@@ -102,13 +102,13 @@ impl CmdRunner {
                     if let Some(mut c) = child_slot.lock().unwrap().take() {
                         let _ = c.wait();
                     }
-                    lines.lock().unwrap().push(tr("— fertig —").into());
+                    lines.lock().unwrap().push(tr("— done —").into());
                     running.store(false, Ordering::SeqCst);
                     ctx.request_repaint();
                 });
             }
             Err(e) => {
-                lines.lock().unwrap().push(tf("Konnte '{0}' nicht starten: {1}", &[&program, &e]));
+                lines.lock().unwrap().push(tf("Could not start '{0}': {1}", &[&program, &e]));
             }
         }
     }
@@ -183,7 +183,7 @@ pub fn well_known(port: u16) -> &'static str {
         8006 => "Proxmox",
         8080 | 8000 | 8008 => "HTTP-Alt",
         8443 => "HTTPS-Alt",
-        9100 => "Drucker (RAW)",
+        9100 => "Printer (RAW)",
         27017 => "MongoDB",
         _ => "",
     }
@@ -195,16 +195,16 @@ pub fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
     let mut v = Vec::new();
     for part in spec.split([',', ';', ' ']).map(str::trim).filter(|s| !s.is_empty()) {
         if let Some((a, b)) = part.split_once('-') {
-            let a: u16 = a.trim().parse().map_err(|_| tf("Ungültiger Port: {0}", &[&part]))?;
-            let b: u16 = b.trim().parse().map_err(|_| tf("Ungültiger Port: {0}", &[&part]))?;
+            let a: u16 = a.trim().parse().map_err(|_| tf("Invalid port: {0}", &[&part]))?;
+            let b: u16 = b.trim().parse().map_err(|_| tf("Invalid port: {0}", &[&part]))?;
             if a > b || a == 0 {
-                return Err(tf("Ungültiger Bereich: {0}", &[&part]));
+                return Err(tf("Invalid range: {0}", &[&part]));
             }
             v.extend(a..=b);
         } else {
-            let p: u16 = part.parse().map_err(|_| tf("Ungültiger Port: {0}", &[&part]))?;
+            let p: u16 = part.parse().map_err(|_| tf("Invalid port: {0}", &[&part]))?;
             if p == 0 {
-                return Err(tr("Port 0 gibt es nicht.").into());
+                return Err(tr("Port 0 doesn't exist.").into());
             }
             v.push(p);
         }
@@ -212,7 +212,7 @@ pub fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
     v.sort_unstable();
     v.dedup();
     if v.is_empty() {
-        return Err(tr("Keine Ports angegeben.").into());
+        return Err(tr("No ports given.").into());
     }
     if v.len() > 65535 {
         v.truncate(65535);
@@ -224,7 +224,7 @@ pub fn resolve(host: &str) -> Result<Vec<SocketAddr>, String> {
     (host.trim(), 0)
         .to_socket_addrs()
         .map(|i| i.collect())
-        .map_err(|e| tf("Name nicht auflösbar: {0}", &[&e]))
+        .map_err(|e| tf("Name can't be resolved: {0}", &[&e]))
 }
 
 #[derive(Default)]
@@ -254,7 +254,7 @@ impl PortScan {
                 Ok(a) if !a.is_empty() => a.iter().find(|a| a.is_ipv4()).copied().unwrap_or(a[0]).ip(),
                 Ok(_) => {
                     let mut s = st.lock().unwrap();
-                    s.error = Some(tr("Keine Adresse gefunden.").into());
+                    s.error = Some(tr("No address found.").into());
                     s.finished = true;
                     return;
                 }
@@ -315,7 +315,7 @@ impl PortScan {
 pub fn parse_mac(text: &str) -> Result<[u8; 6], String> {
     let hex: String = text.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     if hex.len() != 12 {
-        return Err(tr("MAC-Adresse braucht 12 Hex-Zeichen, z. B. 00:11:22:33:44:55").into());
+        return Err(tr("A MAC address needs 12 hex characters, e.g. 00:11:22:33:44:55").into());
     }
     let mut mac = [0u8; 6];
     for i in 0..6 {
@@ -334,9 +334,9 @@ pub fn wake_on_lan(mac_text: &str, broadcast: &str, port: u16) -> Result<String,
     sock.set_broadcast(true).map_err(|e| e.to_string())?;
     let target = format!("{}:{}", broadcast.trim(), port);
     for _ in 0..3 {
-        sock.send_to(&packet, &target).map_err(|e| tf("Senden fehlgeschlagen: {0}", &[&e]))?;
+        sock.send_to(&packet, &target).map_err(|e| tf("Sending failed: {0}", &[&e]))?;
     }
-    Ok(tf("Magic Packet an {0} gesendet (über {1}).", &[&(mac.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")), &target]))
+    Ok(tf("Magic packet sent to {0} (via {1}).", &[&(mac.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")), &target]))
 }
 
 /// Id -> reachable (None while checking).

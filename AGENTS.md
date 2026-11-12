@@ -44,7 +44,7 @@ Windows without Visual Studio: `cargo.cmd` runs a local Rust + LLVM-MinGW toolch
 | `src/remote.rs` | WebDAV storage |
 | `src/agent.rs` | `admincraft cli …` (JSON) and `admincraft mcp` (MCP server over stdio); never returns passwords |
 | `src/keepass_vault.rs` | reading KeePass databases |
-| `src/i18n.rs`, `lang/en.lang` | translations |
+| `src/i18n.rs`, `lang/de.lang` | translations (English is the source text, German built in) |
 | `src/programs.rs` | finding helper programs (settings path, `AdminCraftTools`, PATH) |
 
 ## Versions and releases
@@ -64,9 +64,11 @@ Same scheme as the other Craft apps:
 
 ## Rules
 
-- **Translations:** every user-visible text is German source text wrapped in `tr("…")` or
-  `tf("… {0} …", &[&x])` (`use crate::i18n::{t as tr, tf}`). Add the English line to `lang/en.lang`
-  (`German = English`; use ` => ` when the German text itself contains ` = `). A test checks the file.
+- **Translations:** every user-visible text is English source text wrapped in `tr("…")` or
+  `tf("… {0} …", &[&x])` (`use crate::i18n::{t as tr, tf}`). Add the German line to `lang/de.lang`
+  (`English = German`; use ` => ` when the English text itself contains ` = `). No German (or other
+  language) text in the code, comments included — only exception: matching the output of system tools
+  (e.g. German Windows `ping`). A test checks the file and its placeholders.
 - **Secrets:** never log or print passwords; plain-text passwords only leave the program through the
   export with its explicit warning. Don't commit `AdminCraftData/`, `.kdbx`, keys or screenshots
   with real hosts (see `.gitignore`).

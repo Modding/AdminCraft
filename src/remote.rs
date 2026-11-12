@@ -82,9 +82,9 @@ fn agent() -> ureq::Agent {
 
 fn status_error(code: u16) -> String {
     match code {
-        401 | 403 => tf("Anmeldung am WebDAV-Server abgelehnt (HTTP {0}) – Benutzer/Passwort prüfen.", &[&code]),
-        404 => tr("Ordner auf dem WebDAV-Server nicht gefunden (HTTP 404).").to_string(),
-        _ => tf("WebDAV-Server meldet HTTP {0}.", &[&code]),
+        401 | 403 => tf("WebDAV server refused the login (HTTP {0}) – check user/password.", &[&code]),
+        404 => tr("Folder not found on the WebDAV server (HTTP 404).").to_string(),
+        _ => tf("WebDAV server reports HTTP {0}.", &[&code]),
     }
 }
 
@@ -94,7 +94,7 @@ pub fn fetch(c: &RemoteConfig) -> Result<Option<String>, String> {
     if let Some(a) = c.auth() {
         req = req.header("Authorization", &a);
     }
-    let mut resp = req.call().map_err(|e| tf("WebDAV nicht erreichbar: {0}", &[&e]))?;
+    let mut resp = req.call().map_err(|e| tf("WebDAV not reachable: {0}", &[&e]))?;
     let code = resp.status().as_u16();
     if code == 404 {
         return Ok(None);
@@ -112,7 +112,7 @@ pub fn upload(c: &RemoteConfig, body: &str) -> Result<(), String> {
         if let Some(a) = c.auth() {
             req = req.header("Authorization", &a);
         }
-        req.send(body).map(|r| r.status().as_u16()).map_err(|e| tf("WebDAV nicht erreichbar: {0}", &[&e]))
+        req.send(body).map(|r| r.status().as_u16()).map_err(|e| tf("WebDAV not reachable: {0}", &[&e]))
     };
     let mut code = send()?;
     if code == 409 || code == 404 {
@@ -136,10 +136,10 @@ pub fn upload(c: &RemoteConfig, body: &str) -> Result<(), String> {
     }
 }
 
-/// "Verbindung testen": can we read (and is there already a list)?
+/// "Test connection": can we read (and is there already a list)?
 pub fn test(c: &RemoteConfig) -> Result<String, String> {
     match fetch(c)? {
-        Some(text) => Ok(tf("Verbunden – Liste auf dem Server gefunden ({0} KB).", &[&(text.len() / 1024).max(1)])),
-        None => Ok(tr("Verbunden – noch keine Liste auf dem Server; sie wird beim nächsten Speichern angelegt.").to_string()),
+        Some(text) => Ok(tf("Connected – list found on the server ({0} KB).", &[&(text.len() / 1024).max(1)])),
+        None => Ok(tr("Connected – no list on the server yet; it will be created at the next save.").to_string()),
     }
 }

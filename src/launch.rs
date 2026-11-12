@@ -142,7 +142,7 @@ fn spawn(program: &PathBuf, args: &[String]) -> Result<Child, String> {
     Command::new(program)
         .args(args)
         .spawn()
-        .map_err(|e| tf("{0} konnte nicht gestartet werden: {1}", &[&(program.display()), &e]))
+        .map_err(|e| tf("{0} could not be started: {1}", &[&(program.display()), &e]))
 }
 
 pub fn open_url(url: &str) -> Result<(), String> {
@@ -153,7 +153,7 @@ pub fn open_url(url: &str) -> Result<(), String> {
     } else {
         Command::new(tr("xdg-open")).arg(url).spawn()
     };
-    r.map(|_| ()).map_err(|e| tf("Konnte {0} nicht öffnen: {1}", &[&url, &e]))
+    r.map(|_| ()).map_err(|e| tf("Could not open {0}: {1}", &[&url, &e]))
 }
 
 pub fn open_folder(path: &std::path::Path) {
@@ -209,7 +209,7 @@ fn pw_rules(e: &Entry, c: &Creds, jumps: &[JumpHop]) -> Vec<PwRule> {
 
 pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_px: (u32, u32)) -> Result<Launch, String> {
     if e.protocol.needs_host() && e.host.trim().is_empty() {
-        return Err(tr("Kein Host eingetragen.").into());
+        return Err(tr("No host entered.").into());
     }
     let single_pw = if c.password.is_empty() {
         Vec::new()
@@ -221,7 +221,7 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
     if let Some(t) = settings.templates.get(e.protocol.key()).filter(|t| !t.trim().is_empty()) {
         let words: Vec<String> = split_words(t).iter().map(|w| fill(w, e, c)).collect();
         if words.is_empty() {
-            return Err(tr("Eigener Befehl ist leer.").into());
+            return Err(tr("Own command is empty.").into());
         }
         let preview = fill(&split_words(t).join(" "), e, &Creds { user: c.user.clone(), domain: c.domain.clone(), password: "••••".into() });
         if e.protocol.embedded() {
@@ -233,7 +233,7 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
         let prog = PathBuf::from(&words[0]);
         let child = spawn(&prog, &words[1..])?;
         let embed: Option<&'static [&'static str]> = if settings.embed_windows && matches!(e.protocol, Protocol::Rdp | Protocol::Vnc | Protocol::Ssh) { Some(&[]) } else { None };
-        return Ok(Launch::Process { child, label: tf("Eigener Befehl: {0}", &[&preview]), embed });
+        return Ok(Launch::Process { child, label: tf("Own command: {0}", &[&preview]), embed });
     }
 
     let extra = split_words(&e.extra_args);
@@ -247,9 +247,9 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
         Protocol::Telnet => {
             let prog = programs::find("telnet", settings).ok_or_else(|| {
                 if cfg!(windows) {
-                    tr("Telnet-Client fehlt. Aktivieren: Windows-Taste » \"Windows-Features aktivieren oder deaktivieren\" » Telnet-Client. Oder PuTTY nutzen.").to_string()
+                    tr("Telnet client missing. Turn it on: Windows key » \"Turn Windows features on or off\" » Telnet Client. Or use PuTTY.").to_string()
                 } else {
-                    tr("Programm 'telnet' nicht gefunden (Paket telnet / inetutils installieren).").to_string()
+                    tr("Program 'telnet' not found (install package telnet / inetutils).").to_string()
                 }
             })?;
             let mut cmd = CommandBuilder::new(prog);
@@ -261,7 +261,7 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
         }
         Protocol::PowerShell => {
             let ps = if cfg!(windows) { first_found(&["pwsh", "powershell"]) } else { first_found(&["pwsh"]) }
-                .ok_or(tr("PowerShell nicht gefunden (pwsh installieren)."))?;
+                .ok_or(tr("PowerShell not found (install pwsh)."))?;
             let mut script = String::from("Enter-PSSession -ComputerName $env:AC_HOST");
             if e.port != 0 && e.port != 5985 {
                 script.push_str(&tf(" -Port {0}", &[&e.port]));
@@ -298,7 +298,7 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
             if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
                 cmd.cwd(home);
             }
-            Ok(Launch::Terminal { cmd, preview: tr("Lokale Shell").into(), passwords: Vec::new(), chain: Vec::new() })
+            Ok(Launch::Terminal { cmd, preview: tr("Local shell").into(), passwords: Vec::new(), chain: Vec::new() })
         }
         Protocol::Http | Protocol::Https => {
             let scheme = if e.protocol == Protocol::Http { "http" } else { "https" };
@@ -322,11 +322,11 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
                         "--disable-features=Translate".to_string(),
                     ];
                     let child = spawn(&browser, &args)?;
-                    return Ok(Launch::Process { child, label: tf("Web im Tab: {0}", &[&url]), embed: Some(&["Chrome_WidgetWin_1"]) });
+                    return Ok(Launch::Process { child, label: tf("Web in tab: {0}", &[&url]), embed: Some(&["Chrome_WidgetWin_1"]) });
                 }
             }
             open_url(&url)?;
-            Ok(Launch::Done(tf("Browser geöffnet: {0}", &[&url])))
+            Ok(Launch::Done(tf("Browser opened: {0}", &[&url])))
         }
         Protocol::Rdp => launch_rdp(e, c, settings, tab_px),
         Protocol::Vnc => launch_vnc(e, c, settings),
@@ -388,7 +388,7 @@ fn launch_line(e: &Entry, c: &Creds, settings: &Settings, extra: &[String]) -> R
     };
     let Some(prog) = prog else {
         return Err(tf(
-            "Dafür wird PuTTY oder plink gebraucht (in den Programme-Ordner legen: {0}). Linux/macOS: picocom, screen, nc oder rlogin installieren.",
+            "This needs PuTTY or plink (put it into the programs folder: {0}). Linux/macOS: install picocom, screen, nc or rlogin.",
             &[&programs::tools_dir().display()],
         ));
     };
@@ -402,7 +402,7 @@ fn launch_line(e: &Entry, c: &Creds, settings: &Settings, extra: &[String]) -> R
 
 fn ssh_program(settings: &Settings) -> Result<PathBuf, String> {
     programs::find("ssh", settings).ok_or_else(|| {
-        tr("OpenSSH (ssh) nicht gefunden. Windows: Einstellungen » System » Optionale Features » OpenSSH-Client. Linux: Paket openssh-client. Oder PuTTY als SSH-Programm wählen.").to_string()
+        tr("OpenSSH (ssh) not found. Windows: Settings » System » Optional features » OpenSSH Client. Linux: package openssh-client. Or choose PuTTY as SSH program.").to_string()
     })
 }
 
@@ -524,12 +524,12 @@ fn launch_ssh_external(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpH
     hops.push(crate::transfer::Hop { user: c.user.clone(), host: e.host.trim().into(), port, password: c.password.clone() });
     let env = if hops.iter().any(|h| !h.password.is_empty()) { crate::transfer::askpass_env(&hops) } else { Vec::new() };
     let how = programs::spawn_in_terminal(&prog, &args, &e.name, &env)?;
-    Ok(Launch::Done(tf("OpenSSH in eigenem Fenster ({0}): {1}", &[&how, &(user_host(&c.user, &e.host))])))
+    Ok(Launch::Done(tf("OpenSSH in own window ({0}): {1}", &[&how, &(user_host(&c.user, &e.host))])))
 }
 
 fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) -> Result<Launch, String> {
     let putty = programs::find("putty", settings).ok_or_else(|| {
-        tf("PuTTY nicht gefunden. putty.exe in den Programme-Ordner legen ({0}) oder den Pfad in den Einstellungen eintragen.", &[&(programs::tools_dir().display())])
+        tf("PuTTY not found. Put putty.exe into the programs folder ({0}) or enter its path in the settings.", &[&(programs::tools_dir().display())])
     })?;
     // Chain mode: PuTTY logs in to the first jump host and runs `ssh -t user@target` there
     // (the SSH key for the next hop stays on the jump host).
@@ -569,7 +569,7 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
         0 => {}
         1 => {
             let plink = programs::find("plink", settings)
-                .ok_or(tr("Für einen Jump-Host mit PuTTY wird plink.exe gebraucht (in den Programme-Ordner legen)."))?;
+                .ok_or(tr("A jump host with PuTTY needs plink.exe (put it into the programs folder)."))?;
             let j = &jumps[0];
             let mut pc = tf("\"{0}\" -batch -ssh -P {1}", &[&(plink.display()), &(effective_port(&j.entry))]);
             if !j.creds.user.is_empty() {
@@ -582,7 +582,7 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
             args.push(tr("-proxycmd").into());
             args.push(pc);
         }
-        _ => return Err(tr("PuTTY kann nur über einen Jump-Host gehen. Für mehrere: eingebautes Terminal wählen.").into()),
+        _ => return Err(tr("PuTTY can only go through one jump host. For more: choose the built-in terminal.").into()),
     }
     args.extend(split_words(&e.extra_args));
     args.push(e.host.trim().into());
@@ -601,7 +601,7 @@ fn rdp_file(e: &Entry, c: &Creds, size: Option<(u32, u32)>) -> Result<PathBuf, S
         .chars()
         .map(|ch| if ch.is_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
         .collect();
-    let path = dir.join(format!("{}.rdp", if safe.is_empty() { tr("verbindung").into() } else { safe }));
+    let path = dir.join(format!("{}.rdp", if safe.is_empty() { "connection".into() } else { safe }));
     let o = &e.rdp;
     let mut s = String::new();
     let addr = if e.port == 3389 || e.port == 0 { e.host.trim().to_string() } else { format!("{}:{}", e.host.trim(), e.port) };
@@ -645,7 +645,7 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
-            note = if ok { tr(" – Anmeldedaten übergeben").into() } else { tr(" – Anmeldedaten konnten nicht übergeben werden").into() };
+            note = if ok { tr(" – login passed").into() } else { tr(" – login could not be passed").into() };
         }
         let mut args = vec![file.display().to_string()];
         if e.rdp.admin_session {
@@ -654,14 +654,14 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
         let mstsc = programs::find("mstsc", settings).unwrap_or_else(|| PathBuf::from("mstsc"));
         let child = spawn(&mstsc, &args)?;
         let classes: Option<&'static [&'static str]> = if embed { Some(&["TscShellContainerClass"]) } else { None };
-        Ok(Launch::Process { child, label: tf("Remotedesktop: {0}{1}", &[&host, &note]), embed: classes })
+        Ok(Launch::Process { child, label: tf("Remote desktop: {0}{1}", &[&host, &note]), embed: classes })
     } else if cfg!(target_os = "macos") && programs::find("rdp", settings).is_none() {
         let file = rdp_file(e, c, None)?;
         Command::new(tr("open"))
             .arg(&file)
             .spawn()
-            .map_err(|err| tf("Konnte .rdp-Datei nicht öffnen: {0}", &[&err]))?;
-        Ok(Launch::Done(tf("RDP-Datei geöffnet (Windows App / Microsoft Remote Desktop): {0}", &[&host])))
+            .map_err(|err| tf("Could not open .rdp file: {0}", &[&err]))?;
+        Ok(Launch::Done(tf("RDP file opened (Windows App / Microsoft Remote Desktop): {0}", &[&host])))
     } else {
         if let Some(prog) = programs::find("rdp", settings) {
             let addr = if e.port == 3389 || e.port == 0 { host.to_string() } else { format!("{host}:{}", e.port) };
@@ -701,7 +701,7 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
             let child = spawn(&prog, &[tr("-c").into(), url])?;
             return Ok(Launch::Process { child, label: tf("Remmina: {0}", &[&host]), embed: None });
         }
-        Err(tr("Kein RDP-Programm gefunden. Bitte FreeRDP (xfreerdp) oder Remmina installieren.").into())
+        Err(tr("No RDP program found. Please install FreeRDP (xfreerdp) or Remmina.").into())
     }
 }
 
@@ -720,7 +720,7 @@ fn launch_vnc(e: &Entry, c: &Creds, settings: &Settings) -> Result<Launch, Strin
     if cfg!(target_os = "macos") {
         let url = if c.user.is_empty() { format!("vnc://{host}:{port}") } else { format!("vnc://{}@{host}:{port}", c.user) };
         Command::new(tr("open")).arg(&url).spawn().map_err(|err| err.to_string())?;
-        return Ok(Launch::Done(tf("Bildschirmfreigabe geöffnet: {0}", &[&host])));
+        return Ok(Launch::Done(tf("Screen Sharing opened: {0}", &[&host])));
     }
     if !cfg!(windows) {
         if let Some(prog) = programs::find("remmina", settings) {
@@ -728,7 +728,7 @@ fn launch_vnc(e: &Entry, c: &Creds, settings: &Settings) -> Result<Launch, Strin
             return Ok(Launch::Process { child, label: tf("Remmina: {0}", &[&host]), embed: None });
         }
     }
-    Err(tf("Kein VNC-Viewer gefunden. TigerVNC/TightVNC installieren oder vncviewer.exe in den Programme-Ordner legen ({0}).", &[&(programs::tools_dir().display())]))
+    Err(tf("No VNC viewer found. Install TigerVNC/TightVNC or put vncviewer.exe into the programs folder ({0}).", &[&(programs::tools_dir().display())]))
 }
 
 /// Which helper programs this computer has – shown on the start page.
@@ -744,7 +744,7 @@ pub fn system_check(settings: &Settings) -> Vec<(&'static str, String, bool)> {
     }
     v.push(("PowerShell", tr("pwsh / powershell").into(), first_found(&["pwsh", "powershell"]).is_some()));
     if cfg!(target_os = "macos") {
-        v.push(("RDP (Windows App)", tr(".rdp-Datei").into(), true));
+        v.push(("RDP (Windows App)", tr(".rdp file").into(), true));
     }
     v
 }
@@ -752,16 +752,16 @@ pub fn system_check(settings: &Settings) -> Vec<(&'static str, String, bool)> {
 /// Shown in the settings: what each protocol starts when no own command is set.
 pub fn default_hint(p: Protocol) -> &'static str {
     match p {
-        Protocol::Ssh => "ssh -p {port} {user}@{host}  (oder PuTTY)",
-        Protocol::Sftp => "Eingebauter Datei-Tab (sftp / psftp)",
-        Protocol::Scp => "Eingebauter Datei-Tab (scp / pscp)",
-        Protocol::Ftp => "Eingebauter Datei-Tab (FTP/FTPS)",
+        Protocol::Ssh => "ssh -p {port} {user}@{host}  (or PuTTY)",
+        Protocol::Sftp => "Built-in file tab (sftp / psftp)",
+        Protocol::Scp => "Built-in file tab (scp / pscp)",
+        Protocol::Ftp => "Built-in file tab (FTP/FTPS)",
         Protocol::Telnet => "telnet {host} {port}",
         Protocol::Rdp => {
             if cfg!(windows) {
-                "mstsc im Tab (.rdp-Datei, Anmeldung per cmdkey)"
+                "mstsc in a tab (.rdp file, login via cmdkey)"
             } else if cfg!(target_os = "macos") {
-                "open verbindung.rdp (Windows App)"
+                "open connection.rdp (Windows App)"
             } else {
                 "xfreerdp /v:{host}:{port} /u:{user} /d:{domain}"
             }
@@ -770,8 +770,8 @@ pub fn default_hint(p: Protocol) -> &'static str {
         Protocol::Serial => "putty -serial {host} -sercfg 9600,8,n,1,N",
         Protocol::Raw => "putty -raw -P {port} {host}",
         Protocol::Rlogin => "putty -rlogin -P {port} -l {user} {host}",
-        Protocol::Http | Protocol::Https => "Standard-Browser",
+        Protocol::Http | Protocol::Https => "Default browser",
         Protocol::PowerShell => "pwsh/powershell Enter-PSSession",
-        Protocol::LocalShell => "PowerShell / Standard-Shell",
+        Protocol::LocalShell => "PowerShell / default shell",
     }
 }

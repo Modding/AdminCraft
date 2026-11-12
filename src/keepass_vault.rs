@@ -53,27 +53,27 @@ impl KeePassVault {
     pub fn open(&mut self, path: &str, password: &str, keyfile: &str) -> Result<usize, String> {
         let path = path.trim().trim_matches('"');
         if path.is_empty() {
-            return Err(tr("Keine KeePass-Datei eingestellt (Einstellungen » Passwort-Tresor).").into());
+            return Err(tr("No KeePass file set (Settings » Password vault).").into());
         }
-        let mut file = std::fs::File::open(path).map_err(|e| tf("KeePass-Datei nicht lesbar: {0}", &[&e]))?;
+        let mut file = std::fs::File::open(path).map_err(|e| tf("KeePass file not readable: {0}", &[&e]))?;
         let mut key = keepass::DatabaseKey::new();
         if !password.is_empty() {
             key = key.with_password(password);
         }
         let keyfile = keyfile.trim().trim_matches('"');
         if !keyfile.is_empty() {
-            let mut kf = std::fs::File::open(keyfile).map_err(|e| tf("Schlüsseldatei nicht lesbar: {0}", &[&e]))?;
-            key = key.with_keyfile(&mut kf).map_err(|e| tf("Schlüsseldatei: {0}", &[&e]))?;
+            let mut kf = std::fs::File::open(keyfile).map_err(|e| tf("Key file not readable: {0}", &[&e]))?;
+            key = key.with_keyfile(&mut kf).map_err(|e| tf("Key file: {0}", &[&e]))?;
         }
         if key.is_empty() {
-            return Err(tr("Bitte Masterpasswort oder Schlüsseldatei angeben.").into());
+            return Err(tr("Please enter the master password or a key file.").into());
         }
         let db = keepass::Database::open(&mut file, key).map_err(|e| {
             let t = e.to_string();
             if t.to_lowercase().contains("key") || t.to_lowercase().contains("hmac") || t.to_lowercase().contains("credential") {
-                tr("Falsches Masterpasswort oder falsche Schlüsseldatei.").to_string()
+                tr("Wrong master password or wrong key file.").to_string()
             } else {
-                tf("KeePass-Datei konnte nicht geöffnet werden: {0}", &[&t])
+                tf("KeePass file could not be opened: {0}", &[&t])
             }
         })?;
         let mut out = Vec::new();

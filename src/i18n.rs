@@ -1,24 +1,26 @@
-//! Languages. The German text in the program is the key; a language file maps it to another
-//! language. English is built in; more languages are plain text files in the folder
-//! "AdminCraftLang" next to the program (`xx.lang`, see LIESMICH/README there).
+//! Languages. The program is written in English; that text is the key a language file maps to
+//! another language. German is built in (`lang/de.lang`); more languages are plain text files in
+//! the folder "AdminCraftLang" next to the program (`xx.lang`, see README.txt there).
 //!
 //! File format (UTF-8):
 //!   # comment
-//!   @name = English
-//!   @code = en
-//!   Verbindungen = Connections
-//!   {0} Verbindungen importiert. = {0} connections imported.
+//!   @name = Deutsch
+//!   @code = de
+//!   Connections = Verbindungen
+//!   {0} connections imported. = {0} Verbindungen importiert.
+//!   Empty = list next to the program. => Leer = Liste neben dem Programm.   (" => " when the
+//!                                                                         English text has " = ")
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, RwLock};
 
-const BUILTIN_EN: &str = include_str!("../lang/en.lang");
+const BUILTIN_DE: &str = include_str!("../lang/de.lang");
 
 static TABLE: LazyLock<RwLock<HashMap<String, &'static str>>> = LazyLock::new(|| RwLock::new(HashMap::new()));
-static CURRENT: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("de".to_string()));
+static CURRENT: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("en".to_string()));
 
-/// Translates a German UI text (returns it unchanged when the language has no entry).
+/// Translates an English UI text (returns it unchanged when the language has no entry).
 pub fn t(s: &'static str) -> &'static str {
     match TABLE.read() {
         Ok(map) => map.get(s).copied().unwrap_or(s),
@@ -51,14 +53,14 @@ pub fn tf(s: &'static str, args: &[&dyn std::fmt::Display]) -> String {
 }
 
 pub fn current() -> String {
-    CURRENT.read().map(|c| c.clone()).unwrap_or_else(|_| "de".into())
+    CURRENT.read().map(|c| c.clone()).unwrap_or_else(|_| "en".into())
 }
 
 #[derive(Clone, Debug)]
 pub struct LangInfo {
     pub code: String,
     pub name: String,
-    /// Where it comes from: "eingebaut" or the file path.
+    /// Where it comes from: "built in" or the file path.
     pub source: String,
 }
 
@@ -79,13 +81,13 @@ fn parse(text: &str) -> Parsed {
         if line.trim().is_empty() || line.trim_start().starts_with('#') {
             continue;
         }
-        // " => " for texts that contain " = " themselves, else the first " = "
+        // " => " for texts that contain " = " themselves, else the first " = ".
+        // Spaces at the start of a text belong to it (" – login passed").
         let Some((k, v)) = line.split_once(" => ").or_else(|| line.split_once(" = ")) else { continue };
-        let (k, v) = (k.trim(), v.trim());
-        match k {
-            "@name" => p.name = v.to_string(),
-            "@code" => p.code = v.to_lowercase(),
-            _ if !v.is_empty() => {
+        match k.trim() {
+            "@name" => p.name = v.trim().to_string(),
+            "@code" => p.code = v.trim().to_lowercase(),
+            _ if !v.trim().is_empty() => {
                 p.map.insert(unescape(k), unescape(v));
             }
             _ => {}
@@ -99,26 +101,26 @@ pub fn lang_dir() -> PathBuf {
     crate::programs::tools_dir().with_file_name("AdminCraftLang")
 }
 
-/// Creates the folder with the English file as a model for new languages.
+/// Creates the folder with the German file as a model for new languages.
 pub fn ensure_lang_dir() -> PathBuf {
     let d = lang_dir();
     if std::fs::create_dir_all(&d).is_ok() {
-        let model = d.join("en.lang.vorlage");
+        let model = d.join("de.lang.example");
         if !model.exists() {
-            let _ = std::fs::write(&model, BUILTIN_EN);
+            let _ = std::fs::write(&model, BUILTIN_DE);
         }
-        let readme = d.join("LIESMICH.txt");
+        let readme = d.join("README.txt");
         if !readme.exists() {
             let _ = std::fs::write(
                 readme,
-                "Sprachdateien für AdminCraft / language files for AdminCraft\r\n\r\n\
-                 Neue Sprache: en.lang.vorlage kopieren, z. B. nach fr.lang, oben @name und @code ändern\r\n\
-                 und jeweils den Text rechts vom \" = \" übersetzen. Links steht der deutsche Originaltext.\r\n\
-                 {0}, {1} ... sind Platzhalter und müssen bleiben. AdminCraft neu starten oder in den\r\n\
-                 Einstellungen die Sprache wählen.\r\n\r\n\
-                 New language: copy en.lang.vorlage to e.g. fr.lang, change @name and @code at the top and\r\n\
-                 translate the text right of \" = \". The left side is the German original.\r\n\
-                 A file named en.lang here replaces the built-in English.\r\n",
+                "Language files for AdminCraft / Sprachdateien für AdminCraft\r\n\r\n\
+                 New language: copy de.lang.example to e.g. fr.lang, change @name and @code at the top\r\n\
+                 and translate the text right of \" = \". The left side is the English original and\r\n\
+                 must stay as it is. {0}, {1} ... are placeholders and must stay. Then choose the\r\n\
+                 language in Settings (or restart AdminCraft). A file de.lang here replaces the built-in German.\r\n\r\n\
+                 Neue Sprache: de.lang.example kopieren, z. B. nach fr.lang, oben @name und @code ändern\r\n\
+                 und jeweils den Text rechts vom \" = \" übersetzen. Links steht der englische Originaltext,\r\n\
+                 der bleibt, wie er ist. {0}, {1} ... sind Platzhalter und müssen bleiben.\r\n",
             );
         }
     }
@@ -148,13 +150,16 @@ fn file_langs() -> Vec<(PathBuf, Parsed)> {
     v
 }
 
-/// All languages: German (the original), English (built in) and the files in AdminCraftLang.
+/// All languages: English (the original), German (built in) and the files in AdminCraftLang.
 pub fn available() -> Vec<LangInfo> {
     let mut v = vec![
-        LangInfo { code: "de".into(), name: "Deutsch".into(), source: "eingebaut".into() },
-        LangInfo { code: "en".into(), name: "English".into(), source: "eingebaut".into() },
+        LangInfo { code: "en".into(), name: "English".into(), source: "built in".into() },
+        LangInfo { code: "de".into(), name: "Deutsch".into(), source: "built in".into() },
     ];
     for (path, p) in file_langs() {
+        if p.code == "en" {
+            continue; // English is the program's own text
+        }
         if let Some(existing) = v.iter_mut().find(|l| l.code == p.code) {
             existing.source = path.display().to_string();
         } else {
@@ -180,8 +185,8 @@ pub fn set_language(choice: &str) {
         code = "en".into();
     }
     let mut map: HashMap<String, &'static str> = HashMap::new();
-    if code != "de" {
-        let mut entries = if code == "en" { parse(BUILTIN_EN).map } else { HashMap::new() };
+    if code != "en" {
+        let mut entries = if code == "de" { parse(BUILTIN_DE).map } else { HashMap::new() };
         if let Some((_, p)) = file_langs().into_iter().find(|(_, p)| p.code == code) {
             entries.extend(p.map);
         }
@@ -196,4 +201,10 @@ pub fn set_language(choice: &str) {
     if let Ok(mut c) = CURRENT.write() {
         *c = code;
     }
+}
+
+/// Tests: the German table without touching the global language.
+#[cfg(test)]
+pub fn german_table() -> HashMap<String, String> {
+    parse(BUILTIN_DE).map
 }

@@ -29,7 +29,7 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
   eingebettete Fenster (PuTTY, RDP) bekommen die Tastatur einfach per Klick hinein
 * **Bildschirmfoto:** Knopf oben rechts legt ein Bild des aktiven Tabs (auch RDP/PuTTY) in die Zwischenablage
 * **Sprachen:** Deutsch und Englisch eingebaut, Standard = Systemsprache, umstellbar in den Einstellungen.
-  Weitere Sprachen als Textdatei `xx.lang` im Ordner `AdminCraftLang` (Vorlage `en.lang.vorlage` liegt dort)
+  Weitere Sprachen als Textdatei `xx.lang` im Ordner `AdminCraftLang` (Vorlage `de.lang.example` liegt dort: links steht der englische Originaltext, rechts die Übersetzung)
 * **Netzwerk-Scanner** (wie Angry IP Scanner): IP-Bereich (`/24`, `10.0.0.1-50` …) per Ping und Port-Abfrage,
   mit Name, MAC, Antwortzeit, offenen Ports; Stand speichern und beim nächsten Scan **neu / weg / geändert** sehen;
   gefundene Geräte direkt öffnen oder als Verbindung anlegen
