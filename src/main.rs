@@ -35,6 +35,10 @@ fn main() -> eframe::Result<()> {
         let prompt = std::env::args().nth(1).unwrap_or_default();
         std::process::exit(transfer::askpass_main(&prompt));
     }
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("AdminCraft {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     {
         let a: Vec<String> = std::env::args().collect();
         if a.len() >= 4 && a[1] == "--netscan-check" {

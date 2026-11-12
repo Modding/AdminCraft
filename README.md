@@ -92,7 +92,8 @@
 
 ## Quick start
 
-1. Download `AdminCraft.exe` from the [releases](../../releases) (or [build it](#building)).
+1. Download the archive for your system from the [releases](../../releases) (or [build it](#building))
+   and unpack it.
 2. Put it into any folder — a USB stick is fine — and start it.
 3. Double-click an example connection, or create your own with **+ Connection**.
 
@@ -123,6 +124,13 @@ cargo test
 
 Command line for checks: `--screenshot <file.png>` (draws ~120 frames, saves the window, exits),
 `--lang de|en`, `--data <folder>`.
+
+## Releases
+
+Versions follow semantic versioning (`0.x.y`) like the other Craft apps. Each release
+**AdminCraft vX.Y.Z** (tag `vX.Y.Z`) offers `admincraft-X.Y.Z-windows-x64-portable.zip`,
+`admincraft-X.Y.Z-linux-x86_64.tar.gz`, `admincraft-X.Y.Z-macos-aarch64.tar.gz` and `SHA256SUMS.txt`.
+How a release is made: [AGENTS.md](AGENTS.md#versions-and-releases).
 
 ## Roadmap
 

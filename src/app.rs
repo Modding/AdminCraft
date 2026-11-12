@@ -3218,7 +3218,7 @@ impl AdminApp {
             egui::Window::new(tr("Über AdminCraft")).open(&mut open).resizable(false).show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     logo(ui, 36.0);
-                    ui.label(RichText::new(tr("AdminCraft 0.1")).size(20.0).strong());
+                    ui.label(RichText::new(format!("AdminCraft v{}", env!("CARGO_PKG_VERSION"))).size(20.0).strong());
                 });
                 ui.label(tr("Portabler Verbindungs-Manager für Windows, Linux und macOS."));
                 ui.label(tr("SSH · SFTP · Telnet · PowerShell im Tab, RDP · VNC · Web über die Programme des Systems."));
