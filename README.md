@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo-512.png" width="160" height="160" alt="AdminCraft logo: a honey badger drawn in black and white ink on a dark slate background">
+</p>
+
 <h1 align="center">AdminCraft</h1>
 
 <p align="center">

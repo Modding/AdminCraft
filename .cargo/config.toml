@@ -11,4 +11,5 @@ rustflags = ["-C", "target-feature=+crt-static"]
 
 [env]
 CC_x86_64_pc_windows_gnullvm = { value = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-clang.exe", relative = true }
-AR_x86_64_pc_windows_gnullvm = { value = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-llvm-ar.exe", relative = true }
+RC_x86_64_pc_windows_gnullvm = { value = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-windres.exe", relative = true }
+AR_x86_64_pc_windows_gnullvm ={ value = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-llvm-ar.exe", relative = true }
