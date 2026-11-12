@@ -92,13 +92,13 @@ pub enum Job {
 impl Job {
     fn describe(&self) -> String {
         match self {
-            Job::List(p) if p.is_empty() => tr("Verbinden").to_string(),
-            Job::List(p) => tf("Ordner {0}", &[&p]),
-            Job::Download { remote, .. } => tf("Herunterladen {0}", &[&(base_name(remote))]),
-            Job::Upload { local, .. } => tf("Hochladen {0}", &[&(local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())]),
-            Job::Mkdir(p) => tf("Ordner anlegen {0}", &[&(base_name(p))]),
-            Job::Delete { path, .. } => tf("Löschen {0}", &[&(base_name(path))]),
-            Job::Rename { from, to } => tf("Umbenennen {0} » {1}", &[&(base_name(from)), &(base_name(to))]),
+            Job::List(p) if p.is_empty() => tr("Connect").to_string(),
+            Job::List(p) => tf("Folder {0}", &[&p]),
+            Job::Download { remote, .. } => tf("Download {0}", &[&(base_name(remote))]),
+            Job::Upload { local, .. } => tf("Upload {0}", &[&(local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())]),
+            Job::Mkdir(p) => tf("Create folder {0}", &[&(base_name(p))]),
+            Job::Delete { path, .. } => tf("Delete {0}", &[&(base_name(path))]),
+            Job::Rename { from, to } => tf("Rename {0} » {1}", &[&(base_name(from)), &(base_name(to))]),
         }
     }
 }
@@ -370,7 +370,7 @@ fn run(program: &Path, args: &[String], stdin: Option<&str>, env: &[(String, Str
         cmd.env(k, v);
     }
     no_window(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| tf("{0} konnte nicht gestartet werden: {1}", &[&(program.display()), &e]))?;
+    let mut child = cmd.spawn().map_err(|e| tf("{0} could not be started: {1}", &[&(program.display()), &e]))?;
     if let Some(text) = stdin {
         if let Some(mut si) = child.stdin.take() {
             let _ = si.write_all(text.as_bytes());
@@ -395,11 +395,11 @@ fn clean_error(out: &RunOut) -> String {
     let text = lines.iter().rev().take(3).rev().cloned().collect::<Vec<_>>().join(" · ");
     let low = text.to_lowercase();
     if low.contains("permission denied") || low.contains("access denied") {
-        tf("Anmeldung abgelehnt (Benutzer/Passwort prüfen). {0}", &[&text])
+        tf("Login refused (check user/password). {0}", &[&text])
     } else if low.contains("host key") && low.contains("cache") {
-        tf("Host-Schlüssel unbekannt: einmal mit PuTTY verbinden und bestätigen. {0}", &[&text])
+        tf("Host key unknown: connect once with PuTTY and confirm. {0}", &[&text])
     } else if text.is_empty() {
-        tr("Unbekannter Fehler").into()
+        tr("Unknown error").into()
     } else {
         text
     }
@@ -464,7 +464,7 @@ fn sftp_program(ep: &Endpoint) -> Result<(PathBuf, bool), String> {
     if use_putty {
         if let Some(p) = &ep.progs.psftp {
             if !ep.jumps.is_empty() {
-                return Err(tr("Jump-Host bei Dateiübertragung braucht OpenSSH (sftp).").into());
+                return Err(tr("A jump host for file transfer needs OpenSSH (sftp).").into());
             }
             return Ok((p.clone(), true));
         }
@@ -472,7 +472,7 @@ fn sftp_program(ep: &Endpoint) -> Result<(PathBuf, bool), String> {
     if let Some(p) = &ep.progs.sftp {
         return Ok((p.clone(), false));
     }
-    Err(tr("Kein SFTP-Programm gefunden: OpenSSH-Client installieren oder psftp.exe in den Programme-Ordner legen.").into())
+    Err(tr("No SFTP program found: install the OpenSSH client or put psftp.exe into the programs folder.").into())
 }
 
 fn sftp_batch(ep: &Endpoint, script: &str) -> Result<RunOut, String> {
@@ -540,7 +540,7 @@ fn sftp_list(ep: &Endpoint, path: &str) -> Result<(String, Vec<RemoteItem>), Str
 
 fn sftp_walk(ep: &Endpoint, dir: &str, files: &mut Vec<String>, dirs: &mut Vec<String>, depth: usize) -> Result<(), String> {
     if depth > 12 || files.len() + dirs.len() > 5000 {
-        return Err(tr("Ordner zu tief oder zu groß zum Löschen.").into());
+        return Err(tr("Folder too deep or too big to delete.").into());
     }
     let (_, items) = sftp_list(ep, dir)?;
     for it in items {
@@ -567,7 +567,7 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
             let r = if *is_dir { "-r " } else { "" };
             let script = tf("lcd {0}\nget {1}{2}\n", &[&(local_q(local_dir)), &r, &(q(remote))]);
             let out = sftp_batch(ep, &script)?;
-            done(out, tf("Heruntergeladen: {0} » {1}", &[&(base_name(remote)), &(local_dir.display())]))
+            done(out, tf("Downloaded: {0} » {1}", &[&(base_name(remote)), &(local_dir.display())]))
         }
         Job::Upload { local, remote_dir } => {
             let r = if local.is_dir() { "-r " } else { "" };
@@ -578,16 +578,16 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
             }
             script.push_str(&tf("put {0}{1} {2}\n", &[&r, &(local_q(local)), &(q(&name))]));
             let out = sftp_batch(ep, &script)?;
-            done(out, tf("Hochgeladen: {0} » {1}", &[&name, &remote_dir]))
+            done(out, tf("Uploaded: {0} » {1}", &[&name, &remote_dir]))
         }
         Job::Mkdir(p) => {
             let out = sftp_batch(ep, &tf("mkdir {0}\n", &[&(q(p))]))?;
-            done(out, tf("Ordner angelegt: {0}", &[&p]))
+            done(out, tf("Folder created: {0}", &[&p]))
         }
         Job::Delete { path, is_dir } => {
             if !*is_dir {
                 let out = sftp_batch(ep, &format!("rm {}\n", q(path)))?;
-                return done(out, tf("Gelöscht: {0}", &[&path]));
+                return done(out, tf("Deleted: {0}", &[&path]));
             }
             let mut files = Vec::new();
             let mut dirs = Vec::new();
@@ -600,11 +600,11 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
                 script.push_str(&tf("rmdir {0}\n", &[&(q(d))]));
             }
             let out = sftp_batch(ep, &script)?;
-            done(out, tf("Ordner gelöscht: {0} ({1} Dateien)", &[&path, &(files.len())]))
+            done(out, tf("Folder deleted: {0} ({1} files)", &[&path, &(files.len())]))
         }
         Job::Rename { from, to } => {
             let out = sftp_batch(ep, &tf("rename {0} {1}\n", &[&(q(from)), &(q(to))]))?;
-            done(out, tf("Umbenannt: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
+            done(out, tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
         }
     }
 }
@@ -630,7 +630,7 @@ fn ssh_command(ep: &Endpoint, command: &str) -> Result<RunOut, String> {
             return run(plink, &args, None, &[]);
         }
     }
-    let ssh = ep.progs.ssh.clone().ok_or(tr("Kein ssh-Programm gefunden (OpenSSH-Client oder plink.exe)."))?;
+    let ssh = ep.progs.ssh.clone().ok_or(tr("No ssh program found (OpenSSH client or plink.exe)."))?;
     let mut args = openssh_opts(ep);
     args.push(tr("-p").into());
     args.push(t.port.to_string());
@@ -657,7 +657,7 @@ fn scp_copy(ep: &Endpoint, recursive: bool, from: &str, to: &str) -> Result<RunO
             return run(pscp, &args, None, &[]);
         }
     }
-    let scp = ep.progs.scp.clone().ok_or(tr("Kein scp-Programm gefunden (OpenSSH-Client oder pscp.exe)."))?;
+    let scp = ep.progs.scp.clone().ok_or(tr("No scp program found (OpenSSH client or pscp.exe)."))?;
     let mut args = openssh_opts(ep);
     args.push(tr("-P").into());
     args.push(t.port.to_string());
@@ -690,21 +690,21 @@ fn run_scp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, String
         }
         Job::Download { remote, is_dir, local_dir } => {
             let out = scp_copy(ep, *is_dir, &remote_spec(ep, remote), &local_dir.display().to_string())?;
-            done(out, tf("Heruntergeladen: {0} » {1}", &[&(base_name(remote)), &(local_dir.display())]))
+            done(out, tf("Downloaded: {0} » {1}", &[&(base_name(remote)), &(local_dir.display())]))
         }
         Job::Upload { local, remote_dir } => {
             let target = if remote_dir.ends_with('/') { remote_dir.clone() } else { format!("{remote_dir}/") };
             let out = scp_copy(ep, local.is_dir(), &local.display().to_string(), &remote_spec(ep, &target))?;
-            done(out, tf("Hochgeladen: {0} » {1}", &[&(local.display()), &remote_dir]))
+            done(out, tf("Uploaded: {0} » {1}", &[&(local.display()), &remote_dir]))
         }
-        Job::Mkdir(p) => done(ssh_command(ep, &tf("mkdir -p -- {0}", &[&(sh(p))]))?, tf("Ordner angelegt: {0}", &[&p])),
+        Job::Mkdir(p) => done(ssh_command(ep, &tf("mkdir -p -- {0}", &[&(sh(p))]))?, tf("Folder created: {0}", &[&p])),
         Job::Delete { path, is_dir } => {
             let flag = if *is_dir { "-rf" } else { "-f" };
-            done(ssh_command(ep, &tf("rm {0} -- {1}", &[&flag, &(sh(path))]))?, tf("Gelöscht: {0}", &[&path]))
+            done(ssh_command(ep, &tf("rm {0} -- {1}", &[&flag, &(sh(path))]))?, tf("Deleted: {0}", &[&path]))
         }
         Job::Rename { from, to } => done(
             ssh_command(ep, &format!("mv -- {} {}", sh(from), sh(to)))?,
-            tf("Umbenannt: {0} » {1}", &[&(base_name(from)), &(base_name(to))]),
+            tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]),
         ),
     }
 }
@@ -782,7 +782,7 @@ pub fn tls_config(check_cert: bool) -> Result<Arc<rustls::ClientConfig>, String>
 fn ftp_err(e: suppaftp::FtpError) -> String {
     let t = e.to_string();
     if t.contains("530") {
-        tf("Anmeldung abgelehnt (Benutzer/Passwort prüfen): {0}", &[&t])
+        tf("Login refused (check user/password): {0}", &[&t])
     } else {
         t
     }
@@ -799,9 +799,9 @@ fn ftp_connect(ep: &Endpoint) -> Result<FtpConn, String> {
         let s = s.into_secure(suppaftp::RustlsConnector::from(cfg), &t.host).map_err(|e| {
             let m = ftp_err(e);
             if m.to_lowercase().contains("certificate") {
-                tf("Zertifikat nicht vertrauenswürdig ({0}). Bei selbstsignierten Geräten am Server „Zertifikat nicht prüfen“ anhaken.", &[&m])
+                tf("Certificate not trusted ({0}). For self-signed devices tick \"Don't check the certificate\" on the connection.", &[&m])
             } else {
-                tf("TLS fehlgeschlagen: {0}", &[&m])
+                tf("TLS failed: {0}", &[&m])
             }
         })?;
         FtpConn::Tls(s)
@@ -855,7 +855,7 @@ fn ftp_download(conn: &mut FtpConn, remote: &str, local: &Path, is_dir: bool, de
         return Ok(1);
     }
     if depth > 16 {
-        return Err(tr("Ordner zu tief verschachtelt.").into());
+        return Err(tr("Folder nested too deeply.").into());
     }
     std::fs::create_dir_all(local).map_err(|e| e.to_string())?;
     let (_, items) = ftp_list_dir(conn, remote)?;
@@ -872,7 +872,7 @@ fn ftp_download(conn: &mut FtpConn, remote: &str, local: &Path, is_dir: bool, de
 fn ftp_upload(conn: &mut FtpConn, local: &Path, remote: &str, depth: usize) -> Result<usize, String> {
     if local.is_dir() {
         if depth > 16 {
-            return Err(tr("Ordner zu tief verschachtelt.").into());
+            return Err(tr("Folder nested too deeply.").into());
         }
         with_ftp!(conn, s => {
             let _ = s.mkdir(remote);
@@ -895,7 +895,7 @@ fn ftp_upload(conn: &mut FtpConn, local: &Path, remote: &str, depth: usize) -> R
 fn ftp_delete(conn: &mut FtpConn, path: &str, is_dir: bool, depth: usize) -> Result<(), String> {
     if is_dir {
         if depth > 16 {
-            return Err(tr("Ordner zu tief verschachtelt.").into());
+            return Err(tr("Folder nested too deeply.").into());
         }
         let (_, items) = ftp_list_dir(conn, path)?;
         for it in items {
@@ -928,24 +928,24 @@ fn run_ftp(ep: &Endpoint, slot: &mut Option<FtpConn>, job: &Job, cwd: &mut Strin
         }
         Job::Download { remote, is_dir, local_dir } => {
             let n = ftp_download(conn, remote, &local_dir.join(base_name(remote)), *is_dir, 0)?;
-            Outcome::Done(tf("Heruntergeladen: {0} ({1} Dateien) » {2}", &[&(base_name(remote)), &n, &(local_dir.display())]))
+            Outcome::Done(tf("Downloaded: {0} ({1} files) » {2}", &[&(base_name(remote)), &n, &(local_dir.display())]))
         }
         Job::Upload { local, remote_dir } => {
             let name = local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let n = ftp_upload(conn, local, &join(remote_dir, &name), 0)?;
-            Outcome::Done(tf("Hochgeladen: {0} ({1} Dateien) » {2}", &[&name, &n, &remote_dir]))
+            Outcome::Done(tf("Uploaded: {0} ({1} files) » {2}", &[&name, &n, &remote_dir]))
         }
         Job::Mkdir(p) => {
             with_ftp!(conn, s => s.mkdir(p.as_str()).map_err(ftp_err))?;
-            Outcome::Done(tf("Ordner angelegt: {0}", &[&p]))
+            Outcome::Done(tf("Folder created: {0}", &[&p]))
         }
         Job::Delete { path, is_dir } => {
             ftp_delete(conn, path, *is_dir, 0)?;
-            Outcome::Done(tf("Gelöscht: {0}", &[&path]))
+            Outcome::Done(tf("Deleted: {0}", &[&path]))
         }
         Job::Rename { from, to } => {
             with_ftp!(conn, s => s.rename(from.as_str(), to.as_str()).map_err(ftp_err))?;
-            Outcome::Done(tf("Umbenannt: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
+            Outcome::Done(tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
         }
     };
     // keep the server in the folder the person looks at
@@ -1091,7 +1091,7 @@ pub fn cli_check(kind: &str, host: &str, user: &str, download_dir: &Path) -> Str
     };
     match go(Job::List(String::new()), &mut cwd) {
         Ok(Outcome::Listing(dir, items)) => {
-            out.push_str(&tf("LIST OK {0}: {1} Einträge\n", &[&dir, &(items.len())]));
+            out.push_str(&tf("LIST OK {0}: {1} entries\n", &[&dir, &(items.len())]));
             for it in items.iter().take(12) {
                 out.push_str(&format!("  {} {} {}\n", if it.is_dir { "D" } else { "F" }, it.size, it.name));
             }
@@ -1104,12 +1104,12 @@ pub fn cli_check(kind: &str, host: &str, user: &str, download_dir: &Path) -> Str
                         out.push_str(&tf("GET OK ({0}): {1}\n", &[&ok, &m]));
                     }
                     Ok(_) => out.push_str("GET ?\n"),
-                    Err(e) => out.push_str(&tf("GET FEHLER: {0}\n", &[&e])),
+                    Err(e) => out.push_str(&tf("GET ERROR: {0}\n", &[&e])),
                 }
             }
         }
         Ok(_) => out.push_str("LIST ?\n"),
-        Err(e) => out.push_str(&tf("LIST FEHLER: {0}\n", &[&e])),
+        Err(e) => out.push_str(&tf("LIST ERROR: {0}\n", &[&e])),
     }
     out
 }

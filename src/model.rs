@@ -53,17 +53,17 @@ impl Protocol {
     pub fn label(self) -> &'static str {
         tr(match self {
             Protocol::Ssh => "SSH",
-            Protocol::Sftp => "SFTP (Dateien)",
-            Protocol::Scp => "SCP (Dateien)",
-            Protocol::Ftp => "FTP / FTPS (Dateien)",
+            Protocol::Sftp => "SFTP (files)",
+            Protocol::Scp => "SCP (files)",
+            Protocol::Ftp => "FTP / FTPS (files)",
             Protocol::Telnet => "Telnet",
-            Protocol::Rdp => "RDP (Remotedesktop)",
+            Protocol::Rdp => "RDP (remote desktop)",
             Protocol::Vnc => "VNC",
-            Protocol::Http => "HTTP (Web)",
-            Protocol::Https => "HTTPS (Web)",
-            Protocol::PowerShell => "PowerShell Remoting",
-            Protocol::LocalShell => "Lokale Shell",
-            Protocol::Serial => "Seriell (COM / ttyUSB)",
+            Protocol::Http => "HTTP (web)",
+            Protocol::Https => "HTTPS (web)",
+            Protocol::PowerShell => "PowerShell remoting",
+            Protocol::LocalShell => "Local shell",
+            Protocol::Serial => "Serial (COM / ttyUSB)",
             Protocol::Raw => "Raw TCP",
             Protocol::Rlogin => "Rlogin",
         })
@@ -180,10 +180,10 @@ pub enum SshClient {
 impl SshClient {
     pub fn label(self) -> &'static str {
         tr(match self {
-            SshClient::Default => "Wie in den Einstellungen",
-            SshClient::Builtin => "Eingebautes Terminal (OpenSSH im Tab)",
-            SshClient::Putty => "PuTTY (im Tab)",
-            SshClient::External => "OpenSSH in eigenem Terminalfenster",
+            SshClient::Default => "As in the settings",
+            SshClient::Builtin => "Built-in terminal (OpenSSH in a tab)",
+            SshClient::Putty => "PuTTY (in a tab)",
+            SshClient::External => "OpenSSH in its own terminal window",
         })
     }
 }
@@ -213,9 +213,9 @@ pub enum CredSource {
 impl CredSource {
     pub fn label(self) -> &'static str {
         tr(match self {
-            CredSource::Stored => "In AdminCraft (verschlüsselt)",
-            CredSource::KeePass => "Aus KeePass-Datenbank",
-            CredSource::Ask => "Jedes Mal fragen",
+            CredSource::Stored => "In AdminCraft (encrypted)",
+            CredSource::KeePass => "From KeePass database",
+            CredSource::Ask => "Ask every time",
         })
     }
 }
@@ -274,12 +274,12 @@ pub struct Snippet {
 pub fn default_snippets() -> Vec<Snippet> {
     let s = |n: &'static str, c: &str| Snippet { name: tr(n).into(), command: c.into() };
     vec![
-        s("Speicherplatz", "df -h"),
-        s("Systemlast", "uptime && free -h"),
+        s("Disk space", "df -h"),
+        s("System load", "uptime && free -h"),
         s("Updates (Debian/Ubuntu)", "sudo apt update && sudo apt list --upgradable"),
-        s("Letzte Anmeldungen", "last -n 10"),
-        s("Dienste mit Fehler", "systemctl --failed"),
-        s("Offene Ports", "sudo ss -tulpn"),
+        s("Last logins", "last -n 10"),
+        s("Failed services", "systemctl --failed"),
+        s("Open ports", "sudo ss -tulpn"),
     ]
 }
 
@@ -669,14 +669,14 @@ impl Store {
                     text = Some(t);
                 }
                 Ok(None) => {}
-                Err(e) => store.last_error = Some(tf("{0} – lokale Kopie wird benutzt.", &[&e])),
+                Err(e) => store.last_error = Some(tf("{0} – using the local copy.", &[&e])),
             }
         }
         let text = text.or_else(|| std::fs::read_to_string(&path).ok());
         match text {
             Some(text) => {
                 if let Err(e) = store.load_text(&text) {
-                    store.last_error = Some(tf("Datei konnte nicht gelesen werden: {0}", &[&e]));
+                    store.last_error = Some(tf("File could not be read: {0}", &[&e]));
                     store.read_only = true;
                 }
             }
@@ -733,7 +733,7 @@ impl Store {
 
     fn open_sealed(&mut self, v: Vault) -> Result<(), String> {
         let Some(payload) = self.sealed_payload.take() else { return Ok(()) };
-        let json = v.decrypt(&payload).ok_or_else(|| tr("Verschlüsselte Liste passt nicht zum Masterpasswort.").to_string())?;
+        let json = v.decrypt(&payload).ok_or_else(|| tr("The encrypted list doesn't match the master password.").to_string())?;
         let data = serde_json::from_str::<DataFile>(&json).map_err(|e| e.to_string())?;
         self.data = data;
         self.vault = Some(v);
@@ -912,7 +912,7 @@ impl Store {
             std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
         });
-        self.last_error = result.err().map(|e| tf("Speichern fehlgeschlagen: {0}", &[&e]));
+        self.last_error = result.err().map(|e| tf("Saving failed: {0}", &[&e]));
         self.mtime = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok();
         if let Ok(t) = text {
             self.text_hash = hash_text(&t);
@@ -1182,39 +1182,39 @@ fn conn(id: u64, parent: Option<u64>, name: &str, p: Protocol, host: &str, user:
 /// What a new, empty installation shows: an example layout the person can edit or delete.
 pub fn sample_data() -> DataFile {
     let mut d = DataFile::default();
-    let mut f1 = folder(1, None, tr("Rechenzentrum"));
-    f1.domain = tr("FIRMA").into();
+    let mut f1 = folder(1, None, tr("Data center"));
+    f1.domain = "CORP".into();
     f1.username = tr("administrator").into();
-    f1.description = tr("Server im Serverraum. Benutzer und Domäne werden an die Verbindungen vererbt.").into();
+    f1.description = tr("Servers in the server room. User and domain are inherited by the connections.").into();
     let mut dc = conn(2, Some(1), tr("DC01 – Domain Controller"), Protocol::Rdp, "10.0.0.10", "");
     dc.rdp.admin_session = true;
-    dc.description = tr("Beispiel: Benutzer und Domäne kommen vom Ordner.").into();
-    let fs = conn(3, Some(1), tr("FS01 – Dateiserver"), Protocol::Rdp, "10.0.0.20", "");
-    let mut web = conn(4, Some(1), tr("web01 – Linux Webserver"), Protocol::Ssh, "10.0.0.30", "root");
+    dc.description = tr("Example: user and domain come from the folder.").into();
+    let fs = conn(3, Some(1), tr("FS01 – file server"), Protocol::Rdp, "10.0.0.20", "");
+    let mut web = conn(4, Some(1), tr("web01 – Linux web server"), Protocol::Ssh, "10.0.0.30", "root");
     web.inherit_credentials = false;
     let mut esx = conn(5, Some(1), tr("ESXi Host"), Protocol::Https, "10.0.0.5", "root");
     esx.inherit_credentials = false;
-    let mut ps = conn(6, Some(1), tr("FS01 – PowerShell"), Protocol::PowerShell, "fs01.firma.local", "");
-    ps.description = tr("Enter-PSSession über WinRM").into();
-    let f2 = folder(7, None, tr("Netzwerk"));
+    let mut ps = conn(6, Some(1), tr("FS01 – PowerShell"), Protocol::PowerShell, "fs01.corp.local", "");
+    ps.description = tr("Enter-PSSession over WinRM").into();
+    let f2 = folder(7, None, tr("Network"));
     let sw = conn(8, Some(7), tr("Core-Switch"), Protocol::Ssh, "10.0.0.2", "admin");
     let fw = conn(9, Some(7), tr("Firewall"), Protocol::Https, "10.0.0.1", "admin");
-    let pr = conn(10, Some(7), tr("Drucker Büro"), Protocol::Http, "10.0.1.50", "");
-    let tel = conn(11, Some(7), tr("Alter Router"), Protocol::Telnet, "10.0.0.254", "");
-    let mut f3 = folder(12, None, tr("Arbeitsplätze"));
+    let pr = conn(10, Some(7), tr("Office printer"), Protocol::Http, "10.0.1.50", "");
+    let tel = conn(11, Some(7), tr("Old router"), Protocol::Telnet, "10.0.0.254", "");
+    let mut f3 = folder(12, None, tr("Workstations"));
     f3.expanded = false;
-    let vnc = conn(13, Some(12), tr("Empfang-PC"), Protocol::Vnc, "10.0.1.21", "");
-    let mut bh = conn(14, Some(12), tr("Buchhaltung-PC"), Protocol::Rdp, "10.0.1.22", "");
+    let vnc = conn(13, Some(12), tr("Reception PC"), Protocol::Vnc, "10.0.1.21", "");
+    let mut bh = conn(14, Some(12), tr("Accounting PC"), Protocol::Rdp, "10.0.1.22", "");
     bh.mac = "00:11:22:33:44:55".into();
-    let local = conn(15, None, tr("Lokales Terminal"), Protocol::LocalShell, tr(""), "");
-    let mut bastion = conn(16, Some(1), tr("bastion – Jump-Host"), Protocol::Ssh, "203.0.113.10", "jump");
+    let local = conn(15, None, tr("Local terminal"), Protocol::LocalShell, tr(""), "");
+    let mut bastion = conn(16, Some(1), tr("bastion – jump host"), Protocol::Ssh, "203.0.113.10", "jump");
     bastion.inherit_credentials = false;
-    bastion.description = tr("Sprungserver: andere Verbindungen gehen über diesen Host.").into();
-    let mut db = conn(17, Some(1), tr("db01 – über Jump-Host"), Protocol::Ssh, "10.0.0.40", "root");
+    bastion.description = tr("Jump server: other connections go through this host.").into();
+    let mut db = conn(17, Some(1), tr("db01 – via jump host"), Protocol::Ssh, "10.0.0.40", "root");
     db.inherit_credentials = false;
     db.jump_host = Some(16);
-    db.description = tr("Meldet sich erst am Jump-Host an und tippt dort ssh root@10.0.0.40.").into();
-    let mut files = conn(18, Some(1), tr("web01 – Dateien (SFTP)"), Protocol::Sftp, "10.0.0.30", "root");
+    db.description = tr("Logs in to the jump host first and runs ssh root@10.0.0.40 there.").into();
+    let mut files = conn(18, Some(1), tr("web01 – files (SFTP)"), Protocol::Sftp, "10.0.0.30", "root");
     files.inherit_credentials = false;
     files.start_path = tr("/var/www").into();
     let mut ftp = conn(19, None, tr("Webspace (FTP)"), Protocol::Ftp, "ftp.example.com", "web");

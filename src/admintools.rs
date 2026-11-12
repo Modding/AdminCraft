@@ -33,12 +33,12 @@ fn mask_to_prefix(m: Ipv4Addr) -> Option<u32> {
 pub fn subnet(text: &str) -> Result<Subnet, String> {
     let t = text.trim();
     let (a, m) = t.split_once('/').or_else(|| t.split_once(' ')).unwrap_or((t, "24"));
-    let address: Ipv4Addr = a.trim().parse().map_err(|_| tf("Ungültige Adresse: {0}", &[&a]))?;
+    let address: Ipv4Addr = a.trim().parse().map_err(|_| tf("Invalid address: {0}", &[&a]))?;
     let m = m.trim();
     let prefix = if m.contains('.') {
-        mask_to_prefix(m.parse().map_err(|_| tf("Ungültige Maske: {0}", &[&m]))?).ok_or_else(|| tf("Ungültige Maske: {0}", &[&m]))?
+        mask_to_prefix(m.parse().map_err(|_| tf("Invalid mask: {0}", &[&m]))?).ok_or_else(|| tf("Invalid mask: {0}", &[&m]))?
     } else {
-        m.parse::<u32>().ok().filter(|p| *p <= 32).ok_or_else(|| tf("Ungültige Maske: {0}", &[&m]))?
+        m.parse::<u32>().ok().filter(|p| *p <= 32).ok_or_else(|| tf("Invalid mask: {0}", &[&m]))?
     };
     let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
     let net = u32::from(address) & mask;
@@ -78,7 +78,7 @@ pub struct CertInfo {
 }
 
 fn handshake(host: &str, port: u16, cfg: Arc<rustls::ClientConfig>) -> Result<rustls::ClientConnection, String> {
-    let addr = (host, port).to_socket_addrs().map_err(|e| e.to_string())?.next().ok_or_else(|| tr("Keine Adresse gefunden.").to_string())?;
+    let addr = (host, port).to_socket_addrs().map_err(|e| e.to_string())?.next().ok_or_else(|| tr("No address found.").to_string())?;
     let mut sock = TcpStream::connect_timeout(&addr, Duration::from_secs(8)).map_err(|e| e.to_string())?;
     sock.set_read_timeout(Some(Duration::from_secs(8))).ok();
     let name = rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| e.to_string())?;
@@ -112,8 +112,8 @@ pub fn check_cert(host: &str, port: u16) -> Result<CertInfo, String> {
     let host = host.trim();
     let any = crate::transfer::tls_config(false)?;
     let conn = handshake(host, port, any)?;
-    let certs = conn.peer_certificates().ok_or_else(|| tr("Der Server hat kein Zertifikat geschickt.").to_string())?;
-    let first = certs.first().ok_or_else(|| tr("Der Server hat kein Zertifikat geschickt.").to_string())?;
+    let certs = conn.peer_certificates().ok_or_else(|| tr("The server sent no certificate.").to_string())?;
+    let first = certs.first().ok_or_else(|| tr("The server sent no certificate.").to_string())?;
     let (_, cert) = x509_parser::parse_x509_certificate(first.as_ref()).map_err(|e| e.to_string())?;
     let mut names = Vec::new();
     if let Ok(Some(san)) = cert.subject_alternative_name() {

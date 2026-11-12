@@ -17,7 +17,7 @@ fn temp_store(name: &str) -> Store {
 
 #[test]
 fn vault_roundtrip() {
-    let v = Vault::derive("geheim", &new_salt());
+    let v = Vault::derive("secret", &new_salt());
     let c = v.encrypt("P@ssw0rd äöü");
     assert_eq!(v.decrypt(&c).as_deref(), Some("P@ssw0rd äöü"));
     let other = Vault::derive("falsch", &new_salt());
@@ -52,7 +52,7 @@ fn credentials_inherit_from_folder() {
     let dc = s.data.entries.iter().find(|e| e.name.starts_with("DC01")).unwrap();
     let (u, d, _) = s.credentials(dc.id);
     assert_eq!(u, "administrator");
-    assert_eq!(d, "FIRMA");
+    assert_eq!(d, "CORP");
     let web = s.data.entries.iter().find(|e| e.name.starts_with("web01")).unwrap();
     let (u, d, _) = s.credentials(web.id);
     assert_eq!(u, "root");
@@ -63,7 +63,7 @@ fn credentials_inherit_from_folder() {
 fn remove_deletes_children() {
     let mut s = temp_store("remove");
     let before = s.data.entries.len();
-    s.remove(1); // "Rechenzentrum" with 8 connections
+    s.remove(1); // "Data center" with 8 connections
     assert_eq!(s.data.entries.len(), before - 9);
 }
 
@@ -73,7 +73,7 @@ fn jump_chain_and_chain_command() {
     let db = s.data.entries.iter().find(|e| e.name.starts_with("db01")).unwrap();
     let chain = s.jump_chain(db.id);
     assert_eq!(chain.len(), 1);
-    assert_eq!(s.get(chain[0]).unwrap().name, "bastion – Jump-Host");
+    assert_eq!(s.get(chain[0]).unwrap().name, "bastion – jump host");
     let c = crate::launch::Creds { user: "root".into(), ..Default::default() };
     assert_eq!(crate::launch::chain_command(db, &c), "ssh -t root@10.0.0.40");
     let mut other = db.clone();
@@ -93,15 +93,24 @@ fn jump_chain_runs_ssh_on_jump_host() {
 
 #[test]
 fn translation_placeholders() {
-    // German is the key; without a table the text comes back with the values filled in
-    assert_eq!(crate::i18n::tf("{0} Verbindungen · {1} Ordner", &[&3, &"{1}"]), "3 Verbindungen · {1} Ordner");
-    let en = include_str!("../lang/en.lang");
-    assert!(en.contains("@code = en"));
+    // English is the key; without a table the text comes back with the values filled in
+    assert_eq!(crate::i18n::tf("{0} connections · {1} folders", &[&3, &"{1}"]), "3 connections · {1} folders");
+    let de = include_str!("../lang/de.lang");
+    assert!(de.contains("@code = de"));
     // every line with more than one " = " must use " => " (otherwise the key is cut)
-    for l in en.lines().filter(|l| !l.starts_with('#')) {
+    for l in de.lines().filter(|l| !l.starts_with('#')) {
         assert!(l.matches(" = ").count() <= 1 || l.contains(" => "), "ambiguous line: {l}");
     }
-    assert!(en.lines().filter(|l| l.contains(" = ")).count() > 300);
+    let table = crate::i18n::german_table();
+    assert!(table.len() > 600);
+    assert_eq!(table.get("{0} connections · {1} folders").map(String::as_str), Some("{0} Verbindungen · {1} Ordner"));
+    // a translation keeps every placeholder of the English text
+    for (en, tr) in &table {
+        for i in 0..4 {
+            let ph = format!("{{{i}}}");
+            assert_eq!(en.contains(&ph), tr.contains(&ph), "placeholder {ph}: {en}");
+        }
+    }
 }
 
 #[test]
@@ -155,7 +164,7 @@ fn totp_rfc6238_and_passwords() {
 fn drag_and_drop_in_tree() {
     let mut s = temp_store("dnd");
     let web = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;
-    let fs = s.data.entries.iter().find(|e| e.name.starts_with("FS01 – D")).unwrap().id;
+    let fs = s.data.entries.iter().find(|e| e.name.starts_with("FS01 – f")).unwrap().id;
     let dc = s.data.entries.iter().find(|e| e.name.starts_with("DC01")).unwrap().id;
     // reorder: web01 before DC01 in the same folder
     assert!(s.drop_move(web, Some(dc), false, false));
@@ -191,24 +200,24 @@ fn export_and_import_with_password_modes() {
     let mut s = temp_store("export");
     let web = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;
     let i = s.index_of(web).unwrap();
-    s.data.entries[i].password = "geheim!".into();
+    s.data.entries[i].password = "secret!".into();
     let dir = std::env::temp_dir().join(format!("admincraft-export-{}", std::process::id()));
     let f = |n: &str| dir.join(n);
     // without passwords: nothing secret in the file
     export(&s, Some(1), PwMode::Without, "", &f("none.json")).unwrap();
     let t = std::fs::read_to_string(f("none.json")).unwrap();
-    assert!(!t.contains("geheim!") && t.contains("web01"));
+    assert!(!t.contains("secret!") && t.contains("web01"));
     let (e, p) = read(&t, "").unwrap();
     assert!(p.is_empty() && e.iter().any(|x| x.id == web));
     assert!(e.iter().all(|x| x.id == 1 || s.is_descendant(x.id, 1)), "only the folder and its content");
     // plain: password readable
     export(&s, None, PwMode::Plain, "", &f("plain.json")).unwrap();
     let t = std::fs::read_to_string(f("plain.json")).unwrap();
-    assert!(t.contains("geheim!"));
+    assert!(t.contains("secret!"));
     // encrypted: nothing readable, needs the export password
     export(&s, None, PwMode::Encrypted, "Export-PW", &f("enc.json")).unwrap();
     let t = std::fs::read_to_string(f("enc.json")).unwrap();
-    assert!(!t.contains("geheim!") && !t.contains("web01"));
+    assert!(!t.contains("secret!") && !t.contains("web01"));
     assert_eq!(read(&t, "").unwrap_err(), ReadError::NeedPassword);
     assert_eq!(read(&t, "falsch").unwrap_err(), ReadError::WrongPassword);
     let (entries, pws) = read(&t, "Export-PW").unwrap();
@@ -219,7 +228,7 @@ fn export_and_import_with_password_modes() {
     assert_eq!(other.data.entries.len(), before + entries.len() + 1);
     assert!(n > 10);
     let w = other.data.entries.iter().find(|e| e.name.starts_with("web01 – L") && other.is_descendant(e.id, fid)).unwrap();
-    assert_eq!(w.password, "geheim!");
+    assert_eq!(w.password, "secret!");
     let db = other.data.entries.iter().find(|e| e.name.starts_with("db01") && other.is_descendant(e.id, fid)).unwrap();
     let jump = other.get(db.jump_host.unwrap()).unwrap();
     assert!(jump.name.starts_with("bastion") && other.is_descendant(jump.id, fid));
@@ -276,8 +285,8 @@ fn credential_sources() {
     let mut s = temp_store("creds");
     let id = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;
     let i = s.index_of(id).unwrap();
-    s.data.entries[i].password = "geheim".into();
-    assert_eq!(s.credential_info(id).password, "geheim");
+    s.data.entries[i].password = "secret".into();
+    assert_eq!(s.credential_info(id).password, "secret");
     s.data.entries[i].cred_source = crate::model::CredSource::KeePass;
     let info = s.credential_info(id);
     assert_eq!(info.keepass, Some(crate::model::KeePassRef::Host("10.0.0.30".into())));

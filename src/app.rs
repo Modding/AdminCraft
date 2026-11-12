@@ -319,7 +319,7 @@ impl AdminApp {
             store,
             selected: None,
             filter: String::new(),
-            tabs: vec![Tab { id: 0, title: tr("Start").into(), color: ACCENT, kind: TabKind::Start }],
+            tabs: vec![Tab { id: 0, title: tr("Home").into(), color: ACCENT, kind: TabKind::Start }],
             active: 0,
             next_tab: 1,
             quick_protocol: Protocol::Ssh,
@@ -411,8 +411,8 @@ impl AdminApp {
         }
         if app.shot.is_some() {
             app.selected = app.store.data.entries.iter().find(|e| !e.folder).map(|e| e.id);
-            app.log.push(tr("RDP gestartet: 10.0.0.10 (Beispiel)").into());
-            app.log.push(tr("SSH-Sitzung zu web01 geöffnet (Beispiel)").into());
+            app.log.push(tr("RDP started: 10.0.0.10 (example)").into());
+            app.log.push(tr("SSH session to web01 opened (example)").into());
         }
         // `--open shell|ping:<host>|scan:<host>` opens a tab right away (handy for checks).
         let args: Vec<String> = std::env::args().collect();
@@ -421,7 +421,7 @@ impl AdminApp {
             let (kind, host) = what.split_once(':').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or((what.clone(), String::new()));
             match kind.as_str() {
                 "shell" => {
-                    let e = Entry { name: tr("Lokale Shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
+                    let e = Entry { name: tr("Local shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
                     app.open_session(e, Creds::default(), Vec::new(), &ctx, 0.0);
                 }
                 "settings" => app.open_settings(),
@@ -433,7 +433,7 @@ impl AdminApp {
                         }
                     }
                 }
-                "subnet" => app.add_tab(tr("Subnetz-Rechner").into(), ACCENT, TabKind::Subnet(extra::SubnetTab { input: host.clone() })),
+                "subnet" => app.add_tab(tr("Subnet calculator").into(), ACCENT, TabKind::Subnet(extra::SubnetTab { input: host.clone() })),
                 "cert" => {
                     app.open_cert(host.clone());
                     if let Some(Tab { kind: TabKind::Cert(c), .. }) = app.tabs.last_mut() {
@@ -452,7 +452,7 @@ impl AdminApp {
                 "transfer" => {
                     // demo: an FTP server on this computer (usually none, so the log shows the error)
                     let e = Entry {
-                        name: tr("Dateien (Beispiel)").into(),
+                        name: tr("Files (example)").into(),
                         protocol: Protocol::Ftp,
                         host: if host.is_empty() { "127.0.0.1".into() } else { host.clone() },
                         port: 21,
@@ -462,7 +462,7 @@ impl AdminApp {
                 }
                 "embedtest" => {
                     // check of the window embedding with a harmless program (Character Map)
-                    let e = Entry { name: tr("Einbettung (Test)").into(), protocol: Protocol::Vnc, ..Default::default() };
+                    let e = Entry { name: tr("Embedding (test)").into(), protocol: Protocol::Vnc, ..Default::default() };
                     let prog = if host.is_empty() { tr("charmap.exe").to_string() } else { host.clone() };
                     match std::process::Command::new(&prog).spawn() {
                         Ok(child) => {
@@ -524,7 +524,7 @@ impl AdminApp {
     }
 
     fn open_export(&mut self, root: Option<u64>) {
-        let name = root.and_then(|r| self.store.get(r)).map(|e| e.name.clone()).unwrap_or_else(|| tr("Verbindungen").into());
+        let name = root.and_then(|r| self.store.get(r)).map(|e| e.name.clone()).unwrap_or_else(|| tr("Connections").into());
         self.export_root = root;
         self.export_path = crate::sharing::default_path(&name);
         self.export_msg = None;
@@ -539,45 +539,45 @@ impl AdminApp {
         use crate::sharing::PwMode;
         let mut open = true;
         let mut run = false;
-        egui::Window::new(tr("Verbindungen exportieren")).open(&mut open).default_width(520.0).show(ctx, |ui| {
+        egui::Window::new(tr("Export connections")).open(&mut open).default_width(520.0).show(ctx, |ui| {
             let what = match self.export_root.and_then(|r| self.store.get(r)) {
-                Some(e) => tf("Ordner „{0}“ mit allem darin", &[&e.name]),
-                None => tr("Alle Verbindungen und Ordner").to_string(),
+                Some(e) => tf("Folder \"{0}\" with everything in it", &[&e.name]),
+                None => tr("All connections and folders").to_string(),
             };
             ui.label(RichText::new(what).strong());
-            if self.export_root.is_some() && ui.small_button(tr("Stattdessen alles exportieren")).clicked() {
+            if self.export_root.is_some() && ui.small_button(tr("Export everything instead")).clicked() {
                 self.export_root = None;
             }
             ui.add_space(6.0);
-            ui.label(tr("Passwörter:"));
-            ui.radio_value(&mut self.export_mode, PwMode::Without, tr("Ohne Passwörter (empfohlen zum Weitergeben)"));
-            ui.radio_value(&mut self.export_mode, PwMode::Encrypted, tr("Mit Passwörtern, Datei mit Export-Passwort verschlüsselt"));
-            ui.radio_value(&mut self.export_mode, PwMode::Plain, tr("Mit Passwörtern im Klartext"));
+            ui.label(tr("Passwords:"));
+            ui.radio_value(&mut self.export_mode, PwMode::Without, tr("Without passwords (recommended for passing on)"));
+            ui.radio_value(&mut self.export_mode, PwMode::Encrypted, tr("With passwords, file encrypted with an export password"));
+            ui.radio_value(&mut self.export_mode, PwMode::Plain, tr("With passwords in plain text"));
             match self.export_mode {
                 PwMode::Encrypted => {
                     egui::Grid::new("export_pw").num_columns(2).show(ui, |ui| {
-                        ui.label(tr("Export-Passwort"));
+                        ui.label(tr("Export password"));
                         ui.add(egui::TextEdit::singleline(&mut self.export_pw).password(true));
                         ui.end_row();
-                        ui.label(tr("Wiederholen"));
+                        ui.label(tr("Repeat"));
                         ui.add(egui::TextEdit::singleline(&mut self.export_pw2).password(true));
                         ui.end_row();
                     });
-                    ui.weak(tr("Dem Kollegen das Passwort auf anderem Weg sagen (nicht in derselben Mail)."));
+                    ui.weak(tr("Tell your colleague the password another way (not in the same e-mail)."));
                 }
                 PwMode::Plain => {
                     egui::Frame::new().fill(BAD_RED.gamma_multiply(0.2)).stroke(Stroke::new(1.0, BAD_RED)).corner_radius(4.0).inner_margin(8).show(ui, |ui| {
-                        ui.label(RichText::new(tr("Achtung: Die Passwörter stehen dann lesbar in der Datei.")).color(BAD_RED).strong());
-                        ui.label(tr("Jeder, der die Datei bekommt oder findet, kann sich damit anmelden. Datei nicht per Mail schicken, nicht in Cloud-Ordnern liegen lassen und nach dem Import löschen."));
-                        ui.checkbox(&mut self.export_ack, tr("Verstanden – ich passe gut auf die Datei auf"));
+                        ui.label(RichText::new(tr("Warning: the passwords will be readable in the file.")).color(BAD_RED).strong());
+                        ui.label(tr("Anyone who gets or finds the file can log in with it. Don't e-mail it, don't leave it in cloud folders, and delete it after the import."));
+                        ui.checkbox(&mut self.export_ack, tr("Understood – I'll take good care of the file"));
                     });
                 }
                 PwMode::Without => {
-                    ui.weak(tr("Benutzer, Hosts, Ordner, Notizen und Einstellungen der Verbindungen kommen mit, Passwörter nicht."));
+                    ui.weak(tr("Users, hosts, folders, notes and connection settings are included, passwords are not."));
                 }
             }
             ui.add_space(6.0);
-            ui.label(tr("Datei"));
+            ui.label(tr("File"));
             ui.add(egui::TextEdit::singleline(&mut self.export_path).desired_width(f32::INFINITY));
             let ready = match self.export_mode {
                 PwMode::Without => true,
@@ -585,9 +585,9 @@ impl AdminApp {
                 PwMode::Encrypted => !self.export_pw.is_empty() && self.export_pw == self.export_pw2,
             };
             if self.export_mode == PwMode::Encrypted && !self.export_pw2.is_empty() && self.export_pw != self.export_pw2 {
-                ui.label(RichText::new(tr("Die beiden Eingaben sind verschieden.")).color(BAD_RED));
+                ui.label(RichText::new(tr("The two entries differ.")).color(BAD_RED));
             }
-            if ui.add_enabled(ready && !self.export_path.trim().is_empty(), egui::Button::new(RichText::new(tr("Exportieren")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+            if ui.add_enabled(ready && !self.export_path.trim().is_empty(), egui::Button::new(RichText::new(tr("Export")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
                 run = true;
             }
             if let Some((ok, m)) = &self.export_msg {
@@ -600,8 +600,8 @@ impl AdminApp {
                 Ok(n) => {
                     self.export_pw.clear();
                     self.export_pw2.clear();
-                    self.note(tf("{0} Verbindungen exportiert.", &[&n]), false, now);
-                    (true, tf("{0} Verbindungen exportiert: {1}", &[&n, &path.display()]))
+                    self.note(tf("{0} connections exported.", &[&n]), false, now);
+                    (true, tf("{0} connections exported: {1}", &[&n, &path.display()]))
                 }
                 Err(e) => (false, e),
             });
@@ -616,14 +616,14 @@ impl AdminApp {
         use crate::sharing::ReadError;
         let mut open = true;
         let mut run = false;
-        egui::Window::new(tr("AdminCraft-Export importieren")).open(&mut open).default_width(480.0).show(ctx, |ui| {
-            ui.label(tr("Exportdatei eines Kollegen (.json). Die Verbindungen kommen in einen neuen Ordner."));
-            ui.add(egui::TextEdit::singleline(&mut self.ximport_path).desired_width(f32::INFINITY).hint_text(r"C:\Users\...\AdminCraft-Verbindungen.json"));
+        egui::Window::new(tr("Import AdminCraft export")).open(&mut open).default_width(480.0).show(ctx, |ui| {
+            ui.label(tr("A colleague's export file (.json). The connections go into a new folder."));
+            ui.add(egui::TextEdit::singleline(&mut self.ximport_path).desired_width(f32::INFINITY).hint_text(r"C:\Users\...\AdminCraft-Connections.json"));
             if self.ximport_need_pw {
-                ui.label(tr("Die Datei ist verschlüsselt. Export-Passwort:"));
+                ui.label(tr("The file is encrypted. Export password:"));
                 ui.add(egui::TextEdit::singleline(&mut self.ximport_pw).password(true));
             }
-            if ui.add(egui::Button::new(RichText::new(tr("Importieren")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+            if ui.add(egui::Button::new(RichText::new(tr("Import")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
                 run = true;
             }
             if let Some((ok, m)) = &self.ximport_msg {
@@ -633,7 +633,7 @@ impl AdminApp {
         if run {
             let path = self.ximport_path.trim().trim_matches('"').to_string();
             self.ximport_msg = Some(match std::fs::read_to_string(&path) {
-                Err(e) => (false, tf("Datei nicht lesbar: {0}", &[&e])),
+                Err(e) => (false, tf("File not readable: {0}", &[&e])),
                 Ok(text) => match crate::sharing::read(&text, &self.ximport_pw) {
                     Ok((entries, pws)) => {
                         let stem = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
@@ -643,13 +643,13 @@ impl AdminApp {
                         self.ximport_pw.clear();
                         self.ximport_need_pw = false;
                         self.mark_dirty(now);
-                        (true, tf("{0} Verbindungen importiert ({1} mit Passwort).", &[&n, &with_pw]))
+                        (true, tf("{0} connections imported ({1} with password).", &[&n, &with_pw]))
                     }
                     Err(ReadError::NeedPassword) => {
                         self.ximport_need_pw = true;
-                        (false, tr("Bitte das Export-Passwort eingeben.").to_string())
+                        (false, tr("Please enter the export password.").to_string())
                     }
-                    Err(ReadError::WrongPassword) => (false, tr("Falsches Export-Passwort.").to_string()),
+                    Err(ReadError::WrongPassword) => (false, tr("Wrong export password.").to_string()),
                     Err(ReadError::Other(e)) => (false, e),
                 },
             });
@@ -695,21 +695,21 @@ impl AdminApp {
         }
         if self.show_keys {
             let mut open = true;
-            egui::Window::new(tr("Tastenkürzel")).open(&mut open).resizable(false).show(ctx, |ui| {
+            egui::Window::new(tr("Keyboard shortcuts")).open(&mut open).resizable(false).show(ctx, |ui| {
                 egui::Grid::new("keys").num_columns(2).striped(true).spacing([24.0, 6.0]).show(ui, |ui| {
                     for (k, what) in [
-                        ("Ctrl+Tab", tr("Nächster Tab")),
-                        ("Ctrl+Shift+Tab", tr("Vorheriger Tab")),
-                        ("Ctrl+Shift+W", tr("Tab schließen")),
-                        ("Ctrl+Shift+N", tr("Neue Verbindung")),
-                        ("Ctrl+Shift+F", tr("Verbindungen durchsuchen")),
-                        ("Ctrl+Shift+S", tr("Bildschirmfoto des Tabs")),
-                        ("Ctrl+Shift+E", tr("Verbindungen exportieren")),
-                        ("Ctrl+Shift+L", tr("Netzwerk-Scan")),
-                        ("Ctrl+,", tr("Einstellungen")),
-                        ("F1", tr("Diese Übersicht")),
-                        (tr("Doppelklick"), tr("Verbindung öffnen / Tab umbenennen")),
-                        (tr("Mittlere Maustaste"), tr("Tab schließen")),
+                        ("Ctrl+Tab", tr("Next tab")),
+                        ("Ctrl+Shift+Tab", tr("Previous tab")),
+                        ("Ctrl+Shift+W", tr("Close tab")),
+                        ("Ctrl+Shift+N", tr("New connection")),
+                        ("Ctrl+Shift+F", tr("Search connections")),
+                        ("Ctrl+Shift+S", tr("Screenshot of the tab")),
+                        ("Ctrl+Shift+E", tr("Export connections")),
+                        ("Ctrl+Shift+L", tr("Network scan")),
+                        ("Ctrl+,", tr("Settings")),
+                        ("F1", tr("This overview")),
+                        (tr("Double-click"), tr("Open connection / rename tab")),
+                        (tr("Middle mouse button"), tr("Close tab")),
                     ] {
                         ui.label(RichText::new(k).monospace().strong());
                         ui.label(what);
@@ -717,25 +717,25 @@ impl AdminApp {
                     }
                 });
                 ui.add_space(4.0);
-                ui.weak(tr("Mit Shift, damit Terminal-Programme ihre eigenen Strg-Tasten behalten. macOS: Cmd statt Ctrl."));
+                ui.weak(tr("With Shift, so terminal programs keep their own Ctrl keys. macOS: Cmd instead of Ctrl."));
             });
             self.show_keys = open;
         }
     }
 
     fn open_netscan(&mut self, range: String) {
-        self.add_tab(tr("Netzwerk-Scan").into(), Color32::from_rgb(3, 169, 244), TabKind::NetScan(Box::new(extra::NetScanTab::new(range))));
+        self.add_tab(tr("Network scan").into(), Color32::from_rgb(3, 169, 244), TabKind::NetScan(Box::new(extra::NetScanTab::new(range))));
     }
 
     fn open_cert(&mut self, host: String) {
-        self.add_tab(tr("Zertifikat").into(), Color32::from_rgb(139, 195, 74), TabKind::Cert(extra::CertTab::new(host)));
+        self.add_tab(tr("Certificate").into(), Color32::from_rgb(139, 195, 74), TabKind::Cert(extra::CertTab::new(host)));
     }
 
     fn open_tunnels(&mut self) {
         if let Some(i) = self.tabs.iter().position(|t| matches!(t.kind, TabKind::Tunnels)) {
             self.active = i;
         } else {
-            self.add_tab(tr("SSH-Tunnel").into(), Color32::from_rgb(121, 134, 203), TabKind::Tunnels);
+            self.add_tab(tr("SSH tunnels").into(), Color32::from_rgb(121, 134, 203), TabKind::Tunnels);
         }
     }
 
@@ -763,15 +763,15 @@ impl AdminApp {
             Ok((c, jumps, _)) => match extra::start_tunnel(&e, &c, &jumps, &t, &self.store.data.settings) {
                 Ok(child) => {
                     self.tunnels.insert((id, idx), extra::TunnelRun { child: Some(child), label: label.clone(), error: None });
-                    self.note(tf("Tunnel gestartet: {0}", &[&label]), false, now);
+                    self.note(tf("Tunnel started: {0}", &[&label]), false, now);
                 }
                 Err(err) => {
                     self.tunnels.insert((id, idx), extra::TunnelRun { child: None, label, error: Some(err.clone()) });
                     self.note(err, true, now);
                 }
             },
-            Err(Need::KeePass) => self.note(tr("Für den Tunnel zuerst KeePass entsperren."), true, now),
-            Err(Need::Ask(_)) => self.note(tr("Für den Tunnel zuerst einmal verbinden (Passwort wird abgefragt)."), true, now),
+            Err(Need::KeePass) => self.note(tr("Unlock KeePass first for the tunnel."), true, now),
+            Err(Need::Ask(_)) => self.note(tr("Connect once first for the tunnel (the password is asked)."), true, now),
         }
     }
 
@@ -803,9 +803,9 @@ impl AdminApp {
         }
         for (name, up) in changes {
             if up {
-                self.note(tf("Wieder erreichbar: {0}", &[&name]), false, now);
+                self.note(tf("Reachable again: {0}", &[&name]), false, now);
             } else {
-                self.note(tf("Nicht mehr erreichbar: {0}", &[&name]), true, now);
+                self.note(tf("No longer reachable: {0}", &[&name]), true, now);
             }
         }
     }
@@ -819,19 +819,19 @@ impl AdminApp {
         let mut result = None;
         egui::Modal::new(egui::Id::new("power")).show(ctx, |ui| {
             ui.set_width(380.0);
-            ui.heading(if reboot { tr("Wirklich neu starten?") } else { tr("Wirklich herunterfahren?") });
+            ui.heading(if reboot { tr("Really restart?") } else { tr("Really shut down?") });
             ui.label(format!("{} ({})", e.name, e.host));
             ui.weak(if e.protocol == Protocol::Ssh {
-                tr("Öffnet eine SSH-Sitzung und tippt dort „sudo reboot“ bzw. „sudo poweroff“.")
+                tr("Opens an SSH session and types \"sudo reboot\" or \"sudo poweroff\" there.")
             } else {
-                tr("Schickt den Befehl per „shutdown /m“ – braucht Adminrechte auf dem Zielrechner.")
+                tr("Sends the command with \"shutdown /m\" – needs admin rights on the target computer.")
             });
             ui.horizontal(|ui| {
-                let label = if reboot { tr("Neu starten") } else { tr("Herunterfahren") };
+                let label = if reboot { tr("Restart") } else { tr("Shut down") };
                 if ui.add(egui::Button::new(RichText::new(label).color(Color32::WHITE)).fill(BAD_RED)).clicked() {
                     result = Some(true);
                 }
-                if ui.button(tr("Abbrechen")).clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     result = Some(false);
                 }
             });
@@ -851,7 +851,7 @@ impl AdminApp {
                                 }
                             }
                         }
-                        Err(_) => self.note(tr("Zuerst einmal verbinden (KeePass entsperren / Passwort eingeben)."), true, now),
+                        Err(_) => self.note(tr("Connect once first (unlock KeePass / enter password)."), true, now),
                     }
                 } else {
                     match extra::windows_power(&e.host, reboot) {
@@ -891,9 +891,9 @@ impl AdminApp {
                 let color = entry.protocol.color();
                 self.add_tab(title, color, TabKind::Term(Box::new(TermTab { entry, creds, jumps, term, error, preview, broadcast: false })));
                 if failed {
-                    self.note(tf("Fehler: {0}", &[&msg]), true, now);
+                    self.note(tf("Error: {0}", &[&msg]), true, now);
                 } else {
-                    self.log.push(tf("Sitzung geöffnet: {0}", &[&msg]));
+                    self.log.push(tf("Session opened: {0}", &[&msg]));
                 }
             }
             Ok(Launch::Process { child, label, embed }) => {
@@ -1023,7 +1023,7 @@ impl AdminApp {
         if let Some(i) = self.tabs.iter().position(|t| matches!(t.kind, TabKind::Settings)) {
             self.active = i;
         } else {
-            self.add_tab(tr("Einstellungen").into(), Color32::from_rgb(120, 130, 145), TabKind::Settings);
+            self.add_tab(tr("Settings").into(), Color32::from_rgb(120, 130, 145), TabKind::Settings);
         }
     }
 
@@ -1048,7 +1048,7 @@ impl AdminApp {
                         crate::model::KeePassRef::Entry(n) => n,
                         crate::model::KeePassRef::Host(h) => tf("Host {0}", &[&h]),
                     };
-                    warn = Some(tf("KeePass: kein Eintrag für „{0}“ gefunden – ohne Passwort weiter.", &[&what]));
+                    warn = Some(tf("KeePass: no entry found for \"{0}\" – continuing without password.", &[&what]));
                 }
             }
         }
@@ -1121,7 +1121,7 @@ impl AdminApp {
             How::Default => self.open_session(e, c, jumps, ctx, now),
             How::FileApp(key) => {
                 let Some(prog) = programs::find(key, &self.store.data.settings) else {
-                    self.note(tf("{0} nicht gefunden – in den Programme-Ordner legen oder Pfad in den Einstellungen eintragen.", &[&key]), true, now);
+                    self.note(tf("{0} not found – put it into the programs folder or enter its path in the settings.", &[&key]), true, now);
                     return;
                 };
                 let scheme = match e.protocol {
@@ -1147,7 +1147,7 @@ impl AdminApp {
                     url.push_str(&format!("/{}", e.start_path.trim().trim_start_matches('/')));
                 }
                 match std::process::Command::new(&prog).arg(&url).spawn() {
-                    Ok(_) => self.note(tf("{0} geöffnet: {1}", &[&(prog.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()), &(e.host.trim())]), false, now),
+                    Ok(_) => self.note(tf("{0} opened: {1}", &[&(prog.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()), &(e.host.trim())]), false, now),
                     Err(err) => self.note(tf("{0}: {1}", &[&(prog.display()), &err]), true, now),
                 }
             }
@@ -1170,7 +1170,7 @@ impl AdminApp {
     fn quick_connect(&mut self, ctx: &egui::Context, now: f64) {
         let text = self.quick_host.trim().to_string();
         if text.is_empty() && self.quick_protocol.needs_host() {
-            self.note(tr("Bitte Host oder IP eingeben."), true, now);
+            self.note(tr("Please enter a host or IP."), true, now);
             return;
         }
         let (user, rest) = match text.rsplit_once('@') {
@@ -1232,7 +1232,7 @@ impl AdminApp {
                 self.store.data.entries.push(Entry {
                     id,
                     parent,
-                    name: tr("Neue Verbindung").into(),
+                    name: tr("New connection").into(),
                     ..Default::default()
                 });
                 self.expand(parent);
@@ -1246,7 +1246,7 @@ impl AdminApp {
                     id,
                     parent,
                     folder: true,
-                    name: tr("Neuer Ordner").into(),
+                    name: tr("New folder").into(),
                     inherit_credentials: false,
                     ..Default::default()
                 });
@@ -1263,7 +1263,7 @@ impl AdminApp {
                     let nid = self.store.next_id();
                     let mut copy = e;
                     copy.id = nid;
-                    copy.name = tf("{0} (Kopie)", &[&copy.name]);
+                    copy.name = tf("{0} (copy)", &[&copy.name]);
                     let pos = self.store.index_of(id).map(|i| i + 1).unwrap_or(self.store.data.entries.len());
                     self.store.data.entries.insert(pos, copy);
                     self.selected = Some(nid);
@@ -1401,7 +1401,7 @@ impl AdminApp {
 
     fn open_dns(&mut self, host: String) {
         self.add_tab(
-            tr("DNS-Abfrage").into(),
+            tr("DNS lookup").into(),
             Color32::from_rgb(156, 39, 176),
             TabKind::Dns(DnsTab { host, result: Default::default(), runner: CmdRunner::default(), rtype: tr("A").into(), server: String::new() }),
         );
@@ -1456,59 +1456,59 @@ impl AdminApp {
     fn menu_bar(&mut self, ui: &mut egui::Ui, now: f64) {
         let ctx = ui.ctx().clone();
         egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button(tr("Datei"), |ui| {
-                if ui.button(tr("Neue Verbindung")).clicked() {
+            ui.menu_button(tr("File"), |ui| {
+                if ui.button(tr("New connection")).clicked() {
                     let p = self.new_parent_for_selection();
                     self.apply(Act::NewConn(p), &ctx, now);
                 }
-                if ui.button(tr("Neuer Ordner")).clicked() {
+                if ui.button(tr("New folder")).clicked() {
                     let p = self.new_parent_for_selection();
                     self.apply(Act::NewFolder(p), &ctx, now);
                 }
                 ui.separator();
-                if ui.button(tr("mRemoteNG-Datei importieren …")).clicked() {
+                if ui.button(tr("Import mRemoteNG file …")).clicked() {
                     self.show_import = true;
                 }
-                if ui.button(tr("OpenSSH-Konfiguration importieren (~/.ssh/config) …")).clicked() {
+                if ui.button(tr("Import OpenSSH configuration (~/.ssh/config) …")).clicked() {
                     self.show_ssh_import = true;
                     self.ssh_import_msg = None;
                 }
                 ui.separator();
-                if ui.button(tr("Verbindungen exportieren …")).clicked() {
+                if ui.button(tr("Export connections …")).clicked() {
                     self.open_export(None);
                 }
-                if ui.button(tr("AdminCraft-Export importieren …")).clicked() {
+                if ui.button(tr("Import AdminCraft export …")).clicked() {
                     self.show_ximport = true;
                     self.ximport_msg = None;
                     self.ximport_need_pw = false;
                 }
-                if ui.button(tr("Datenordner öffnen")).clicked() {
+                if ui.button(tr("Open data folder")).clicked() {
                     if let Some(dir) = self.store.path.parent() {
                         let _ = std::fs::create_dir_all(dir);
                         launch::open_folder(dir);
                     }
                 }
-                if ui.button(tr("Jetzt speichern")).clicked() {
+                if ui.button(tr("Save now")).clicked() {
                     self.store.save();
                     self.dirty_since = None;
                 }
                 ui.separator();
-                if ui.button(tr("Beenden")).clicked() {
+                if ui.button(tr("Quit")).clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
-            ui.menu_button(tr("Ansicht"), |ui| {
+            ui.menu_button(tr("View"), |ui| {
                 let mut dark = self.store.data.settings.dark;
-                if ui.radio_value(&mut dark, true, tr("Dunkles Design")).clicked()
-                    | ui.radio_value(&mut dark, false, tr("Helles Design")).clicked()
+                if ui.radio_value(&mut dark, true, tr("Dark theme")).clicked()
+                    | ui.radio_value(&mut dark, false, tr("Light theme")).clicked()
                 {
                     self.store.data.settings.dark = dark;
                     self.mark_dirty(now);
                 }
                 ui.separator();
-                ui.checkbox(&mut self.show_props, tr("Eigenschaften anzeigen"));
+                ui.checkbox(&mut self.show_props, tr("Show properties"));
             });
-            ui.menu_button(tr("Werkzeuge"), |ui| {
+            ui.menu_button(tr("Tools"), |ui| {
                 let host = self.selected.and_then(|id| self.store.get(id)).map(|e| e.host.clone()).unwrap_or_default();
                 if ui.button(tr("Ping")).clicked() {
                     self.open_ping(host.clone(), PingMode::Ping, &ctx);
@@ -1516,10 +1516,10 @@ impl AdminApp {
                 if ui.button(tr("Traceroute")).clicked() {
                     self.open_ping(host.clone(), PingMode::Trace, &ctx);
                 }
-                if ui.button(tr("Port-Scan")).clicked() {
+                if ui.button(tr("Port scan")).clicked() {
                     self.open_scan(host.clone());
                 }
-                if ui.button(tr("DNS-Abfrage")).clicked() {
+                if ui.button(tr("DNS lookup")).clicked() {
                     self.open_dns(host.clone());
                 }
                 if ui.button(tr("Wake-on-LAN")).clicked() {
@@ -1527,59 +1527,59 @@ impl AdminApp {
                     self.open_wol(mac);
                 }
                 ui.separator();
-                if ui.button(tr("Netzwerk-Scan (IP-Bereich)")).clicked() {
+                if ui.button(tr("Network scan (IP range)")).clicked() {
                     self.open_netscan(String::new());
                 }
-                if ui.button(tr("Subnetz-Rechner")).clicked() {
-                    self.add_tab(tr("Subnetz-Rechner").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab::default()));
+                if ui.button(tr("Subnet calculator")).clicked() {
+                    self.add_tab(tr("Subnet calculator").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab::default()));
                 }
-                if ui.button(tr("Zertifikat prüfen")).clicked() {
+                if ui.button(tr("Check certificate")).clicked() {
                     self.open_cert(host.clone());
                 }
-                if ui.button(tr("SSH-Tunnel")).clicked() {
+                if ui.button(tr("SSH tunnels")).clicked() {
                     self.open_tunnels();
                 }
-                if ui.button(tr("Passwort-Generator")).clicked() {
+                if ui.button(tr("Password generator")).clicked() {
                     self.pwgen.open = true;
                     self.pwgen.target = None;
                 }
                 ui.separator();
-                if ui.button(tr("Mehrfach-Eingabe: alle SSH-Tabs an")).clicked() {
+                if ui.button(tr("Multi-input: all SSH tabs on")).clicked() {
                     self.set_broadcast_all(true);
                 }
-                if ui.button(tr("Mehrfach-Eingabe: alle aus")).clicked() {
+                if ui.button(tr("Multi-input: all off")).clicked() {
                     self.set_broadcast_all(false);
                 }
                 ui.separator();
-                if ui.button(tr("Erreichbarkeit aller Verbindungen prüfen")).clicked() {
+                if ui.button(tr("Check reachability of all connections")).clicked() {
                     self.check_status(&ctx);
                 }
-                if ui.button(tr("Lokale Shell öffnen")).clicked() {
-                    let e = Entry { name: tr("Lokale Shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
+                if ui.button(tr("Open local shell")).clicked() {
+                    let e = Entry { name: tr("Local shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
                     self.open_session(e, Creds::default(), Vec::new(), &ctx, now);
                 }
-                if ui.button(tr("Programme-Ordner öffnen")).on_hover_text(tr("Hier PuTTY, VNC-Viewer, WinSCP … ablegen")).clicked() {
+                if ui.button(tr("Open programs folder")).on_hover_text(tr("Put PuTTY, VNC viewer, WinSCP … here")).clicked() {
                     launch::open_folder(&programs::ensure_tools_dir());
                 }
                 ui.separator();
                 if self.keepass.unlocked {
-                    if ui.button(tr("KeePass sperren")).clicked() {
+                    if ui.button(tr("Lock KeePass")).clicked() {
                         self.keepass.lock();
                     }
-                } else if ui.button(tr("KeePass entsperren …")).clicked() {
+                } else if ui.button(tr("Unlock KeePass …")).clicked() {
                     self.kp_dialog = true;
                     self.kp_msg = None;
                 }
                 ui.separator();
-                if ui.button(tr("Einstellungen …")).clicked() {
+                if ui.button(tr("Settings …")).clicked() {
                     self.show_settings = true;
                 }
             });
-            ui.menu_button(tr("Hilfe"), |ui| {
-                if ui.add(egui::Button::new(tr("Tastenkürzel")).shortcut_text("F1")).clicked() {
+            ui.menu_button(tr("Help"), |ui| {
+                if ui.add(egui::Button::new(tr("Keyboard shortcuts")).shortcut_text("F1")).clicked() {
                     self.show_keys = true;
                 }
-                if ui.button(tr("Über AdminCraft")).clicked() {
+                if ui.button(tr("About AdminCraft")).clicked() {
                     self.show_about = true;
                 }
             });
@@ -1589,7 +1589,7 @@ impl AdminApp {
     fn toolbar(&mut self, ui: &mut egui::Ui, now: f64) {
         let ctx = ui.ctx().clone();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("Schnellverbindung")).strong());
+            ui.label(RichText::new(tr("Quick connect")).strong());
             egui::ComboBox::from_id_salt("quick_proto")
                 .width(150.0)
                 .selected_text(self.quick_protocol.label())
@@ -1600,11 +1600,11 @@ impl AdminApp {
                 });
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.quick_host)
-                    .hint_text(tr("Host oder IP   (z. B. admin@10.0.0.5:22)"))
+                    .hint_text(tr("Host or IP   (e.g. admin@10.0.0.5:22)"))
                     .desired_width(280.0),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.add(egui::Button::new(RichText::new(tr("Verbinden")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
+            if ui.add(egui::Button::new(RichText::new(tr("Connect")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
                 self.quick_connect(&ctx, now);
             }
             ui.separator();
@@ -1613,13 +1613,13 @@ impl AdminApp {
             } else {
                 self.quick_host.rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("").to_string()
             };
-            if ui.button(tr("Ping")).on_hover_text(tr("Host anpingen")).clicked() {
+            if ui.button(tr("Ping")).on_hover_text(tr("Ping the host")).clicked() {
                 self.open_ping(host.clone(), PingMode::Ping, &ctx);
             }
             if ui.button(tr("Traceroute")).clicked() {
                 self.open_ping(host.clone(), PingMode::Trace, &ctx);
             }
-            if ui.button(tr("Port-Scan")).clicked() {
+            if ui.button(tr("Port scan")).clicked() {
                 self.open_scan(host.clone());
             }
             if ui.button(tr("DNS")).clicked() {
@@ -1629,20 +1629,20 @@ impl AdminApp {
                 let mac = self.selected.and_then(|id| self.store.get(id)).map(|e| e.mac.clone()).unwrap_or_default();
                 self.open_wol(mac);
             }
-            if ui.button(tr("Netzwerk-Scan")).on_hover_text(tr("IP-Bereich nach Geräten durchsuchen")).clicked() {
+            if ui.button(tr("Network scan")).on_hover_text(tr("Search an IP range for devices")).clicked() {
                 self.open_netscan(String::new());
             }
-            if ui.button(tr("Shell")).on_hover_text(tr("Lokale Shell in neuem Tab")).clicked() {
-                let e = Entry { name: tr("Lokale Shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
+            if ui.button(tr("Shell")).on_hover_text(tr("Local shell in a new tab")).clicked() {
+                let e = Entry { name: tr("Local shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
                 self.open_session(e, Creds::default(), Vec::new(), &ctx, now);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(tr("Einstellungen")).clicked() {
+                if ui.button(tr("Settings")).clicked() {
                     self.show_settings = true;
                 }
                 if ui
-                    .button(tr("Bildschirmfoto"))
-                    .on_hover_text(tr("Bild des aktiven Tabs (auch RDP/PuTTY) in die Zwischenablage"))
+                    .button(tr("Screenshot"))
+                    .on_hover_text(tr("Picture of the active tab (RDP/PuTTY too) to the clipboard"))
                     .clicked()
                 {
                     self.shot_tab = Some(self.last_content);
@@ -1655,16 +1655,16 @@ impl AdminApp {
         ui.horizontal(|ui| {
             let conns = self.store.data.entries.iter().filter(|e| !e.folder).count();
             let folders = self.store.data.entries.len() - conns;
-            ui.label(tf("{0} Verbindungen · {1} Ordner", &[&conns, &folders]));
+            ui.label(tf("{0} connections · {1} folders", &[&conns, &folders]));
             ui.separator();
             if self.store.data.master {
-                ui.label(RichText::new(tr("Passwörter mit Masterpasswort verschlüsselt")).color(OK_GREEN));
+                ui.label(RichText::new(tr("Passwords encrypted with master password")).color(OK_GREEN));
             } else {
-                ui.label(RichText::new(tr("Kein Masterpasswort – Passwörter nur verschleiert")).color(Color32::from_rgb(230, 160, 40)))
-                    .on_hover_text(tr("In den Einstellungen ein Masterpasswort setzen."));
+                ui.label(RichText::new(tr("No master password – passwords only obfuscated")).color(Color32::from_rgb(230, 160, 40)))
+                    .on_hover_text(tr("Set a master password in the settings."));
             }
             ui.separator();
-            let place = tr(if self.store.read_only { "Nur lesen" } else { "Portabel" });
+            let place = tr(if self.store.read_only { "Read only" } else { "Portable" });
             // short path (folder + file); the full one on hover
             let short: Vec<String> = self.store.path.components().rev().take(2).map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
             let short = short.into_iter().rev().collect::<Vec<_>>().join(std::path::MAIN_SEPARATOR_STR);
@@ -1673,7 +1673,7 @@ impl AdminApp {
                 ui.separator();
                 match self.store.remote_state.lock().unwrap().last_error.clone() {
                     Some(e) => ui.label(RichText::new(tf("WebDAV: {0}", &[&e])).color(BAD_RED)),
-                    None => ui.label(RichText::new(tr("WebDAV verbunden")).color(OK_GREEN)),
+                    None => ui.label(RichText::new(tr("WebDAV connected")).color(OK_GREEN)),
                 };
             }
             if let Some(err) = &self.store.last_error {
@@ -1696,20 +1696,20 @@ impl AdminApp {
         let mut acts = Vec::new();
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.heading(tr("Verbindungen"));
+            ui.heading(tr("Connections"));
         });
-        let search = ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text(tr("Suchen (Name, Host, Benutzer) …")).desired_width(f32::INFINITY));
+        let search = ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text(tr("Search (name, host, user) …")).desired_width(f32::INFINITY));
         if std::mem::take(&mut self.focus_search) {
             search.request_focus();
         }
         ui.horizontal(|ui| {
-            if ui.button(tr("+ Verbindung")).clicked() {
+            if ui.button(tr("+ Connection")).clicked() {
                 acts.push(Act::NewConn(self.new_parent_for_selection()));
             }
-            if ui.button(tr("+ Ordner")).clicked() {
+            if ui.button(tr("+ Folder")).clicked() {
                 acts.push(Act::NewFolder(self.new_parent_for_selection()));
             }
-            if ui.button(tr("Status")).on_hover_text(tr("Prüft, ob die Hosts auf ihrem Port antworten")).clicked() {
+            if ui.button(tr("Status")).on_hover_text(tr("Checks whether the hosts answer on their port")).clicked() {
                 self.check_status(&ctx);
             }
         });
@@ -1734,7 +1734,7 @@ impl AdminApp {
                     .map(|e| e.id)
                     .collect();
                 if hits.is_empty() {
-                    ui.weak(tr("Nichts gefunden."));
+                    ui.weak(tr("Nothing found."));
                 }
                 for id in hits {
                     self.tree_row(ui, id, 0, &mut acts, true);
@@ -1752,11 +1752,11 @@ impl AdminApp {
                 }
             }
             rest.context_menu(|ui| {
-                if ui.button(tr("Neue Verbindung")).clicked() {
+                if ui.button(tr("New connection")).clicked() {
                     acts.push(Act::NewConn(None));
                     ui.close();
                 }
-                if ui.button(tr("Neuer Ordner")).clicked() {
+                if ui.button(tr("New folder")).clicked() {
                     acts.push(Act::NewFolder(None));
                     ui.close();
                 }
@@ -1838,7 +1838,7 @@ impl AdminApp {
             let resp = if e.folder {
                 resp
             } else {
-                let host = if e.protocol.needs_host() { format!("{}:{}", e.host, e.port) } else { tr("lokal").into() };
+                let host = if e.protocol.needs_host() { format!("{}:{}", e.host, e.port) } else { tr("local").into() };
                 resp.on_hover_text(format!("{} · {}\n{}", e.protocol.label(), host, e.description))
             };
             if resp.clicked() {
@@ -1850,43 +1850,43 @@ impl AdminApp {
             resp.context_menu(|ui| {
                 acts.push(Act::Select(id));
                 if e.folder {
-                    if ui.button(tr("Alle Verbindungen im Ordner öffnen")).clicked() {
+                    if ui.button(tr("Open all connections in the folder")).clicked() {
                         acts.push(Act::ConnectAll(id));
                         ui.close();
                     }
-                    if ui.button(tr("Neue Verbindung hier")).clicked() {
+                    if ui.button(tr("New connection here")).clicked() {
                         acts.push(Act::NewConn(Some(id)));
                         ui.close();
                     }
-                    if ui.button(tr("Neuer Unterordner")).clicked() {
+                    if ui.button(tr("New subfolder")).clicked() {
                         acts.push(Act::NewFolder(Some(id)));
                         ui.close();
                     }
-                    if ui.button(tr("Ordner exportieren …")).clicked() {
+                    if ui.button(tr("Export folder …")).clicked() {
                         acts.push(Act::Export(Some(id)));
                         ui.close();
                     }
                 } else {
-                    if ui.button(RichText::new(tr("Verbinden")).strong()).clicked() {
+                    if ui.button(RichText::new(tr("Connect")).strong()).clicked() {
                         acts.push(Act::Connect(id));
                         ui.close();
                     }
                     if e.protocol == Protocol::Ssh {
-                        if ui.button(tr("Dateien übertragen (SFTP)")).clicked() {
+                        if ui.button(tr("Transfer files (SFTP)")).clicked() {
                             acts.push(Act::Files(id));
                             ui.close();
                         }
-                        if ui.button(tr("In eigenem Terminal öffnen (OpenSSH)")).clicked() {
+                        if ui.button(tr("Open in own terminal (OpenSSH)")).clicked() {
                             acts.push(Act::OpenSsh(id));
                             ui.close();
                         }
-                        if ui.button(tr("Mit PuTTY öffnen")).clicked() {
+                        if ui.button(tr("Open with PuTTY")).clicked() {
                             acts.push(Act::Putty(id));
                             ui.close();
                         }
                     }
                     if e.protocol == Protocol::Ssh || e.protocol.transfer() {
-                        for (key, label) in [("winscp", "In WinSCP öffnen"), ("filezilla", "In FileZilla öffnen")] {
+                        for (key, label) in [("winscp", "Open in WinSCP"), ("filezilla", "Open in FileZilla")] {
                             if self.prog_cache.get(key).map(|x| x.is_some()).unwrap_or(false) && ui.button(tr(label)).clicked() {
                                 acts.push(Act::FileApp(id, key));
                                 ui.close();
@@ -1898,34 +1898,34 @@ impl AdminApp {
                             acts.push(Act::Ping(id));
                             ui.close();
                         }
-                        if ui.button(tr("Port-Scan")).clicked() {
+                        if ui.button(tr("Port scan")).clicked() {
                             acts.push(Act::Scan(id));
                             ui.close();
                         }
                     }
-                    if !e.mac.trim().is_empty() && ui.button(tr("Aufwecken (Wake-on-LAN)")).clicked() {
+                    if !e.mac.trim().is_empty() && ui.button(tr("Wake up (Wake-on-LAN)")).clicked() {
                         acts.push(Act::Wake(id));
                         ui.close();
                     }
-                    if ui.button(tr("Kopieren / Duplizieren")).clicked() {
+                    if ui.button(tr("Copy / duplicate")).clicked() {
                         acts.push(Act::Duplicate(id));
                         ui.close();
                     }
-                    if e.protocol == Protocol::Ssh && !e.tunnels.is_empty() && ui.button(tr("SSH-Tunnel starten")).clicked() {
+                    if e.protocol == Protocol::Ssh && !e.tunnels.is_empty() && ui.button(tr("Start SSH tunnels")).clicked() {
                         acts.push(Act::StartTunnels(id));
                         ui.close();
                     }
-                    if e.protocol == Protocol::Https && ui.button(tr("Zertifikat prüfen")).clicked() {
+                    if e.protocol == Protocol::Https && ui.button(tr("Check certificate")).clicked() {
                         acts.push(Act::CheckCert(id));
                         ui.close();
                     }
                     if cfg!(windows) && matches!(e.protocol, Protocol::Rdp | Protocol::PowerShell | Protocol::Vnc) {
-                        ui.menu_button(tr("Windows-Verwaltung"), |ui| {
+                        ui.menu_button(tr("Windows management"), |ui| {
                             for (tool, label) in [
-                                (extra::WinTool::Services, tr("Dienste")),
-                                (extra::WinTool::Events, tr("Ereignisanzeige")),
-                                (extra::WinTool::Manage, tr("Computerverwaltung")),
-                                (extra::WinTool::Share, tr("Laufwerk C$ öffnen")),
+                                (extra::WinTool::Services, tr("Services")),
+                                (extra::WinTool::Events, tr("Event viewer")),
+                                (extra::WinTool::Manage, tr("Computer management")),
+                                (extra::WinTool::Share, tr("Open drive C$")),
                             ] {
                                 if ui.button(label).clicked() {
                                     acts.push(Act::WinTool(id, tool));
@@ -1935,25 +1935,25 @@ impl AdminApp {
                         });
                     }
                     if e.protocol.needs_host() && matches!(e.protocol, Protocol::Rdp | Protocol::PowerShell | Protocol::Vnc | Protocol::Ssh) {
-                        ui.menu_button(tr("Ein/Aus"), |ui| {
-                            if ui.button(tr("Neu starten …")).clicked() {
+                        ui.menu_button(tr("Power"), |ui| {
+                            if ui.button(tr("Restart …")).clicked() {
                                 acts.push(Act::Power(id, true));
                                 ui.close();
                             }
-                            if ui.button(tr("Herunterfahren …")).clicked() {
+                            if ui.button(tr("Shut down …")).clicked() {
                                 acts.push(Act::Power(id, false));
                                 ui.close();
                             }
                         });
                     }
-                    if ui.button(tr("Host kopieren")).clicked() {
+                    if ui.button(tr("Copy host")).clicked() {
                         ui.ctx().copy_text(e.host.clone());
                         ui.close();
                     }
                 }
                 ui.separator();
-                ui.menu_button(tr("Verschieben nach"), |ui| {
-                    if ui.button(tr("(oberste Ebene)")).clicked() {
+                ui.menu_button(tr("Move to"), |ui| {
+                    if ui.button(tr("(top level)")).clicked() {
                         acts.push(Act::MoveTo(id, None));
                         ui.close();
                     }
@@ -1967,16 +1967,16 @@ impl AdminApp {
                         }
                     }
                 });
-                if ui.button(tr("Nach oben")).clicked() {
+                if ui.button(tr("Move up")).clicked() {
                     acts.push(Act::Shift(id, true));
                     ui.close();
                 }
-                if ui.button(tr("Nach unten")).clicked() {
+                if ui.button(tr("Move down")).clicked() {
                     acts.push(Act::Shift(id, false));
                     ui.close();
                 }
                 ui.separator();
-                if ui.button(RichText::new(tr("Löschen …")).color(BAD_RED)).clicked() {
+                if ui.button(RichText::new(tr("Delete …")).color(BAD_RED)).clicked() {
                     acts.push(Act::AskDelete(id));
                     ui.close();
                 }
@@ -2030,13 +2030,13 @@ impl AdminApp {
     fn props_panel(&mut self, ui: &mut egui::Ui, now: f64) {
         let ctx = ui.ctx().clone();
         ui.add_space(4.0);
-        ui.heading(tr("Eigenschaften"));
+        ui.heading(tr("Properties"));
         ui.separator();
         let Some(id) = self.selected else {
             ui.add_space(20.0);
-            ui.weak(tr("Links eine Verbindung oder einen Ordner auswählen."));
+            ui.weak(tr("Select a connection or folder on the left."));
             ui.add_space(8.0);
-            ui.weak(tr("Doppelklick öffnet eine Verbindung, Rechtsklick zeigt alle Aktionen."));
+            ui.weak(tr("Double-click opens a connection, right-click shows all actions."));
             return;
         };
         let Some(idx) = self.store.index_of(id) else {
@@ -2088,7 +2088,7 @@ impl AdminApp {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.horizontal(|ui| {
                 if e.folder {
-                    ui.label(RichText::new(tr("Ordner")).color(Color32::from_rgb(232, 180, 60)).strong());
+                    ui.label(RichText::new(tr("Folder")).color(Color32::from_rgb(232, 180, 60)).strong());
                 } else {
                     badge(ui, e.protocol);
                 }
@@ -2099,45 +2099,45 @@ impl AdminApp {
             ui.horizontal(|ui| {
                 if !e.folder
                     && ui
-                        .add(egui::Button::new(RichText::new(tr("Verbinden")).color(Color32::WHITE).strong()).fill(ACCENT))
+                        .add(egui::Button::new(RichText::new(tr("Connect")).color(Color32::WHITE).strong()).fill(ACCENT))
                         .clicked()
                 {
                     act = Some(Act::Connect(id));
                 }
-                if !e.folder && e.protocol == Protocol::Ssh && ui.button(tr("Dateien")).on_hover_text(tr("Dateien hoch- und herunterladen (SFTP)")).clicked() {
+                if !e.folder && e.protocol == Protocol::Ssh && ui.button(tr("Files")).on_hover_text(tr("Upload and download files (SFTP)")).clicked() {
                     act = Some(Act::Files(id));
                 }
-                if e.folder && ui.button(tr("Alle öffnen")).clicked() {
+                if e.folder && ui.button(tr("Open all")).clicked() {
                     act = Some(Act::ConnectAll(id));
                 }
-                if !e.folder && ui.button(tr("Duplizieren")).clicked() {
+                if !e.folder && ui.button(tr("Duplicate")).clicked() {
                     act = Some(Act::Duplicate(id));
                 }
-                if ui.button(RichText::new(tr("Löschen")).color(BAD_RED)).clicked() {
+                if ui.button(RichText::new(tr("Delete")).color(BAD_RED)).clicked() {
                     act = Some(Act::AskDelete(id));
                 }
             });
             ui.add_space(8.0);
 
-            section(ui, tr("Allgemein"));
+            section(ui, tr("General"));
             egui::Grid::new(tr("props_general")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                 ui.label(tr("Name"));
                 ui.add(egui::TextEdit::singleline(&mut e.name).desired_width(f32::INFINITY));
                 ui.end_row();
-                ui.label(tr("Ordner"));
+                ui.label(tr("Folder"));
                 let current = e
                     .parent
                     .and_then(|p| folders.iter().find(|(f, _)| *f == p).map(|(_, n)| n.clone()))
-                    .unwrap_or_else(|| tr("(oberste Ebene)").into());
+                    .unwrap_or_else(|| tr("(top level)").into());
                 egui::ComboBox::from_id_salt("parent_combo").selected_text(current).width(200.0).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut e.parent, None, tr("(oberste Ebene)"));
+                    ui.selectable_value(&mut e.parent, None, tr("(top level)"));
                     for (fid, name) in &folders {
                         ui.selectable_value(&mut e.parent, Some(*fid), name);
                     }
                 });
                 ui.end_row();
                 if !e.folder {
-                    ui.label(tr("Protokoll"));
+                    ui.label(tr("Protocol"));
                     let before = e.protocol;
                     egui::ComboBox::from_id_salt("proto_combo").selected_text(e.protocol.label()).width(200.0).show_ui(ui, |ui| {
                         for p in Protocol::ALL {
@@ -2150,10 +2150,10 @@ impl AdminApp {
                     ui.end_row();
                     if e.protocol.needs_host() {
                         ui.label(tr("Host / IP"));
-                        ui.add(egui::TextEdit::singleline(&mut e.host).hint_text(tr("server.firma.local")).desired_width(f32::INFINITY));
+                        ui.add(egui::TextEdit::singleline(&mut e.host).hint_text("server.corp.local").desired_width(f32::INFINITY));
                         ui.end_row();
                         if e.protocol == Protocol::Serial {
-                            ui.label(tr("Geschwindigkeit"));
+                            ui.label(tr("Speed"));
                             egui::ComboBox::from_id_salt("baud").selected_text(format!("{} Baud", e.baud)).show_ui(ui, |ui| {
                                 for b in [1200u32, 2400, 4800, 9600, 19200, 38400, 57600, 115200] {
                                     ui.selectable_value(&mut e.baud, b, format!("{b} Baud"));
@@ -2170,15 +2170,15 @@ impl AdminApp {
             });
 
             if e.protocol != Protocol::LocalShell || e.folder {
-                section(ui, tr("Anmeldung"));
+                section(ui, tr("Login"));
                 egui::Grid::new(tr("props_login")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                    ui.label(tr("Benutzer"));
+                    ui.label(tr("User"));
                     ui.add(egui::TextEdit::singleline(&mut e.username).desired_width(f32::INFINITY));
                     ui.end_row();
-                    ui.label(tr("Domäne"));
+                    ui.label(tr("Domain"));
                     ui.add(egui::TextEdit::singleline(&mut e.domain).desired_width(f32::INFINITY));
                     ui.end_row();
-                    ui.label(tr("Passwort aus"));
+                    ui.label(tr("Password from"));
                     egui::ComboBox::from_id_salt("cred_src").selected_text(e.cred_source.label()).width(220.0).show_ui(ui, |ui| {
                         for s in [CredSource::Stored, CredSource::KeePass, CredSource::Ask] {
                             ui.selectable_value(&mut e.cred_source, s, s.label());
@@ -2187,13 +2187,13 @@ impl AdminApp {
                     ui.end_row();
                     match e.cred_source {
                         CredSource::Stored => {
-                            ui.label(tr("Passwort"));
+                            ui.label(tr("Password"));
                             ui.add(egui::TextEdit::singleline(&mut e.password).password(!self.show_password).desired_width(f32::INFINITY));
                             ui.end_row();
                             ui.label("");
                             ui.horizontal(|ui| {
-                                ui.checkbox(&mut self.show_password, tr("Passwort zeigen"));
-                                if ui.small_button(tr("Erzeugen")).on_hover_text(tr("Sicheres Passwort erzeugen")).clicked() {
+                                ui.checkbox(&mut self.show_password, tr("Show password"));
+                                if ui.small_button(tr("Generate")).on_hover_text(tr("Generate a secure password")).clicked() {
                                     self.pwgen.open = true;
                                     self.pwgen.target = Some(id);
                                     self.pwgen.value.clear();
@@ -2203,39 +2203,39 @@ impl AdminApp {
                         }
                         CredSource::KeePass => {
                             if let Some((code, left)) = &kp_otp {
-                                ui.label(tr("2FA-Code"));
+                                ui.label(tr("2FA code"));
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(code).monospace().size(16.0).strong());
-                                    ui.weak(tf("noch {0} s", &[left]));
-                                    if ui.small_button(tr("kopieren")).clicked() {
+                                    ui.weak(tf("{0} s left", &[left]));
+                                    if ui.small_button(tr("copy")).clicked() {
                                         ui.ctx().copy_text(code.clone());
                                     }
                                 });
                                 ui.end_row();
                             }
-                            ui.label(tr("KeePass-Eintrag"));
+                            ui.label(tr("KeePass entry"));
                             ui.add(
                                 egui::TextEdit::singleline(&mut e.keepass_entry)
-                                    .hint_text(tr("leer = passend zum Host suchen"))
+                                    .hint_text(tr("empty = search by host"))
                                     .desired_width(f32::INFINITY),
                             );
                             ui.end_row();
                             ui.label("");
                             ui.horizontal(|ui| {
                                 if !kp_configured {
-                                    if ui.link(tr("KeePass-Datei einstellen")).clicked() {
+                                    if ui.link(tr("Set up KeePass file")).clicked() {
                                         open_settings = true;
                                     }
                                 } else if kp_unlocked {
                                     let filter = e.keepass_entry.to_lowercase();
-                                    egui::ComboBox::from_id_salt("kp_pick").selected_text(tr("Eintrag wählen …")).width(200.0).show_ui(ui, |ui| {
+                                    egui::ComboBox::from_id_salt("kp_pick").selected_text(tr("Choose entry …")).width(200.0).show_ui(ui, |ui| {
                                         for p in kp_paths.iter().filter(|p| filter.is_empty() || p.to_lowercase().contains(&filter)).take(300) {
                                             if ui.selectable_label(false, p).clicked() {
                                                 e.keepass_entry = p.clone();
                                             }
                                         }
                                     });
-                                } else if ui.button(tr("KeePass entsperren")).clicked() {
+                                } else if ui.button(tr("Unlock KeePass")).clicked() {
                                     open_kp = true;
                                 }
                             });
@@ -2243,32 +2243,32 @@ impl AdminApp {
                         }
                         CredSource::Ask => {
                             ui.label("");
-                            ui.weak(tr("Wird beim Verbinden abgefragt und bis zum Beenden gemerkt."));
+                            ui.weak(tr("Asked when connecting and remembered until AdminCraft closes."));
                             ui.end_row();
                         }
                     }
                     if !e.folder {
                         ui.label("");
-                        ui.checkbox(&mut e.inherit_credentials, tr("Leere Felder vom Ordner übernehmen"));
+                        ui.checkbox(&mut e.inherit_credentials, tr("Take empty fields from the folder"));
                         ui.end_row();
                     }
                 });
                 if e.folder {
-                    ui.weak(tr("Benutzer, Domäne und Passwort gelten für alle Verbindungen in diesem Ordner, die nichts Eigenes eingetragen haben."));
+                    ui.weak(tr("User, domain and password apply to all connections in this folder that have nothing of their own."));
                 } else if e.inherit_credentials {
                     if let Some((u, d, p)) = &inherited {
                         if (e.username.is_empty() && !u.is_empty()) || (e.domain.is_empty() && !d.is_empty()) || (e.password.is_empty() && !p.is_empty()) {
                             let mut parts = Vec::new();
                             if e.username.is_empty() && !u.is_empty() {
-                                parts.push(tf("Benutzer {0}", &[&u]));
+                                parts.push(tf("user {0}", &[&u]));
                             }
                             if e.domain.is_empty() && !d.is_empty() {
-                                parts.push(tf("Domäne {0}", &[&d]));
+                                parts.push(tf("domain {0}", &[&d]));
                             }
                             if e.password.is_empty() && !p.is_empty() {
-                                parts.push(tr("Passwort").into());
+                                parts.push(tr("Password").into());
                             }
-                            ui.label(RichText::new(tf("Vom Ordner: {0}", &[&(parts.join(", "))])).italics().color(ACCENT));
+                            ui.label(RichText::new(tf("From the folder: {0}", &[&(parts.join(", "))])).italics().color(ACCENT));
                         }
                     }
                 }
@@ -2277,13 +2277,13 @@ impl AdminApp {
             if !e.folder {
                 match e.protocol {
                     Protocol::Rdp => {
-                        section(ui, tr("Remotedesktop"));
+                        section(ui, tr("Remote desktop"));
                         let presets = [(1280, 720), (1366, 768), (1600, 900), (1920, 1080), (2560, 1440)];
-                        let current = if e.rdp.fullscreen { tr("Vollbild").to_string() } else { format!("{} × {}", e.rdp.width, e.rdp.height) };
+                        let current = if e.rdp.fullscreen { tr("Full screen").to_string() } else { format!("{} × {}", e.rdp.width, e.rdp.height) };
                         egui::Grid::new(tr("props_rdp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                            ui.label(tr("Bildschirm"));
+                            ui.label(tr("Screen"));
                             egui::ComboBox::from_id_salt("rdp_res").selected_text(current).show_ui(ui, |ui| {
-                                if ui.selectable_label(e.rdp.fullscreen, tr("Vollbild")).clicked() {
+                                if ui.selectable_label(e.rdp.fullscreen, tr("Full screen")).clicked() {
                                     e.rdp.fullscreen = true;
                                 }
                                 for (w, h) in presets {
@@ -2297,24 +2297,24 @@ impl AdminApp {
                             });
                             ui.end_row();
                         });
-                        ui.checkbox(&mut e.rdp.pass_credentials, tr("Anmeldedaten automatisch übergeben"))
+                        ui.checkbox(&mut e.rdp.pass_credentials, tr("Pass the login automatically"))
                             .on_hover_text(tr(if cfg!(windows) {
-                                "Speichert Benutzer und Passwort für diesen Host in der Windows-Anmeldeinformationsverwaltung (cmdkey), damit Remotedesktop sich selbst anmeldet."
+                                "Stores user and password for this host in the Windows Credential Manager (cmdkey), so Remote Desktop logs in by itself."
                             } else {
-                                "Gibt Benutzer und Passwort an FreeRDP weiter."
+                                "Passes user and password to FreeRDP."
                             }));
-                        ui.checkbox(&mut e.rdp.admin_session, tr("Admin-/Konsolensitzung (/admin)"));
-                        ui.checkbox(&mut e.rdp.multimon, tr("Alle Monitore verwenden"));
-                        ui.checkbox(&mut e.rdp.redirect_clipboard, tr("Zwischenablage teilen"));
-                        ui.checkbox(&mut e.rdp.redirect_drives, tr("Lokale Laufwerke verbinden"));
+                        ui.checkbox(&mut e.rdp.admin_session, tr("Admin/console session (/admin)"));
+                        ui.checkbox(&mut e.rdp.multimon, tr("Use all monitors"));
+                        ui.checkbox(&mut e.rdp.redirect_clipboard, tr("Share clipboard"));
+                        ui.checkbox(&mut e.rdp.redirect_drives, tr("Connect local drives"));
                     }
                     Protocol::Ssh | Protocol::Sftp | Protocol::Scp => {
                         section(ui, if e.protocol == Protocol::Ssh { "SSH" } else { "SSH / Dateien" });
                         egui::Grid::new(tr("props_ssh")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                             if e.protocol == Protocol::Ssh {
-                                ui.label(tr("Öffnen mit"));
+                                ui.label(tr("Open with"));
                                 let shown = if e.ssh_client == SshClient::Default {
-                                    tf("Standard ({0})", &[&(short_client(default_client))])
+                                    tf("Default ({0})", &[&tr(short_client(default_client))])
                                 } else {
                                     e.ssh_client.label().to_string()
                                 };
@@ -2325,57 +2325,57 @@ impl AdminApp {
                                 });
                                 ui.end_row();
                             }
-                            ui.label(tr("Jump-Host"));
+                            ui.label(tr("Jump host"));
                             let cur = e
                                 .jump_host
                                 .and_then(|j| jump_opts.iter().find(|(x, _)| *x == j).map(|(_, n)| n.clone()))
-                                .unwrap_or_else(|| tr("(keiner – direkt verbinden)").into());
+                                .unwrap_or_else(|| tr("(none – connect directly)").into());
                             egui::ComboBox::from_id_salt("jump_host").selected_text(cur).width(220.0).show_ui(ui, |ui| {
-                                ui.selectable_value(&mut e.jump_host, None, tr("(keiner – direkt verbinden)"));
+                                ui.selectable_value(&mut e.jump_host, None, tr("(none – connect directly)"));
                                 for (jid, name) in &jump_opts {
                                     ui.selectable_value(&mut e.jump_host, Some(*jid), name);
                                 }
                             });
                             ui.end_row();
                             if e.jump_host.is_some() && e.protocol == Protocol::Ssh {
-                                ui.label(tr("Weiter per"));
+                                ui.label(tr("Continue via"));
                                 ui.vertical(|ui| {
-                                    ui.radio_value(&mut e.jump_mode, JumpMode::Chain, tr("Auf dem Jump-Host weiter: „ssh user@ziel“"))
-                                        .on_hover_text(tr("AdminCraft meldet sich am Jump-Host an und startet dort sofort ssh zum Ziel. Richtig, wenn der SSH-Schlüssel für das Ziel AUF dem Jump-Host liegt. Geht mit Terminal-Tab, PuTTY und eigenem Fenster."));
-                                    ui.radio_value(&mut e.jump_mode, JumpMode::ProxyJump, tr("Tunnel durch den Jump-Host (ssh -J)"))
-                                        .on_hover_text(tr("Die Verbindung läuft durch den Jump-Host, angemeldet wird von DIESEM PC aus (Schlüssel/Passwort hier). Mit PuTTY wird dazu plink gebraucht."));
+                                    ui.radio_value(&mut e.jump_mode, JumpMode::Chain, tr("Continue on the jump host: \"ssh user@target\""))
+                                        .on_hover_text(tr("AdminCraft logs in to the jump host and runs ssh to the target there right away. Right when the SSH key for the target is ON the jump host. Works with terminal tab, PuTTY and own window."));
+                                    ui.radio_value(&mut e.jump_mode, JumpMode::ProxyJump, tr("Tunnel through the jump host (ssh -J)"))
+                                        .on_hover_text(tr("The connection runs through the jump host, the login happens from THIS PC (key/password here). PuTTY needs plink for this."));
                                 });
                                 ui.end_row();
                             }
-                            ui.label(tr("Schlüsseldatei"));
+                            ui.label(tr("Key file"));
                             ui.add(egui::TextEdit::singleline(&mut e.ssh_key).hint_text(tr("~/.ssh/id_ed25519 (optional)")).desired_width(f32::INFINITY));
                             ui.end_row();
                             if e.protocol == Protocol::Ssh {
-                                ui.label(tr("Extra-Optionen"));
-                                ui.add(egui::TextEdit::singleline(&mut e.extra_args).hint_text(tr("z. B. -L 8080:localhost:80")).desired_width(f32::INFINITY));
+                                ui.label(tr("Extra options"));
+                                ui.add(egui::TextEdit::singleline(&mut e.extra_args).hint_text(tr("e.g. -L 8080:localhost:80")).desired_width(f32::INFINITY));
                                 ui.end_row();
                             } else {
-                                ui.label(tr("Start-Ordner"));
+                                ui.label(tr("Start folder"));
                                 ui.add(egui::TextEdit::singleline(&mut e.start_path).hint_text(tr("/home/user (optional)")).desired_width(f32::INFINITY));
                                 ui.end_row();
                             }
                         });
                         if e.jump_host.is_some() && e.protocol != Protocol::Ssh {
-                            ui.weak(tr("Dateiübertragung über Jump-Host nutzt immer den Tunnel (ssh -J)."));
+                            ui.weak(tr("File transfer through a jump host always uses the tunnel (ssh -J)."));
                         }
                         if e.protocol == Protocol::Ssh {
-                            section(ui, tr("Tunnel (Portweiterleitung)"));
+                            section(ui, tr("Tunnels (port forwarding)"));
                             let mut remove = None;
                             for (i, tun) in e.tunnels.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
-                                    ui.label(tr("lokal"));
+                                    ui.label(tr("local"));
                                     ui.add(egui::DragValue::new(&mut tun.local_port).range(1..=65535));
                                     ui.label("»");
                                     ui.add(egui::TextEdit::singleline(&mut tun.remote_host).desired_width(90.0));
                                     ui.label(":");
                                     ui.add(egui::DragValue::new(&mut tun.remote_port).range(1..=65535));
-                                    ui.checkbox(&mut tun.auto, tr("auto")).on_hover_text(tr("Beim Verbinden mitstarten"));
-                                    if ui.small_button("×").on_hover_text(tr("Entfernen")).clicked() {
+                                    ui.checkbox(&mut tun.auto, tr("auto")).on_hover_text(tr("Start together with the connection"));
+                                    if ui.small_button("×").on_hover_text(tr("Remove")).clicked() {
                                         remove = Some(i);
                                     }
                                 });
@@ -2387,39 +2387,39 @@ impl AdminApp {
                                 if ui.button(tr("+ Tunnel")).clicked() {
                                     e.tunnels.push(Default::default());
                                 }
-                                if !e.tunnels.is_empty() && ui.button(tr("Tunnel starten")).clicked() {
+                                if !e.tunnels.is_empty() && ui.button(tr("Start tunnels")).clicked() {
                                     act = Some(Act::StartTunnels(id));
                                 }
                             });
-                            ui.weak(tr("Beispiel: lokal 8443 » 192.168.1.1:443 – dann https://localhost:8443 öffnen."));
+                            ui.weak(tr("Example: local 8443 » 192.168.1.1:443 – then open https://localhost:8443."));
                         }
                     }
                     Protocol::Ftp => {
                         section(ui, tr("FTP"));
-                        ui.checkbox(&mut e.ftp_tls, tr("Verschlüsselt (FTPS, explizites TLS)"));
+                        ui.checkbox(&mut e.ftp_tls, tr("Encrypted (FTPS, explicit TLS)"));
                         if e.ftp_tls {
-                            ui.checkbox(&mut e.tls_ignore_cert, tr("Zertifikat nicht prüfen (selbstsigniert, z. B. NAS)"))
-                                .on_hover_text(tr("Nur für eigene Geräte im eigenen Netz: die Verbindung bleibt verschlüsselt, der Server wird aber nicht geprüft."));
+                            ui.checkbox(&mut e.tls_ignore_cert, tr("Don't check the certificate (self-signed, e.g. NAS)"))
+                                .on_hover_text(tr("Only for your own devices in your own network: the connection stays encrypted, but the server is not verified."));
                         }
                         egui::Grid::new(tr("props_ftp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                            ui.label(tr("Start-Ordner"));
+                            ui.label(tr("Start folder"));
                             ui.add(egui::TextEdit::singleline(&mut e.start_path).hint_text(tr("/ (optional)")).desired_width(f32::INFINITY));
                             ui.end_row();
                         });
-                        ui.weak(tr("Leerer Benutzer = anonymes FTP."));
+                        ui.weak(tr("Empty user = anonymous FTP."));
                     }
                     Protocol::Http | Protocol::Https => {
                         section(ui, tr("Web"));
-                        ui.add_enabled(cfg!(windows), egui::Checkbox::new(&mut e.web_in_tab, tr("Im Tab öffnen (Edge/Chrome-Fenster)")))
-                            .on_disabled_hover_text(tr("Nur unter Windows möglich."));
-                        if e.protocol == Protocol::Https && ui.button(tr("Zertifikat prüfen")).clicked() {
+                        ui.add_enabled(cfg!(windows), egui::Checkbox::new(&mut e.web_in_tab, tr("Open in a tab (Edge/Chrome window)")))
+                            .on_disabled_hover_text(tr("Only possible on Windows."));
+                        if e.protocol == Protocol::Https && ui.button(tr("Check certificate")).clicked() {
                             act = Some(Act::CheckCert(id));
                         }
                     }
                     Protocol::Telnet | Protocol::Vnc => {
-                        section(ui, tr("Erweitert"));
+                        section(ui, tr("Advanced"));
                         egui::Grid::new(tr("props_extra")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                            ui.label(tr("Extra-Optionen"));
+                            ui.label(tr("Extra options"));
                             ui.add(egui::TextEdit::singleline(&mut e.extra_args).desired_width(f32::INFINITY));
                             ui.end_row();
                         });
@@ -2428,28 +2428,28 @@ impl AdminApp {
                 }
 
                 if e.protocol.needs_host() {
-                    section(ui, tr("Netzwerk"));
+                    section(ui, tr("Network"));
                     egui::Grid::new(tr("props_net")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                        ui.label(tr("MAC-Adresse"));
-                        ui.add(egui::TextEdit::singleline(&mut e.mac).hint_text(tr("für Wake-on-LAN")).desired_width(f32::INFINITY));
+                        ui.label(tr("MAC address"));
+                        ui.add(egui::TextEdit::singleline(&mut e.mac).hint_text(tr("for Wake-on-LAN")).desired_width(f32::INFINITY));
                         ui.end_row();
                     });
                     ui.horizontal(|ui| {
                         if ui.button(tr("Ping")).clicked() {
                             act = Some(Act::Ping(id));
                         }
-                        if ui.button(tr("Port-Scan")).clicked() {
+                        if ui.button(tr("Port scan")).clicked() {
                             act = Some(Act::Scan(id));
                         }
-                        if ui.add_enabled(!e.mac.trim().is_empty(), egui::Button::new(tr("Aufwecken"))).clicked() {
+                        if ui.add_enabled(!e.mac.trim().is_empty(), egui::Button::new(tr("Wake up"))).clicked() {
                             act = Some(Act::Wake(id));
                         }
                     });
                 }
             }
 
-            section(ui, tr("Notizen"));
-            ui.add(egui::TextEdit::multiline(&mut e.description).desired_rows(4).desired_width(f32::INFINITY).hint_text(tr("z. B. Standort, Ansprechpartner, Besonderheiten")));
+            section(ui, tr("Notes"));
+            ui.add(egui::TextEdit::multiline(&mut e.description).desired_rows(4).desired_width(f32::INFINITY).hint_text(tr("e.g. location, contact person, special notes")));
         });
 
         if e != self.store.data.entries[idx] {
@@ -2546,28 +2546,28 @@ impl AdminApp {
                                         drag_stop = true;
                                     }
                                     if i != 0 {
-                                        r.on_hover_text(tr("Doppelklick: umbenennen · ziehen: verschieben · Rechtsklick: mehr")).context_menu(|ui| {
-                                            if ui.button(tr("Umbenennen")).clicked() {
+                                        r.on_hover_text(tr("Double-click: rename · drag: move · right-click: more")).context_menu(|ui| {
+                                            if ui.button(tr("Rename")).clicked() {
                                                 rename_start = Some((tab.id, tab.title.clone()));
                                                 ui.close();
                                             }
-                                            if i > 1 && ui.button(tr("Nach links")).clicked() {
+                                            if i > 1 && ui.button(tr("Move left")).clicked() {
                                                 swap = Some((i, i - 1));
                                                 ui.close();
                                             }
-                                            if i + 1 < self.tabs.len() && ui.button(tr("Nach rechts")).clicked() {
+                                            if i + 1 < self.tabs.len() && ui.button(tr("Move right")).clicked() {
                                                 swap = Some((i, i + 1));
                                                 ui.close();
                                             }
                                             ui.separator();
-                                            if ui.button(tr("Tab schließen")).clicked() {
+                                            if ui.button(tr("Close tab")).clicked() {
                                                 close = Some(i);
                                                 ui.close();
                                             }
                                         });
                                     }
                                 }
-                                if i != 0 && ui.add(egui::Button::new("×").frame(false).small()).on_hover_text(tr("Tab schließen")).clicked() {
+                                if i != 0 && ui.add(egui::Button::new("×").frame(false).small()).on_hover_text(tr("Close tab")).clicked() {
                                     close = Some(i);
                                 }
                             });
@@ -2682,16 +2682,16 @@ impl AdminApp {
                         badge(ui, t.entry.protocol);
                         ui.label(RichText::new(&t.preview).monospace().weak());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(tr("Neu verbinden")).clicked() {
+                            if ui.button(tr("Reconnect")).clicked() {
                                 if let Some(term) = &mut t.term {
                                     term.kill();
                                 }
                                 reconnect = Some((t.entry.clone(), t.creds.clone(), t.jumps.clone()));
                             }
-                            ui.checkbox(&mut t.broadcast, tr("Mehrfach"))
-                                .on_hover_text(tr("Was hier getippt wird, geht auch an alle anderen Tabs mit „Mehrfach“."));
+                            ui.checkbox(&mut t.broadcast, tr("Multi"))
+                                .on_hover_text(tr("What you type here also goes to all other tabs with \"Multi\"."));
                             let (entry, creds) = (t.entry.clone(), t.creds.clone());
-                            ui.menu_button(tr("Befehle"), |ui| {
+                            ui.menu_button(tr("Commands"), |ui| {
                                 for sn in &snippets {
                                     if ui.button(&sn.name).on_hover_text(&sn.command).clicked() {
                                         snippet_cmd = Some(fill_snippet(&sn.command, &entry, &creds));
@@ -2699,23 +2699,23 @@ impl AdminApp {
                                     }
                                 }
                                 if snippets.is_empty() {
-                                    ui.weak(tr("Noch keine Befehle gespeichert."));
+                                    ui.weak(tr("No commands saved yet."));
                                 }
                                 ui.separator();
-                                if ui.button(tr("Befehle verwalten …")).clicked() {
+                                if ui.button(tr("Manage commands …")).clicked() {
                                     open_settings_req = true;
                                     ui.close();
                                 }
                             });
                             if let Some(term) = &mut t.term {
-                                if ui.button(tr("Text kopieren")).on_hover_text(tr("Bildschirminhalt in die Zwischenablage")).clicked() {
+                                if ui.button(tr("Copy text")).on_hover_text(tr("Screen content to the clipboard")).clicked() {
                                     ui.ctx().copy_text(term.screen_text());
                                 }
-                                if term.has_password() && ui.button(tr("Passwort senden")).clicked() {
+                                if term.has_password() && ui.button(tr("Send password")).clicked() {
                                     term.send_password();
                                     term.focus_next = true;
                                 }
-                                if ui.button(tr("Strg+C")).on_hover_text(tr("Unterbrechen")).clicked() {
+                                if ui.button(tr("Ctrl+C")).on_hover_text(tr("Interrupt")).clicked() {
                                     term.send(&[3]);
                                     term.focus_next = true;
                                 }
@@ -2732,7 +2732,7 @@ impl AdminApp {
                             ui.label(RichText::new(msg).color(WARN));
                         } else if term.chain_left() > 0 {
                             ui.label(
-                                RichText::new(tf("Jump-Host: noch {0} Sprung/Sprünge – ssh wird am Prompt automatisch eingetippt …", &[&(term.chain_left())]))
+                                RichText::new(tf("Jump host: {0} hop(s) left – ssh is typed at the prompt automatically …", &[&(term.chain_left())]))
                                     .color(ACCENT),
                             );
                         }
@@ -2787,7 +2787,7 @@ impl AdminApp {
                             Err(err) => t.error = Some(err),
                         },
                         Ok(Launch::Done(m)) => t.error = Some(m),
-                        Ok(_) => t.error = Some(tr("Verbindungsart geändert – bitte Tab schließen und neu öffnen.").into()),
+                        Ok(_) => t.error = Some(tr("Connection type changed – please close the tab and open it again.").into()),
                         Err(err) => t.error = Some(err),
                     }
                     t.entry = e;
@@ -2809,7 +2809,7 @@ impl AdminApp {
                             p.detached = false;
                         }
                         Ok(Launch::Done(m)) => p.exited = Some(m),
-                        Ok(_) => p.exited = Some(tr("Verbindungsart geändert – bitte Tab schließen und neu öffnen.").into()),
+                        Ok(_) => p.exited = Some(tr("Connection type changed – please close the tab and open it again.").into()),
                         Err(err) => p.exited = Some(err),
                     }
                     p.entry = e;
@@ -2854,11 +2854,11 @@ impl AdminApp {
         for a in netscan_acts {
             match a {
                 NetScanAct::Add(h, proto) => {
-                    let folder = match self.store.data.entries.iter().find(|e| e.folder && e.name == tr("Netzwerk-Scan")).map(|e| e.id) {
+                    let folder = match self.store.data.entries.iter().find(|e| e.folder && e.name == tr("Network scan")).map(|e| e.id) {
                         Some(f) => f,
                         None => {
                             let fid = self.store.next_id();
-                            self.store.data.entries.push(Entry { id: fid, folder: true, name: tr("Netzwerk-Scan").into(), inherit_credentials: false, ..Default::default() });
+                            self.store.data.entries.push(Entry { id: fid, folder: true, name: tr("Network scan").into(), inherit_credentials: false, ..Default::default() });
                             fid
                         }
                     };
@@ -2882,7 +2882,7 @@ impl AdminApp {
                     self.expand(Some(folder));
                     self.selected = Some(nid);
                     self.mark_dirty(now);
-                    self.note(tf("Verbindung angelegt: {0}", &[&h.ip]), false, now);
+                    self.note(tf("Connection created: {0}", &[&h.ip]), false, now);
                 }
                 NetScanAct::Connect(h, proto) => {
                     let e = Entry { name: h.ip.to_string(), protocol: proto, host: h.ip.to_string(), port: proto.default_port(), inherit_credentials: false, ..Default::default() };
@@ -2900,14 +2900,14 @@ impl AdminApp {
                 StartAct::Dns => self.open_dns(String::new()),
                 StartAct::Wol => self.open_wol(String::new()),
                 StartAct::Shell => {
-                    let e = Entry { name: tr("Lokale Shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
+                    let e = Entry { name: tr("Local shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
                     self.open_session(e, Creds::default(), Vec::new(), &ctx, now);
                 }
                 StartAct::Connect(id) => self.connect_id(id, &ctx, now),
                 StartAct::Status => self.check_status(&ctx),
                 StartAct::Tools => launch::open_folder(&programs::ensure_tools_dir()),
                 StartAct::NetScan => self.open_netscan(String::new()),
-                StartAct::Subnet => self.add_tab(tr("Subnetz-Rechner").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab::default())),
+                StartAct::Subnet => self.add_tab(tr("Subnet calculator").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab::default())),
                 StartAct::Cert => self.open_cert(String::new()),
                 StartAct::Tunnels => self.open_tunnels(),
                 StartAct::Files => {
@@ -2920,7 +2920,7 @@ impl AdminApp {
                         Some(id) => self.apply(Act::Files(id), &ctx, now),
                         None => {
                             self.quick_protocol = Protocol::Sftp;
-                            self.note(tr("Links einen SSH-/SFTP-/FTP-Server wählen oder oben in der Schnellverbindung SFTP/FTP + Host eingeben."), false, now);
+                            self.note(tr("Pick an SSH/SFTP/FTP server on the left or enter SFTP/FTP + host in quick connect above."), false, now);
                         }
                     }
                 }
@@ -2935,29 +2935,29 @@ impl AdminApp {
                 logo(ui, 60.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new(tr("AdminCraft")).size(28.0).strong());
-                    ui.label(tr("Alle Server, Switches und PCs an einem Ort – RDP, SSH, VNC, Telnet, PowerShell und Web."));
+                    ui.label(tr("All servers, switches and PCs in one place – RDP, SSH, VNC, Telnet, PowerShell and web."));
                 });
             });
             ui.add_space(14.0);
 
-            ui.label(RichText::new(tr("Schnellstart")).strong().size(15.0));
+            ui.label(RichText::new(tr("Quick start")).strong().size(15.0));
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 let cards: [(&str, &str, StartAct, Color32); 15] = [
-                    ("Neue Verbindung", "Server oder Gerät anlegen", StartAct::NewConn, ACCENT),
-                    ("Dateien übertragen", "SFTP, SCP, FTP – hoch & runter", StartAct::Files, Protocol::Sftp.color()),
-                    ("Ping", "Ist der Host erreichbar?", StartAct::Ping, Color32::from_rgb(0, 150, 136)),
-                    ("Port-Scan", "Welche Dienste laufen?", StartAct::Scan, Color32::from_rgb(255, 152, 0)),
-                    ("DNS-Abfrage", "Name zu IP-Adresse", StartAct::Dns, Color32::from_rgb(156, 39, 176)),
-                    ("Wake-on-LAN", "PC per Netzwerk einschalten", StartAct::Wol, Color32::from_rgb(255, 193, 7)),
-                    ("Lokale Shell", "Terminal auf diesem PC", StartAct::Shell, Color32::from_rgb(121, 85, 72)),
-                    ("Status prüfen", "Alle Hosts antesten", StartAct::Status, OK_GREEN),
-                    ("Netzwerk-Scan", "Geräte im IP-Bereich finden", StartAct::NetScan, Color32::from_rgb(3, 169, 244)),
-                    ("Subnetz-Rechner", "Netz, Maske, Broadcast", StartAct::Subnet, Color32::from_rgb(0, 137, 123)),
-                    ("Zertifikat prüfen", "Wie lange gilt HTTPS noch?", StartAct::Cert, Color32::from_rgb(139, 195, 74)),
-                    ("SSH-Tunnel", "Portweiterleitungen", StartAct::Tunnels, Color32::from_rgb(121, 134, 203)),
-                    ("Programme-Ordner", "PuTTY, VNC … hier ablegen", StartAct::Tools, Color32::from_rgb(120, 130, 145)),
-                    ("Einstellungen", "Pfade, SSH, KeePass", StartAct::Settings, Color32::from_rgb(96, 125, 139)),
+                    ("New connection", "Add a server or device", StartAct::NewConn, ACCENT),
+                    ("Transfer files", "SFTP, SCP, FTP – up & down", StartAct::Files, Protocol::Sftp.color()),
+                    ("Ping", "Is the host reachable?", StartAct::Ping, Color32::from_rgb(0, 150, 136)),
+                    ("Port scan", "Which services are running?", StartAct::Scan, Color32::from_rgb(255, 152, 0)),
+                    ("DNS lookup", "Name to IP address", StartAct::Dns, Color32::from_rgb(156, 39, 176)),
+                    ("Wake-on-LAN", "Switch a PC on over the network", StartAct::Wol, Color32::from_rgb(255, 193, 7)),
+                    ("Local shell", "Terminal on this PC", StartAct::Shell, Color32::from_rgb(121, 85, 72)),
+                    ("Check status", "Test all hosts", StartAct::Status, OK_GREEN),
+                    ("Network scan", "Find devices in an IP range", StartAct::NetScan, Color32::from_rgb(3, 169, 244)),
+                    ("Subnet calculator", "Network, mask, broadcast", StartAct::Subnet, Color32::from_rgb(0, 137, 123)),
+                    ("Check certificate", "How long is HTTPS still valid?", StartAct::Cert, Color32::from_rgb(139, 195, 74)),
+                    ("SSH tunnels", "Port forwarding", StartAct::Tunnels, Color32::from_rgb(121, 134, 203)),
+                    ("Programs folder", "Put PuTTY, VNC … here", StartAct::Tools, Color32::from_rgb(120, 130, 145)),
+                    ("Settings", "Paths, SSH, KeePass", StartAct::Settings, Color32::from_rgb(96, 125, 139)),
                     ("Import", "mRemoteNG · ~/.ssh/config", StartAct::Import, Color32::from_rgb(96, 125, 139)),
                 ];
                 for (title, sub, act, color) in cards {
@@ -2970,7 +2970,7 @@ impl AdminApp {
             ui.add_space(16.0);
             ui.columns(2, |cols| {
                 let ui = &mut cols[0];
-                ui.label(RichText::new(tr("Verbindungen nach Protokoll")).strong().size(15.0));
+                ui.label(RichText::new(tr("Connections by protocol")).strong().size(15.0));
                 ui.add_space(4.0);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -2990,15 +2990,15 @@ impl AdminApp {
                         });
                     }
                     if !any {
-                        ui.weak(tr("Noch keine Verbindungen."));
+                        ui.weak(tr("No connections yet."));
                     }
                 });
                 ui.add_space(10.0);
-                ui.label(RichText::new(tr("Zuletzt")).strong().size(15.0));
+                ui.label(RichText::new(tr("Recent")).strong().size(15.0));
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     if self.log.is_empty() {
-                        ui.weak(tr("Noch nichts geöffnet. Doppelklick auf eine Verbindung links."));
+                        ui.weak(tr("Nothing opened yet. Double-click a connection on the left."));
                     }
                     for line in self.log.iter().rev().take(8) {
                         ui.label(line);
@@ -3006,7 +3006,7 @@ impl AdminApp {
                 });
 
                 let ui = &mut cols[1];
-                ui.label(RichText::new(tr("Systemcheck – Programme auf diesem Computer")).strong().size(15.0));
+                ui.label(RichText::new(tr("System check – programs on this computer")).strong().size(15.0));
                 ui.add_space(4.0);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -3018,25 +3018,25 @@ impl AdminApp {
                             if *ok {
                                 ui.label(RichText::new(prog).weak());
                             } else {
-                                ui.label(RichText::new(tr("fehlt")).color(WARN)).on_hover_text(tf("Installieren oder in den Programme-Ordner legen: {0}", &[&prog]));
+                                ui.label(RichText::new(tr("missing")).color(WARN)).on_hover_text(tf("Install or put into the programs folder: {0}", &[&prog]));
                             }
                             ui.end_row();
                         }
                     });
-                    if ui.link(tr("Programme-Ordner öffnen")).clicked() {
+                    if ui.link(tr("Open programs folder")).clicked() {
                         acts.push(StartAct::Tools);
                     }
                 });
                 ui.add_space(10.0);
-                ui.label(RichText::new(tr("Tipps")).strong().size(15.0));
+                ui.label(RichText::new(tr("Tips")).strong().size(15.0));
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(tr("• Doppelklick öffnet eine Verbindung, Rechtsklick zeigt alle Aktionen."));
-                    ui.label(tr("• Verbindungen und Ordner per Ziehen verschieben: oben/unten = Reihenfolge, Mitte eines Ordners = hinein."));
-                    ui.label(tr("• SSH, Telnet, PowerShell im Terminal-Tab; RDP und PuTTY als Fenster im Tab."));
-                    ui.label(tr("• Jump-Host: am Server einen anderen SSH-Server als Sprungserver wählen."));
-                    ui.label(tr("• Passwörter: in AdminCraft, aus KeePass oder jedes Mal fragen."));
-                    ui.label(tr("• Ordner „AdminCraftData“ und „AdminCraftTools“ liegen neben dem Programm – mitkopieren."));
+                    ui.label(tr("• Double-click opens a connection, right-click shows all actions."));
+                    ui.label(tr("• Drag connections and folders: top/bottom = order, middle of a folder = into it."));
+                    ui.label(tr("• SSH, Telnet, PowerShell in the terminal tab; RDP and PuTTY as a window in the tab."));
+                    ui.label(tr("• Jump host: choose another SSH server as jump server on a connection."));
+                    ui.label(tr("• Passwords: in AdminCraft, from KeePass or asked every time."));
+                    ui.label(tr("• The folders \"AdminCraftData\" and \"AdminCraftTools\" sit next to the program – copy them along."));
                 });
             });
         });
@@ -3050,20 +3050,20 @@ impl AdminApp {
             let is_folder = self.store.get(id).map(|e| e.folder).unwrap_or(false);
             let resp = egui::Modal::new(egui::Id::new(tr("confirm_delete"))).show(ctx, |ui| {
                 ui.set_width(360.0);
-                ui.heading(tr("Wirklich löschen?"));
+                ui.heading(tr("Really delete?"));
                 ui.add_space(6.0);
                 ui.label(if is_folder {
-                    tf("Der Ordner „{0}“ und alles darin wird gelöscht.", &[&name])
+                    tf("The folder \"{0}\" and everything in it will be deleted.", &[&name])
                 } else {
-                    tf("Die Verbindung „{0}“ wird gelöscht.", &[&name])
+                    tf("The connection \"{0}\" will be deleted.", &[&name])
                 });
                 ui.add_space(10.0);
                 let mut result = None;
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(RichText::new(tr("Löschen")).color(Color32::WHITE)).fill(BAD_RED)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(BAD_RED)).clicked() {
                         result = Some(true);
                     }
-                    if ui.button(tr("Abbrechen")).clicked() {
+                    if ui.button(tr("Cancel")).clicked() {
                         result = Some(false);
                     }
                 });
@@ -3097,17 +3097,17 @@ impl AdminApp {
             let mut unlock = false;
             egui::Modal::new(egui::Id::new(tr("kp_unlock"))).show(ctx, |ui| {
                 ui.set_width(400.0);
-                ui.heading(tr("KeePass entsperren"));
+                ui.heading(tr("Unlock KeePass"));
                 ui.add_space(4.0);
                 if self.store.data.settings.keepass_path.trim().is_empty() {
-                    ui.label(tr("Noch keine KeePass-Datei eingestellt. Pfad zur .kdbx-Datei:"));
+                    ui.label(tr("No KeePass file set yet. Path to the .kdbx file:"));
                 } else {
-                    ui.label(tr("Datenbank:"));
+                    ui.label(tr("Database:"));
                 }
                 ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Tresor\Passwoerter.kdbx").desired_width(f32::INFINITY));
-                ui.label(tr("Schlüsseldatei (optional):"));
+                ui.label(tr("Key file (optional):"));
                 ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_keyfile).desired_width(f32::INFINITY));
-                ui.label(tr("Masterpasswort der KeePass-Datenbank:"));
+                ui.label(tr("Master password of the KeePass database:"));
                 let r = ui.add(egui::TextEdit::singleline(&mut self.kp_pw).password(true).desired_width(f32::INFINITY));
                 if !r.has_focus() && self.kp_pw.is_empty() {
                     r.request_focus();
@@ -3116,12 +3116,12 @@ impl AdminApp {
                 if let Some((ok, m)) = &self.kp_msg {
                     ui.label(RichText::new(m).color(if *ok { OK_GREEN } else { BAD_RED }));
                 }
-                ui.weak(tr("AdminCraft liest die Datenbank nur. Das Masterpasswort wird nicht gespeichert."));
+                ui.weak(tr("AdminCraft only reads the database. The master password is not stored."));
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(RichText::new(tr("Entsperren")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
+                    if ui.add(egui::Button::new(RichText::new(tr("Unlock")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
                         unlock = true;
                     }
-                    if ui.button(tr("Abbrechen")).clicked() {
+                    if ui.button(tr("Cancel")).clicked() {
                         close = true;
                     }
                 });
@@ -3133,7 +3133,7 @@ impl AdminApp {
                     Ok(n) => {
                         self.kp_dialog = false;
                         self.mark_dirty(now);
-                        self.note(tf("KeePass entsperrt: {0} Einträge.", &[&n]), false, now);
+                        self.note(tf("KeePass unlocked: {0} entries.", &[&n]), false, now);
                         self.run_kp_pending(ctx, now);
                     }
                     Err(e) => self.kp_msg = Some((false, e)),
@@ -3150,17 +3150,17 @@ impl AdminApp {
             if let Some(a) = &mut self.ask {
                 egui::Modal::new(egui::Id::new(tr("ask_pw"))).show(ctx, |ui| {
                     ui.set_width(380.0);
-                    ui.heading(tr("Anmeldung"));
-                    ui.label(tf("Passwort für „{0}“", &[&a.name]));
+                    ui.heading(tr("Login"));
+                    ui.label(tf("Password for \"{0}\"", &[&a.name]));
                     egui::Grid::new(tr("ask_grid")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                        ui.label(tr("Benutzer"));
+                        ui.label(tr("User"));
                         if a.key == 0 {
                             ui.add(egui::TextEdit::singleline(&mut a.user).desired_width(240.0));
                         } else {
-                            ui.label(if a.user.is_empty() { tr("(keiner)").to_string() } else { a.user.clone() });
+                            ui.label(if a.user.is_empty() { tr("(none)").to_string() } else { a.user.clone() });
                         }
                         ui.end_row();
-                        ui.label(tr("Passwort"));
+                        ui.label(tr("Password"));
                         let r = ui.add(egui::TextEdit::singleline(&mut a.pw).password(true).desired_width(240.0));
                         if a.focus {
                             r.request_focus();
@@ -3168,13 +3168,13 @@ impl AdminApp {
                         }
                         ui.end_row();
                     });
-                    ui.weak(tr("Leer lassen bei Anmeldung per SSH-Schlüssel. Wird bis zum Beenden gemerkt."));
+                    ui.weak(tr("Leave empty for SSH key login. Remembered until AdminCraft closes."));
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new(RichText::new(tr("Verbinden")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
+                        if ui.add(egui::Button::new(RichText::new(tr("Connect")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
                             result = Some(true);
                         }
-                        if ui.button(tr("Abbrechen")).clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             result = Some(false);
                         }
                     });
@@ -3202,18 +3202,18 @@ impl AdminApp {
         self.ximport_dialog(ctx, now);
         if self.show_ssh_import {
             let mut open = true;
-            egui::Window::new(tr("OpenSSH-Konfiguration importieren")).open(&mut open).default_width(480.0).show(ctx, |ui| {
-                ui.label(tr("Übernimmt die Hosts aus der OpenSSH-Konfiguration (Host, HostName, User, Port, IdentityFile, ProxyJump)."));
+            egui::Window::new(tr("Import OpenSSH configuration")).open(&mut open).default_width(480.0).show(ctx, |ui| {
+                ui.label(tr("Takes the hosts from the OpenSSH configuration (Host, HostName, User, Port, IdentityFile, ProxyJump)."));
                 ui.add(egui::TextEdit::singleline(&mut self.ssh_import_path).desired_width(f32::INFINITY));
-                if ui.button(tr("Importieren")).clicked() {
+                if ui.button(tr("Import")).clicked() {
                     let path = self.ssh_import_path.trim().trim_matches('"').to_string();
                     self.ssh_import_msg = Some(match std::fs::read_to_string(&path) {
-                        Err(e) => (false, tf("Datei nicht lesbar: {0}", &[&e])),
+                        Err(e) => (false, tf("File not readable: {0}", &[&e])),
                         Ok(text) => {
                             let folder_id = self.store.next_id();
                             let entries = crate::import::import_ssh_config(&text, folder_id + 1, Some(folder_id));
                             if entries.is_empty() {
-                                (false, tr("Keine Hosts gefunden.").into())
+                                (false, tr("No hosts found.").into())
                             } else {
                                 let n = entries.len();
                                 let max = entries.iter().map(|e| e.id).max().unwrap_or(folder_id);
@@ -3228,7 +3228,7 @@ impl AdminApp {
                                 self.store.data.next_id = max + 1;
                                 self.selected = Some(folder_id);
                                 self.mark_dirty(now);
-                                (true, tf("{0} Hosts importiert.", &[&n]))
+                                (true, tf("{0} hosts imported.", &[&n]))
                             }
                         }
                     });
@@ -3242,16 +3242,16 @@ impl AdminApp {
 
         if self.show_import {
             let mut open = true;
-            egui::Window::new(tr("mRemoteNG-Datei importieren")).open(&mut open).default_width(480.0).show(ctx, |ui| {
-                ui.label(tr("Pfad zur confCons.xml (in mRemoteNG: Datei » Exportieren, oder %APPDATA%\\mRemoteNG\\confCons.xml):"));
+            egui::Window::new(tr("Import mRemoteNG file")).open(&mut open).default_width(480.0).show(ctx, |ui| {
+                ui.label(tr("Path to confCons.xml (in mRemoteNG: File » Export, or %APPDATA%\\mRemoteNG\\confCons.xml):"));
                 ui.add(egui::TextEdit::singleline(&mut self.import_path).desired_width(f32::INFINITY).hint_text(r"C:\Users\...\confCons.xml"));
-                ui.label(tr("Passwort der Datei (leer lassen, wenn in mRemoteNG keins gesetzt war):"));
+                ui.label(tr("Password of the file (leave empty if none was set in mRemoteNG):"));
                 ui.add(egui::TextEdit::singleline(&mut self.import_pw).password(true).desired_width(f32::INFINITY));
                 ui.add_space(6.0);
-                if ui.button(tr("Importieren")).clicked() {
+                if ui.button(tr("Import")).clicked() {
                     let path = self.import_path.trim().trim_matches('"').to_string();
                     self.import_msg = Some(match std::fs::read_to_string(&path) {
-                        Err(e) => (false, tf("Datei nicht lesbar: {0}", &[&e])),
+                        Err(e) => (false, tf("File not readable: {0}", &[&e])),
                         Ok(xml) => {
                             let folder_id = self.store.next_id();
                             let first = folder_id + 1;
@@ -3271,12 +3271,12 @@ impl AdminApp {
                                     self.store.data.next_id = max + 1;
                                     self.selected = Some(folder_id);
                                     self.mark_dirty(now);
-                                    let mut msg = tf("{0} Verbindungen importiert.", &[&n]);
+                                    let mut msg = tf("{0} connections imported.", &[&n]);
                                     if imp.passwords_ok > 0 {
-                                        msg.push_str(&tf(" {0} Passwörter übernommen.", &[&imp.passwords_ok]));
+                                        msg.push_str(&tf(" {0} passwords taken over.", &[&imp.passwords_ok]));
                                     }
                                     if imp.passwords_failed > 0 {
-                                        msg.push_str(&tf(" {0} Passwörter konnten nicht entschlüsselt werden.", &[&imp.passwords_failed]));
+                                        msg.push_str(&tf(" {0} passwords could not be decrypted.", &[&imp.passwords_failed]));
                                     }
                                     (true, msg)
                                 }
@@ -3293,16 +3293,16 @@ impl AdminApp {
 
         if self.show_about {
             let mut open = true;
-            egui::Window::new(tr("Über AdminCraft")).open(&mut open).resizable(false).show(ctx, |ui| {
+            egui::Window::new(tr("About AdminCraft")).open(&mut open).resizable(false).show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     logo(ui, 36.0);
                     ui.label(RichText::new(format!("AdminCraft v{}", env!("CARGO_PKG_VERSION"))).size(20.0).strong());
                 });
-                ui.label(tr("Portabler Verbindungs-Manager für Windows, Linux und macOS."));
-                ui.label(tr("SSH · SFTP · Telnet · PowerShell im Tab, RDP · VNC · Web über die Programme des Systems."));
-                ui.label(tr("Werkzeuge: Ping, Traceroute, Port-Scan, DNS, Wake-on-LAN, Erreichbarkeit."));
+                ui.label(tr("Portable connection manager for Windows, Linux and macOS."));
+                ui.label(tr("SSH · SFTP · Telnet · PowerShell in tabs, RDP · VNC · web through the system's programs."));
+                ui.label(tr("Tools: ping, traceroute, port scan, DNS, Wake-on-LAN, reachability."));
                 ui.add_space(6.0);
-                ui.weak(tf("Daten: {0}", &[&(self.store.path.display())]));
+                ui.weak(tf("Data: {0}", &[&(self.store.path.display())]));
             });
             self.show_about = open;
         }
@@ -3312,18 +3312,18 @@ impl AdminApp {
                 ui.set_width(340.0);
                 ui.horizontal(|ui| {
                     logo(ui, 28.0);
-                    ui.heading(tr("AdminCraft entsperren"));
+                    ui.heading(tr("Unlock AdminCraft"));
                 });
                 ui.add_space(6.0);
-                ui.label(tr("Die Verbindungen sind mit einem Masterpasswort geschützt."));
-                let r = ui.add(egui::TextEdit::singleline(&mut self.unlock_pw).password(true).hint_text(tr("Masterpasswort")).desired_width(f32::INFINITY));
+                ui.label(tr("The connections are protected by a master password."));
+                let r = ui.add(egui::TextEdit::singleline(&mut self.unlock_pw).password(true).hint_text(tr("Master password")).desired_width(f32::INFINITY));
                 r.request_focus();
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if self.unlock_failed {
-                    ui.label(RichText::new(tr("Falsches Passwort.")).color(BAD_RED));
+                    ui.label(RichText::new(tr("Wrong password.")).color(BAD_RED));
                 }
                 ui.horizontal(|ui| {
-                    if ui.button(tr("Entsperren")).clicked() || enter {
+                    if ui.button(tr("Unlock")).clicked() || enter {
                         let pw = std::mem::take(&mut self.unlock_pw);
                         self.unlock_failed = !self.store.unlock(&pw);
                         if !self.unlock_failed {
@@ -3332,7 +3332,7 @@ impl AdminApp {
                             self.applied_dark = None;
                         }
                     }
-                    if ui.button(tr("Beenden")).clicked() {
+                    if ui.button(tr("Quit")).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
@@ -3342,22 +3342,22 @@ impl AdminApp {
 
     fn settings_ui(&mut self, ui: &mut egui::Ui, now: f64) {
         let mut changed = false;
-        section(ui, tr("Sprache"));
+        section(ui, tr("Language"));
         let langs = crate::i18n::available();
         let sys = crate::i18n::system_code();
         let shown = if self.store.data.settings.language.is_empty() {
-            tf("Systemsprache ({0})", &[&crate::i18n::current()])
+            tf("System language ({0})", &[&crate::i18n::current()])
         } else {
             langs.iter().find(|l| l.code == self.store.data.settings.language).map(|l| l.name.clone()).unwrap_or_else(|| self.store.data.settings.language.clone())
         };
         ui.horizontal(|ui| {
             let mut pick: Option<String> = None;
             egui::ComboBox::from_id_salt("lang").selected_text(shown).width(220.0).show_ui(ui, |ui| {
-                if ui.selectable_label(self.store.data.settings.language.is_empty(), tf("Systemsprache ({0})", &[&sys])).clicked() {
+                if ui.selectable_label(self.store.data.settings.language.is_empty(), tf("System language ({0})", &[&sys])).clicked() {
                     pick = Some(String::new());
                 }
                 for l in &langs {
-                    if ui.selectable_label(self.store.data.settings.language == l.code, format!("{} ({})", l.name, l.code)).on_hover_text(&l.source).clicked() {
+                    if ui.selectable_label(self.store.data.settings.language == l.code, format!("{} ({})", l.name, l.code)).on_hover_text(if l.source == "built in" { tr("built in") } else { l.source.as_str() }).clicked() {
                         pick = Some(l.code.clone());
                     }
                 }
@@ -3367,27 +3367,27 @@ impl AdminApp {
                 crate::i18n::set_language(&code);
                 changed = true;
             }
-            if ui.button(tr("Sprachordner öffnen")).on_hover_text(tr("Eigene Sprachdateien (.lang) hier ablegen")).clicked() {
+            if ui.button(tr("Open language folder")).on_hover_text(tr("Put your own language files (.lang) here")).clicked() {
                 launch::open_folder(&crate::i18n::ensure_lang_dir());
             }
         });
-        ui.weak(tr("Weitere Sprachen: Datei en.lang.vorlage im Sprachordner kopieren und übersetzen."));
+        ui.weak(tr("More languages: copy de.lang.example in the language folder to xx.lang and translate the right side."));
 
-        section(ui, tr("Darstellung"));
+        section(ui, tr("Appearance"));
         ui.horizontal(|ui| {
-            changed |= ui.radio_value(&mut self.store.data.settings.dark, true, tr("Dunkel")).changed();
-            changed |= ui.radio_value(&mut self.store.data.settings.dark, false, tr("Hell")).changed();
+            changed |= ui.radio_value(&mut self.store.data.settings.dark, true, tr("Dark")).changed();
+            changed |= ui.radio_value(&mut self.store.data.settings.dark, false, tr("Light")).changed();
         });
         changed |= ui
-            .add(egui::Slider::new(&mut self.store.data.settings.terminal_font_size, 10.0..=24.0).text(tr("Terminal-Schriftgröße")))
+            .add(egui::Slider::new(&mut self.store.data.settings.terminal_font_size, 10.0..=24.0).text(tr("Terminal font size")))
             .changed();
         changed |= ui
-            .checkbox(&mut self.store.data.settings.auto_password, tr("Gespeichertes Passwort im Terminal automatisch eingeben (SSH/Telnet)"))
+            .checkbox(&mut self.store.data.settings.auto_password, tr("Type the stored password in the terminal automatically (SSH/Telnet)"))
             .changed();
 
-        section(ui, tr("SSH, Remotedesktop und Dateien"));
+        section(ui, tr("SSH, remote desktop and files"));
         egui::Grid::new(tr("ssh_defaults")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-            ui.label(tr("SSH öffnen mit"));
+            ui.label(tr("Open SSH with"));
             let cur = self.store.data.settings.default_ssh_client;
             egui::ComboBox::from_id_salt("def_client").selected_text(cur.label()).width(300.0).show_ui(ui, |ui| {
                 for c in [SshClient::Builtin, SshClient::Putty, SshClient::External] {
@@ -3395,10 +3395,10 @@ impl AdminApp {
                 }
             });
             ui.end_row();
-            ui.label(tr("Dateiübertragung mit"));
+            ui.label(tr("File transfer with"));
             let t = self.store.data.settings.transfer_tool;
             let tl = |t: TransferTool| match t {
-                TransferTool::Auto => tr("Automatisch (OpenSSH, sonst PuTTY)"),
+                TransferTool::Auto => tr("Automatic (OpenSSH, else PuTTY)"),
                 TransferTool::OpenSsh => "OpenSSH (sftp / scp)",
                 TransferTool::Putty => "PuTTY (psftp / pscp)",
             };
@@ -3412,16 +3412,16 @@ impl AdminApp {
         changed |= ui
             .add_enabled(
                 embed::SUPPORTED,
-                egui::Checkbox::new(&mut self.store.data.settings.embed_windows, tr("RDP-, PuTTY- und VNC-Fenster in den Tab einbetten")),
+                egui::Checkbox::new(&mut self.store.data.settings.embed_windows, tr("Embed RDP, PuTTY and VNC windows in the tab")),
             )
-            .on_disabled_hover_text(tr("Nur unter Windows möglich – auf Linux/macOS laufen sie in eigenen Fenstern, der Tab zeigt den Status."))
+            .on_disabled_hover_text(tr("Only possible on Windows – on Linux/macOS they run in their own windows, the tab shows the status."))
             .changed();
-        changed |= ui.checkbox(&mut self.store.data.settings.show_hidden, tr("Versteckte Dateien (.name) bei der Dateiübertragung zeigen")).changed();
+        changed |= ui.checkbox(&mut self.store.data.settings.show_hidden, tr("Show hidden files (.name) in the file transfer")).changed();
 
-        section(ui, tr("Programme"));
-        ui.label(tr("AdminCraft sucht jedes Programm hier: 1. eigener Pfad unten, 2. Programme-Ordner neben AdminCraft, 3. System."));
+        section(ui, tr("Programs"));
+        ui.label(tr("AdminCraft looks for each program here: 1. own path below, 2. programs folder next to AdminCraft, 3. system."));
         ui.horizontal(|ui| {
-            if ui.button(tr("Programme-Ordner öffnen")).clicked() {
+            if ui.button(tr("Open programs folder")).clicked() {
                 launch::open_folder(&programs::ensure_tools_dir());
             }
             ui.weak(programs::tools_dir().display().to_string());
@@ -3429,10 +3429,10 @@ impl AdminApp {
         ui.add_space(4.0);
         let mut recheck = false;
         egui::Grid::new(tr("progs")).num_columns(4).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-            ui.label(RichText::new(tr("Programm")).strong());
-            ui.label(RichText::new(tr("Wofür")).strong());
-            ui.label(RichText::new(tr("Gefunden")).strong());
-            ui.label(RichText::new(tr("Eigener Pfad (optional)")).strong());
+            ui.label(RichText::new(tr("Program")).strong());
+            ui.label(RichText::new(tr("For")).strong());
+            ui.label(RichText::new(tr("Found")).strong());
+            ui.label(RichText::new(tr("Own path (optional)")).strong());
             ui.end_row();
             for p in programs::PROGRAMS {
                 ui.label(tr(p.label));
@@ -3442,7 +3442,7 @@ impl AdminApp {
                         ui.label(RichText::new(format!("OK · {}", src.label())).color(OK_GREEN)).on_hover_text(path.display().to_string());
                     }
                     None => {
-                        ui.label(RichText::new(tr("fehlt")).color(WARN));
+                        ui.label(RichText::new(tr("missing")).color(WARN));
                     }
                 }
                 let entry = self.store.data.settings.programs.entry(p.key.to_string()).or_default();
@@ -3457,22 +3457,22 @@ impl AdminApp {
             }
         });
         self.store.data.settings.programs.retain(|_, v| !v.trim().is_empty());
-        if ui.button(tr("Neu suchen")).on_hover_text(tr("Nachdem Programme in den Ordner gelegt wurden")).clicked() {
+        if ui.button(tr("Search again")).on_hover_text(tr("After programs were put into the folder")).clicked() {
             recheck = true;
         }
         if recheck {
             self.refresh_programs();
         }
 
-        section(ui, tr("Passwort-Tresor: KeePass"));
-        ui.label(tr("Verbindungen können ihr Passwort aus einer KeePass-/KeePassXC-Datenbank (.kdbx) holen: am Server „Passwort aus » KeePass“ wählen."));
+        section(ui, tr("Password vault: KeePass"));
+        ui.label(tr("Connections can take their password from a KeePass/KeePassXC database (.kdbx): choose \"Password from » KeePass\" on a connection."));
         egui::Grid::new(tr("kp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-            ui.label(tr("Datenbank (.kdbx)"));
+            ui.label(tr("Database (.kdbx)"));
             changed |= ui
                 .add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Tresor\Passwoerter.kdbx").desired_width(380.0))
                 .changed();
             ui.end_row();
-            ui.label(tr("Schlüsseldatei"));
+            ui.label(tr("Key file"));
             changed |= ui
                 .add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_keyfile).hint_text(tr("optional")).desired_width(380.0))
                 .changed();
@@ -3480,37 +3480,37 @@ impl AdminApp {
         });
         ui.horizontal(|ui| {
             if self.keepass.unlocked {
-                ui.label(RichText::new(tf("Entsperrt – {0} Einträge", &[&(self.keepass.entries.len())])).color(OK_GREEN));
-                if ui.button(tr("Sperren")).clicked() {
+                ui.label(RichText::new(tf("Unlocked – {0} entries", &[&(self.keepass.entries.len())])).color(OK_GREEN));
+                if ui.button(tr("Lock")).clicked() {
                     self.keepass.lock();
                 }
             } else {
-                ui.label(RichText::new(tr("Gesperrt")).color(WARN));
-                if ui.button(tr("Entsperren …")).clicked() {
+                ui.label(RichText::new(tr("Locked")).color(WARN));
+                if ui.button(tr("Unlock …")).clicked() {
                     self.kp_dialog = true;
                     self.kp_msg = None;
                 }
             }
         });
 
-        section(ui, tr("Sitzungen und Überwachung"));
-        changed |= ui.checkbox(&mut self.store.data.settings.restore_session, tr("Beim Start die zuletzt offenen Verbindungen wieder öffnen")).changed();
+        section(ui, tr("Sessions and monitoring"));
+        changed |= ui.checkbox(&mut self.store.data.settings.restore_session, tr("Reopen the last open connections at start")).changed();
         ui.horizontal(|ui| {
-            changed |= ui.checkbox(&mut self.store.data.settings.session_log, tr("Terminal-Sitzungen mitschreiben (Textdateien)")).changed();
-            if ui.small_button(tr("Ordner öffnen")).clicked() {
+            changed |= ui.checkbox(&mut self.store.data.settings.session_log, tr("Record terminal sessions (text files)")).changed();
+            if ui.small_button(tr("Open folder")).clicked() {
                 let d = crate::model::data_dir(true).join("logs");
                 let _ = std::fs::create_dir_all(&d);
                 launch::open_folder(&d);
             }
         });
         ui.horizontal(|ui| {
-            ui.label(tr("Alle Hosts prüfen alle"));
+            ui.label(tr("Check all hosts every"));
             changed |= ui.add(egui::DragValue::new(&mut self.store.data.settings.monitor_minutes).range(0..=1440).suffix(" min")).changed();
-            ui.weak(tr("(0 = aus; meldet, wenn ein Server ausfällt oder wieder da ist)"));
+            ui.weak(tr("(0 = off; reports when a server goes down or comes back)"));
         });
 
-        section(ui, tr("Gespeicherte Befehle"));
-        ui.weak(tr("Im Terminal-Tab unter „Befehle“. Platzhalter: {host} {user} {name}"));
+        section(ui, tr("Saved commands"));
+        ui.weak(tr("In the terminal tab under \"Commands\". Placeholders: {host} {user} {name}"));
         let mut del = None;
         egui::Grid::new("snippets").num_columns(3).spacing([8.0, 4.0]).show(ui, |ui| {
             for (i, sn) in self.store.data.settings.snippets.iter_mut().enumerate() {
@@ -3526,39 +3526,39 @@ impl AdminApp {
             self.store.data.settings.snippets.remove(i);
             changed = true;
         }
-        if ui.button(tr("+ Befehl")).clicked() {
-            self.store.data.settings.snippets.push(crate::model::Snippet { name: tr("Neuer Befehl").into(), command: String::new() });
+        if ui.button(tr("+ Command")).clicked() {
+            self.store.data.settings.snippets.push(crate::model::Snippet { name: tr("New command").into(), command: String::new() });
             changed = true;
         }
 
-        section(ui, tr("Speicherort der Verbindungsliste"));
-        ui.label(tr("Zentral ablegen, damit das Team (oder du an mehreren PCs) dieselbe Liste nutzt. Änderungen anderer werden automatisch neu geladen."));
+        section(ui, tr("Where the connection list is stored"));
+        ui.label(tr("Store it centrally so the team (or you on several PCs) uses the same list. Changes by others are reloaded automatically."));
         ui.horizontal(|ui| {
-            ui.radio_value(&mut self.storage_kind, 0, tr("Auf diesem PC"));
-            ui.radio_value(&mut self.storage_kind, 1, tr("Netzwerkordner (SMB)"));
-            ui.radio_value(&mut self.storage_kind, 2, tr("WebDAV-Server"));
+            ui.radio_value(&mut self.storage_kind, 0, tr("On this PC"));
+            ui.radio_value(&mut self.storage_kind, 1, tr("Network folder (SMB)"));
+            ui.radio_value(&mut self.storage_kind, 2, tr("WebDAV server"));
         });
         match self.storage_kind {
             1 => {
                 ui.horizontal(|ui| {
-                    ui.label(tr("Ordner"));
+                    ui.label(tr("Folder"));
                     ui.add(egui::TextEdit::singleline(&mut self.shared_edit).desired_width(380.0).hint_text(r"\\server\it\AdminCraft"));
                 });
             }
             2 => {
                 egui::Grid::new("dav").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                    ui.label(tr("Adresse"));
+                    ui.label(tr("Address"));
                     ui.add(egui::TextEdit::singleline(&mut self.dav_url).desired_width(420.0).hint_text("https://cloud.firma.de/remote.php/dav/files/admin/AdminCraft/"));
                     ui.end_row();
-                    ui.label(tr("Benutzer"));
+                    ui.label(tr("User"));
                     ui.add(egui::TextEdit::singleline(&mut self.dav_user).desired_width(220.0));
                     ui.end_row();
-                    ui.label(tr("Passwort"));
+                    ui.label(tr("Password"));
                     ui.add(egui::TextEdit::singleline(&mut self.dav_pw).password(true).desired_width(220.0));
                     ui.end_row();
                 });
-                ui.weak(tr("Nextcloud/ownCloud: am besten ein App-Passwort anlegen. Endet die Adresse mit „/“, wird connections.json darin benutzt."));
-                if ui.button(tr("Verbindung testen")).clicked() {
+                ui.weak(tr("Nextcloud/ownCloud: best create an app password. If the address ends with \"/\", connections.json inside it is used."));
+                if ui.button(tr("Test connection")).clicked() {
                     let mut c = crate::remote::RemoteConfig { url: self.dav_url.clone(), user: self.dav_user.clone(), password_enc: String::new() };
                     c.set_password(&self.dav_pw);
                     self.dav_msg = Some(match crate::remote::test(&c) {
@@ -3569,7 +3569,7 @@ impl AdminApp {
             }
             _ => {}
         }
-        if ui.button(tr("Übernehmen")).clicked() {
+        if ui.button(tr("Apply")).clicked() {
             self.store.save();
             let result = match self.storage_kind {
                 1 => crate::model::set_shared_location(&self.shared_edit, &self.store.path).and_then(|_| crate::remote::save_config(&Default::default())),
@@ -3588,7 +3588,7 @@ impl AdminApp {
                 _ => crate::model::set_shared_location("", &self.store.path).and_then(|_| crate::remote::save_config(&Default::default())),
             };
             self.dav_msg = Some(match result {
-                Ok(()) => (true, tr("Gespeichert – AdminCraft bitte neu starten.").to_string()),
+                Ok(()) => (true, tr("Saved – please restart AdminCraft.").to_string()),
                 Err(e) => (false, e),
             });
         }
@@ -3597,49 +3597,49 @@ impl AdminApp {
         }
         let can_seal = self.store.data.master;
         changed |= ui
-            .add_enabled(can_seal, egui::Checkbox::new(&mut self.store.data.settings.encrypt_file, tr("Gesamte Liste mit dem Masterpasswort verschlüsseln (auch Namen, Hosts, Notizen)")))
-            .on_disabled_hover_text(tr("Zuerst unten ein Masterpasswort setzen."))
+            .add_enabled(can_seal, egui::Checkbox::new(&mut self.store.data.settings.encrypt_file, tr("Encrypt the whole list with the master password (names, hosts, notes too)")))
+            .on_disabled_hover_text(tr("Set a master password below first."))
             .changed();
-        ui.weak(tr("Empfohlen für zentrale Ablage. Alle im Team brauchen dasselbe Masterpasswort; Passwörter alternativ per KeePass."));
+        ui.weak(tr("Recommended for central storage. Everyone in the team needs the same master password; alternatively passwords via KeePass."));
 
-        section(ui, tr("Masterpasswort"));
+        section(ui, tr("Master password"));
         ui.label(tr(if self.store.data.master {
-            "Ein Masterpasswort ist gesetzt. Ohne es lassen sich die Passwörter nicht lesen."
+            "A master password is set. Without it the passwords can't be read."
         } else {
-            "Noch kein Masterpasswort: Passwörter sind nur verschleiert. Für echten Schutz eins setzen."
+            "No master password yet: passwords are only obfuscated. Set one for real protection."
         }));
         egui::Grid::new(tr("master")).num_columns(2).show(ui, |ui| {
-            ui.label(tr("Neues Passwort"));
+            ui.label(tr("New password"));
             ui.add(egui::TextEdit::singleline(&mut self.new_master).password(true));
             ui.end_row();
-            ui.label(tr("Wiederholen"));
+            ui.label(tr("Repeat"));
             ui.add(egui::TextEdit::singleline(&mut self.new_master2).password(true));
             ui.end_row();
         });
         ui.horizontal(|ui| {
-            if ui.button(if self.store.data.master { "Ändern" } else { "Setzen" }).clicked() {
+            if ui.button(if self.store.data.master { "Change" } else { "Set" }).clicked() {
                 if self.new_master.is_empty() {
-                    self.settings_msg = Some(tr("Bitte ein Passwort eingeben.").into());
+                    self.settings_msg = Some(tr("Please enter a password.").into());
                 } else if self.new_master != self.new_master2 {
-                    self.settings_msg = Some(tr("Die beiden Eingaben sind verschieden.").into());
+                    self.settings_msg = Some(tr("The two entries differ.").into());
                 } else {
                     let pw = std::mem::take(&mut self.new_master);
                     self.new_master2.clear();
                     self.store.set_master(&pw);
-                    self.settings_msg = Some(tr("Masterpasswort gespeichert.").into());
+                    self.settings_msg = Some(tr("Master password saved.").into());
                 }
             }
-            if self.store.data.master && ui.button(tr("Entfernen")).clicked() {
+            if self.store.data.master && ui.button(tr("Remove")).clicked() {
                 self.store.set_master("");
-                self.settings_msg = Some(tr("Masterpasswort entfernt.").into());
+                self.settings_msg = Some(tr("Master password removed.").into());
             }
         });
         if let Some(m) = &self.settings_msg {
             ui.label(RichText::new(m).color(ACCENT));
         }
 
-        section(ui, tr("Eigener Befehl pro Protokoll (für Profis)"));
-        ui.weak(tr("Ersetzt den eingebauten Start ganz. Leer = Standard. Platzhalter: {host} {port} {user} {domain} {password} {name}"));
+        section(ui, tr("Own command per protocol (for experts)"));
+        ui.weak(tr("Replaces the built-in start completely. Empty = default. Placeholders: {host} {port} {user} {domain} {password} {name}"));
         egui::Grid::new(tr("templates")).num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
             for p in Protocol::ALL {
                 ui.label(p.label());
@@ -3652,16 +3652,16 @@ impl AdminApp {
         });
         self.store.data.settings.templates.retain(|_, v| !v.trim().is_empty());
 
-        section(ui, tr("Speicherort"));
+        section(ui, tr("Storage location"));
         ui.label(self.store.path.display().to_string());
         ui.horizontal(|ui| {
-            if ui.button(tr("Ordner öffnen")).clicked() {
+            if ui.button(tr("Open folder")).clicked() {
                 if let Some(dir) = self.store.path.parent() {
                     let _ = std::fs::create_dir_all(dir);
                     launch::open_folder(dir);
                 }
             }
-            if ui.button(tr("Systemcheck wiederholen")).clicked() {
+            if ui.button(tr("Repeat system check")).clicked() {
                 self.system_check = launch::system_check(&self.store.data.settings);
             }
         });
@@ -3670,7 +3670,7 @@ impl AdminApp {
         }
     }
 
-    /// "Bildschirmfoto": the active tab's area as a picture in the clipboard. Taken one frame
+    /// "Screenshot": the active tab's area as a picture in the clipboard. Taken one frame
     /// after the click so the button's own highlight is gone.
     fn tab_screenshot(&mut self, ctx: &egui::Context, now: f64) {
         let ppp = ctx.pixels_per_point();
@@ -3685,7 +3685,7 @@ impl AdminApp {
             match screen {
                 Some((w, h, rgba)) => {
                     ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba));
-                    self.note(tf("Bildschirmfoto ({0} × {1}) in der Zwischenablage.", &[&w, &h]), false, now);
+                    self.note(tf("Screenshot ({0} × {1}) copied to the clipboard.", &[&w, &h]), false, now);
                 }
                 None => {
                     // other systems: our own drawing (outside programs' windows are separate there)
@@ -3707,7 +3707,7 @@ impl AdminApp {
         if let Some(img) = got {
             let [w, h] = img.size;
             ctx.copy_image((*img).clone());
-            self.note(tf("Bildschirmfoto ({0} × {1}) in der Zwischenablage.", &[&w, &h]), false, now);
+            self.note(tf("Screenshot ({0} × {1}) copied to the clipboard.", &[&w, &h]), false, now);
         }
     }
 
@@ -3744,7 +3744,7 @@ impl AdminApp {
                 let _ = std::fs::create_dir_all(dir);
             }
             if let Err(e) = image::save_buffer(&shot.path, &bytes, w as u32, h as u32, image::ColorType::Rgba8) {
-                eprintln!("Screenshot konnte nicht gespeichert werden: {e}");
+                eprintln!("Screenshot could not be saved: {e}");
             }
             // report the state of embedded windows next to the picture (for checks)
             let mut report = format!("parent={:?} time={:.1}\n", self.parent_hwnd, ctx.input(|i| i.time));
@@ -3763,7 +3763,7 @@ impl AdminApp {
             }
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else if shot.frames > 900 {
-            eprintln!("Kein Screenshot erhalten.");
+            eprintln!("No screenshot received.");
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -3859,13 +3859,13 @@ impl eframe::App for AdminApp {
                     if let Ok(Some(status)) = child.try_wait() {
                         // mstsc hands over to an already running copy sometimes: keep the tab if its window is ours
                         if !p.embed.as_ref().map(|e| e.attached()).unwrap_or(false) {
-                            p.exited = Some(if status.success() { tr("Sitzung beendet.").into() } else { tf("Programm beendet (Code {0}).", &[&(status.code().unwrap_or(-1))]) });
+                            p.exited = Some(if status.success() { tr("Session ended.").into() } else { tf("Program ended (code {0}).", &[&(status.code().unwrap_or(-1))]) });
                         }
                     }
                 }
                 if let Some(em) = &mut p.embed {
                     if em.lost() {
-                        p.exited = Some(tr("Fenster wurde geschlossen.").into());
+                        p.exited = Some(tr("Window was closed.").into());
                     }
                 }
             }
@@ -3909,7 +3909,7 @@ impl eframe::App for AdminApp {
         if now - self.last_reload_check > 5.0 && self.dirty_since.is_none() && !self.store.read_only {
             self.last_reload_check = now;
             if self.store.reload_if_changed() {
-                self.note(tr("Verbindungsliste wurde von außen geändert – neu geladen."), false, now);
+                self.note(tr("Connection list was changed elsewhere – reloaded."), false, now);
             }
         }
         if let Some((id, pw)) = extra::pwgen_window(&ctx, &mut self.pwgen) {
@@ -3917,7 +3917,7 @@ impl eframe::App for AdminApp {
                 self.store.data.entries[i].password = pw;
                 self.store.data.entries[i].cred_source = CredSource::Stored;
                 self.mark_dirty(now);
-                self.note(tr("Passwort übernommen."), false, now);
+                self.note(tr("Password applied."), false, now);
             }
         }
         self.power_dialog(&ctx, now);
@@ -4031,8 +4031,8 @@ fn url_enc(s: &str) -> String {
 fn short_client(c: SshClient) -> &'static str {
     match c {
         SshClient::Putty => "PuTTY",
-        SshClient::External => "eigenes Fenster",
-        _ => "Terminal-Tab",
+        SshClient::External => "own window",
+        _ => "terminal tab",
     }
 }
 
@@ -4052,22 +4052,22 @@ fn proc_ui(ui: &mut egui::Ui, p: &mut ProcTab, now: f64) -> (Option<(Entry, Cred
         badge(ui, p.entry.protocol);
         ui.label(RichText::new(&p.label).weak());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(tr("Neu verbinden")).clicked() {
+            if ui.button(tr("Reconnect")).clicked() {
                 reconnect = Some((p.entry.clone(), p.creds.clone(), p.jumps.clone()));
             }
             if p.exited.is_none() {
-                if ui.button(RichText::new(tr("Trennen")).color(BAD_RED)).clicked() {
+                if ui.button(RichText::new(tr("Disconnect")).color(BAD_RED)).clicked() {
                     stop_proc(p);
-                    p.exited = Some(tr("Getrennt.").into());
+                    p.exited = Some(tr("Disconnected.").into());
                 }
                 let attached = p.embed.as_ref().map(|e| e.attached()).unwrap_or(false);
-                if attached && ui.button(tr("Als eigenes Fenster")).on_hover_text(tr("Fenster aus dem Tab lösen")).clicked() {
+                if attached && ui.button(tr("As own window")).on_hover_text(tr("Detach the window from the tab")).clicked() {
                     if let Some(em) = &mut p.embed {
                         em.detach();
                     }
                     p.detached = true;
                 }
-                if attached && ui.button(tr("Fokus")).on_hover_text(tr("Tastatur an das Fenster geben")).clicked() {
+                if attached && ui.button(tr("Focus")).on_hover_text(tr("Give the keyboard to the window")).clicked() {
                     if let Some(em) = &p.embed {
                         em.focus();
                     }
@@ -4082,18 +4082,18 @@ fn proc_ui(ui: &mut egui::Ui, p: &mut ProcTab, now: f64) -> (Option<(Entry, Cred
     let (msg, color) = if let Some(m) = &p.exited {
         (m.clone(), WARN)
     } else if p.detached {
-        (tr("Läuft in eigenem Fenster (aus dem Tab gelöst).").to_string(), ui.visuals().text_color())
+        (tr("Running in its own window (detached from the tab).").to_string(), ui.visuals().text_color())
     } else if attached {
         (String::new(), ui.visuals().text_color())
     } else if p.want_embed {
         let secs = (now - p.started).max(0.0) as u32;
         (
-            tf("Verbinde … das Fenster wird hier im Tab angezeigt, sobald es erscheint ({0} s).\nZertifikat- oder Anmeldefragen erscheinen kurz als eigenes Fenster.", &[&secs]),
+            tf("Connecting … the window will show here in the tab as soon as it appears ({0} s).\nCertificate or login questions briefly appear as their own window.", &[&secs]),
             ACCENT,
         )
     } else {
         (
-            tr("Läuft in eigenem Fenster. Dieser Tab zeigt den Status; „Trennen“ beendet die Sitzung.").to_string(),
+            tr("Running in its own window. This tab shows the status; \"Disconnect\" ends the session.").to_string(),
             ui.visuals().text_color(),
         )
     };
@@ -4187,15 +4187,15 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
             what = what.replacen("FTP", "FTPS", 1);
         }
         if !ep.jumps.is_empty() {
-            what.push_str(&tf("  über {0}", &[&(ep.jumps.iter().map(|j| j.host.clone()).collect::<Vec<_>>().join(" » "))]));
+            what.push_str(&tf("  via {0}", &[&(ep.jumps.iter().map(|j| j.host.clone()).collect::<Vec<_>>().join(" » "))]));
         }
         ui.label(RichText::new(what).monospace().weak());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(b) = &busy {
-                ui.label(RichText::new(if queued > 0 { tf("{0} (+{1} wartend)", &[&b, &queued]) } else { b.clone() }).color(ACCENT));
+                ui.label(RichText::new(if queued > 0 { tf("{0} (+{1} waiting)", &[&b, &queued]) } else { b.clone() }).color(ACCENT));
                 ui.spinner();
             } else if connected {
-                ui.label(RichText::new(tr("Verbunden")).color(OK_GREEN));
+                ui.label(RichText::new(tr("Connected")).color(OK_GREEN));
             }
         });
     });
@@ -4210,14 +4210,14 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
         let ui = &mut cols[0];
         ui.set_min_height(pane_h);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("Dieser PC")).strong());
-            if ui.small_button(tr("Hoch")).on_hover_text(tr("Ordner höher")).clicked() {
+            ui.label(RichText::new(tr("This PC")).strong());
+            if ui.small_button(tr("Up")).on_hover_text(tr("Folder up")).clicked() {
                 if let Some(p) = t.local_dir.parent() {
                     nav_local = Some(p.to_path_buf());
                 }
             }
             if cfg!(windows) {
-                egui::ComboBox::from_id_salt("drives").selected_text(tr("Laufwerk")).width(70.0).show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt("drives").selected_text(tr("Drive")).width(70.0).show_ui(ui, |ui| {
                     for d in transfer::drives() {
                         if ui.selectable_label(false, d.display().to_string()).clicked() {
                             nav_local = Some(d);
@@ -4257,8 +4257,8 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
         ui.horizontal_wrapped(|ui| {
             let n = t.local_sel.len();
             if ui
-                .add_enabled(n > 0 && connected, egui::Button::new(RichText::new(tf("Hochladen » ({0})", &[&n])).color(Color32::WHITE)).fill(ACCENT))
-                .on_hover_text(tr("Auswahl in den rechten Ordner hochladen. Tipp: Dateien auch einfach ins Fenster ziehen."))
+                .add_enabled(n > 0 && connected, egui::Button::new(RichText::new(tf("Upload » ({0})", &[&n])).color(Color32::WHITE)).fill(ACCENT))
+                .on_hover_text(tr("Upload the selection into the right folder. Tip: you can also drag files into the window."))
                 .clicked()
             {
                 for name in &t.local_sel {
@@ -4266,21 +4266,21 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                 }
                 t.local_sel.clear();
             }
-            if ui.button(tr("Neuer Ordner")).clicked() {
+            if ui.button(tr("New folder")).clicked() {
                 t.dialog = Some(XferDialog::Mkdir { remote: false, name: String::new() });
             }
-            if ui.add_enabled(n == 1, egui::Button::new(tr("Umbenennen"))).clicked() {
+            if ui.add_enabled(n == 1, egui::Button::new(tr("Rename"))).clicked() {
                 let from = t.local_sel.iter().next().cloned().unwrap_or_default();
                 t.dialog = Some(XferDialog::Rename { remote: false, to: from.clone(), from });
             }
-            if ui.add_enabled(n > 0, egui::Button::new(tr("Löschen"))).clicked() {
+            if ui.add_enabled(n > 0, egui::Button::new(tr("Delete"))).clicked() {
                 let names = t.local_items.iter().filter(|i| t.local_sel.contains(&i.name)).map(|i| (i.name.clone(), i.is_dir)).collect();
                 t.dialog = Some(XferDialog::Delete { remote: false, names });
             }
-            if ui.button(tr("Neu lesen")).clicked() {
+            if ui.button(tr("Refresh")).clicked() {
                 nav_local = Some(t.local_dir.clone());
             }
-            if ui.button(tr("Öffnen")).on_hover_text(tr("Ordner im Dateimanager öffnen")).clicked() {
+            if ui.button(tr("Open")).on_hover_text(tr("Open folder in the file manager")).clicked() {
                 launch::open_folder(&t.local_dir);
             }
         });
@@ -4290,7 +4290,7 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
         ui.set_min_height(pane_h);
         ui.horizontal(|ui| {
             ui.label(RichText::new(tf("Server ({0})", &[&ep.target.host])).strong());
-            if ui.add_enabled(connected, egui::Button::new(tr("Hoch")).small()).on_hover_text(tr("Ordner höher")).clicked() {
+            if ui.add_enabled(connected, egui::Button::new(tr("Up")).small()).on_hover_text(tr("Folder up")).clicked() {
                 nav_remote = Some(transfer::parent(&cwd));
             }
             let r = ui.add(egui::TextEdit::singleline(&mut t.remote_edit).desired_width(f32::INFINITY));
@@ -4304,10 +4304,10 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                     if busy.is_some() {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label(tr("Verbinde …"));
+                            ui.label(tr("Connecting …"));
                         });
                     } else {
-                        ui.label(RichText::new(tr("Nicht verbunden – Meldung unten. „Neu lesen“ versucht es erneut.")).color(WARN));
+                        ui.label(RichText::new(tr("Not connected – see message below. \"Refresh\" tries again.")).color(WARN));
                     }
                 }
                 for it in items.iter().filter(|i| show_hidden || !i.name.starts_with('.')) {
@@ -4332,8 +4332,8 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
         ui.horizontal_wrapped(|ui| {
             let n = t.remote_sel.len();
             if ui
-                .add_enabled(n > 0, egui::Button::new(RichText::new(tf("« Herunterladen ({0})", &[&n])).color(Color32::WHITE)).fill(ACCENT))
-                .on_hover_text(tr("Auswahl in den linken Ordner herunterladen"))
+                .add_enabled(n > 0, egui::Button::new(RichText::new(tf("« Download ({0})", &[&n])).color(Color32::WHITE)).fill(ACCENT))
+                .on_hover_text(tr("Download the selection into the left folder"))
                 .clicked()
             {
                 for it in items.iter().filter(|i| t.remote_sel.contains(&i.name)) {
@@ -4341,18 +4341,18 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                 }
                 t.remote_sel.clear();
             }
-            if ui.add_enabled(connected, egui::Button::new(tr("Neuer Ordner"))).clicked() {
+            if ui.add_enabled(connected, egui::Button::new(tr("New folder"))).clicked() {
                 t.dialog = Some(XferDialog::Mkdir { remote: true, name: String::new() });
             }
-            if ui.add_enabled(n == 1, egui::Button::new(tr("Umbenennen"))).clicked() {
+            if ui.add_enabled(n == 1, egui::Button::new(tr("Rename"))).clicked() {
                 let from = t.remote_sel.iter().next().cloned().unwrap_or_default();
                 t.dialog = Some(XferDialog::Rename { remote: true, to: from.clone(), from });
             }
-            if ui.add_enabled(n > 0, egui::Button::new(tr("Löschen"))).clicked() {
+            if ui.add_enabled(n > 0, egui::Button::new(tr("Delete"))).clicked() {
                 let names = items.iter().filter(|i| t.remote_sel.contains(&i.name)).map(|i| (i.name.clone(), i.is_dir && !i.is_link)).collect();
                 t.dialog = Some(XferDialog::Delete { remote: true, names });
             }
-            if ui.button(tr("Neu lesen")).on_hover_text(tr("Ordner neu lesen / neu verbinden")).clicked() {
+            if ui.button(tr("Refresh")).on_hover_text(tr("Refresh folder / reconnect")).clicked() {
                 nav_remote = Some(if connected { cwd.clone() } else { t.entry.start_path.clone() });
             }
         });
@@ -4362,7 +4362,7 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
     egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(6).show(ui, |ui| {
         egui::ScrollArea::vertical().id_salt("xfer_log").max_height(log_h - 12.0).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
             if log.is_empty() {
-                ui.weak(tr("Doppelklick öffnet Ordner. Mehrere Einträge mit Strg+Klick wählen. Dateien aus dem Explorer ins Fenster ziehen = hochladen."));
+                ui.weak(tr("Double-click opens folders. Select several entries with Ctrl+click. Drag files from the explorer into the window = upload."));
             }
             for (ok, l) in &log {
                 ui.label(RichText::new(l).small().color(if *ok { OK_GREEN } else { BAD_RED }));
@@ -4387,10 +4387,10 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
             match d {
                 XferDialog::Mkdir { remote, name } => {
-                    ui.heading(tr(if *remote { "Neuer Ordner auf dem Server" } else { "Neuer Ordner auf diesem PC" }));
-                    ui.add(egui::TextEdit::singleline(name).hint_text(tr("Ordnername"))).request_focus();
+                    ui.heading(tr(if *remote { "New folder on the server" } else { "New folder on this PC" }));
+                    ui.add(egui::TextEdit::singleline(name).hint_text(tr("Folder name"))).request_focus();
                     ui.horizontal(|ui| {
-                        if (ui.button(tr("Anlegen")).clicked() || enter) && !name.trim().is_empty() {
+                        if (ui.button(tr("Create")).clicked() || enter) && !name.trim().is_empty() {
                             if *remote {
                                 t.xfer.send(Job::Mkdir(transfer::join(&cwd, name.trim())));
                             } else {
@@ -4398,17 +4398,17 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                             }
                             close = true;
                         }
-                        if ui.button(tr("Abbrechen")).clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             close = true;
                         }
                     });
                 }
                 XferDialog::Rename { remote, from, to } => {
-                    ui.heading(tr("Umbenennen"));
+                    ui.heading(tr("Rename"));
                     ui.label(from.as_str());
                     ui.add(egui::TextEdit::singleline(to)).request_focus();
                     ui.horizontal(|ui| {
-                        if (ui.button(tr("Umbenennen")).clicked() || enter) && !to.trim().is_empty() && to != from {
+                        if (ui.button(tr("Rename")).clicked() || enter) && !to.trim().is_empty() && to != from {
                             if *remote {
                                 t.xfer.send(Job::Rename { from: transfer::join(&cwd, from), to: transfer::join(&cwd, to.trim()) });
                             } else {
@@ -4416,22 +4416,22 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                             }
                             close = true;
                         }
-                        if ui.button(tr("Abbrechen")).clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             close = true;
                         }
                     });
                 }
                 XferDialog::Delete { remote, names } => {
-                    ui.heading(tr("Wirklich löschen?"));
-                    ui.label(tr(if *remote { "Auf dem Server:" } else { "Auf diesem PC:" }));
+                    ui.heading(tr("Really delete?"));
+                    ui.label(tr(if *remote { "On the server:" } else { "On this PC:" }));
                     for (n, dir) in names.iter().take(8) {
-                        ui.label(format!("• {n}{}", if *dir { tr("  (Ordner mit Inhalt)") } else { "" }));
+                        ui.label(format!("• {n}{}", if *dir { tr("  (folder with content)") } else { "" }));
                     }
                     if names.len() > 8 {
-                        ui.label(tf("… und {0} weitere", &[&(names.len() - 8)]));
+                        ui.label(tf("… and {0} more", &[&(names.len() - 8)]));
                     }
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new(RichText::new(tr("Löschen")).color(Color32::WHITE)).fill(BAD_RED)).clicked() {
+                        if ui.add(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(BAD_RED)).clicked() {
                             for (n, dir) in names.iter() {
                                 if *remote {
                                     t.xfer.send(Job::Delete { path: transfer::join(&cwd, n), is_dir: *dir });
@@ -4442,7 +4442,7 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                             }
                             close = true;
                         }
-                        if ui.button(tr("Abbrechen")).clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             close = true;
                         }
                     });
@@ -4484,19 +4484,19 @@ fn ping_ui(ui: &mut egui::Ui, p: &mut PingTab, ctx: &egui::Context) {
         ui.selectable_value(&mut p.mode, PingMode::Trace, tr("Traceroute"));
         ui.separator();
         ui.label(tr("Host"));
-        let r = ui.add(egui::TextEdit::singleline(&mut p.host).desired_width(220.0).hint_text(tr("Name oder IP")));
+        let r = ui.add(egui::TextEdit::singleline(&mut p.host).desired_width(220.0).hint_text(tr("Name or IP")));
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if p.mode == PingMode::Ping {
-            ui.checkbox(&mut p.continuous, tr("Dauerping"));
+            ui.checkbox(&mut p.continuous, tr("Continuous ping"));
         }
         if p.runner.is_running() {
-            if ui.button(tr("Stopp")).clicked() {
+            if ui.button(tr("Stop")).clicked() {
                 p.runner.stop();
             }
         } else if ui.add(egui::Button::new(RichText::new(tr("Start")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
             start_ping(p, ctx);
         }
-        if ui.button(tr("Kopieren")).clicked() {
+        if ui.button(tr("Copy")).clicked() {
             ui.ctx().copy_text(p.runner.text());
         }
     });
@@ -4512,7 +4512,7 @@ fn output_box(ui: &mut egui::Ui, lines: &[String]) {
         .show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
                 if lines.is_empty() {
-                    ui.weak(tr("Host eingeben und Start drücken."));
+                    ui.weak(tr("Enter a host and press Start."));
                 }
                 for l in lines {
                     let color = if l.contains("TTL=") || l.contains("ttl=") || l.contains("Antwort von") || l.contains("bytes from") {
@@ -4532,40 +4532,40 @@ fn scan_ui(ui: &mut egui::Ui, s: &mut ScanTab, ctx: &egui::Context) {
     let running = s.scan.as_ref().map(|x| !x.state.lock().unwrap().finished).unwrap_or(false);
     egui::Grid::new(tr("scan_form")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
         ui.label(tr("Host"));
-        ui.add(egui::TextEdit::singleline(&mut s.host).desired_width(260.0).hint_text(tr("Name oder IP")));
+        ui.add(egui::TextEdit::singleline(&mut s.host).desired_width(260.0).hint_text(tr("Name or IP")));
         ui.end_row();
         ui.label(tr("Ports"));
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut s.ports).desired_width(420.0));
-            if ui.small_button(tr("Wichtige")).clicked() {
+            if ui.small_button(tr("Common")).clicked() {
                 s.ports = tools::COMMON_PORTS.into();
             }
             if ui.small_button("1-1024").clicked() {
                 s.ports = "1-1024".into();
             }
-            if ui.small_button(tr("Alle")).clicked() {
+            if ui.small_button(tr("All")).clicked() {
                 s.ports = "1-65535".into();
             }
         });
         ui.end_row();
-        ui.label(tr("Wartezeit"));
+        ui.label(tr("Timeout"));
         ui.add(egui::DragValue::new(&mut s.timeout).range(100..=5000).suffix(" ms"));
         ui.end_row();
     });
     ui.horizontal(|ui| {
         if running {
-            if ui.button(tr("Abbrechen")).clicked() {
+            if ui.button(tr("Cancel")).clicked() {
                 if let Some(sc) = &s.scan {
                     sc.cancel();
                 }
             }
-        } else if ui.add(egui::Button::new(RichText::new(tr("Scannen")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+        } else if ui.add(egui::Button::new(RichText::new(tr("Scan")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
             match tools::parse_ports(&s.ports) {
                 Ok(ports) if !s.host.trim().is_empty() => {
                     s.error = None;
                     s.scan = Some(PortScan::start(&s.host, ports, s.timeout, ctx.clone()));
                 }
-                Ok(_) => s.error = Some(tr("Bitte einen Host eingeben.").into()),
+                Ok(_) => s.error = Some(tr("Please enter a host.").into()),
                 Err(e) => s.error = Some(e),
             }
         }
@@ -4581,40 +4581,40 @@ fn scan_ui(ui: &mut egui::Ui, s: &mut ScanTab, ctx: &egui::Context) {
             return;
         }
         let frac = if st.total == 0 { 0.0 } else { st.done as f32 / st.total as f32 };
-        ui.add(egui::ProgressBar::new(frac).text(tf("{0} / {1} Ports geprüft · Adresse {2}", &[&st.done, &st.total, &st.address])));
+        ui.add(egui::ProgressBar::new(frac).text(tf("{0} / {1} ports checked · address {2}", &[&st.done, &st.total, &st.address])));
         ui.add_space(6.0);
-        ui.label(RichText::new(tf("{0} offene Ports", &[&(st.open.len())])).strong());
+        ui.label(RichText::new(tf("{0} open ports", &[&(st.open.len())])).strong());
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Grid::new(tr("scan_res")).striped(true).num_columns(3).spacing([24.0, 4.0]).show(ui, |ui| {
                 ui.label(RichText::new(tr("Port")).strong());
-                ui.label(RichText::new(tr("Dienst")).strong());
+                ui.label(RichText::new(tr("Service")).strong());
                 ui.label(RichText::new(tr("Status")).strong());
                 ui.end_row();
                 for p in &st.open {
                     ui.label(RichText::new(p.to_string()).monospace());
                     ui.label(tools::well_known(*p));
-                    ui.label(RichText::new(tr("offen")).color(OK_GREEN));
+                    ui.label(RichText::new(tr("open")).color(OK_GREEN));
                     ui.end_row();
                 }
             });
         });
     } else {
-        ui.weak(tr("Prüft, welche TCP-Ports am Host antworten. Nur in eigenen Netzen verwenden."));
+        ui.weak(tr("Checks which TCP ports answer on the host. Only use in your own networks."));
     }
 }
 
 const DNS_TYPES: [(&str, &str); 11] = [
-    ("A", "IPv4-Adresse"),
-    ("AAAA", "IPv6-Adresse"),
-    ("MX", "Mailserver"),
-    ("TXT", "Text (SPF, DKIM, Verifizierung)"),
+    ("A", "IPv4 address"),
+    ("AAAA", "IPv6 address"),
+    ("MX", "Mail server"),
+    ("TXT", "Text (SPF, DKIM, verification)"),
     ("CNAME", "Alias"),
-    ("NS", "Nameserver der Zone"),
-    ("SOA", "Zonen-Verwaltung"),
-    ("PTR", "Rückwärts: IP zu Name"),
-    ("SRV", "Dienste, z. B. _ldap._tcp.firma.local"),
-    ("CAA", "Erlaubte Zertifizierungsstellen"),
-    ("ANY", "Alles (viele Server lehnen ab)"),
+    ("NS", "Name servers of the zone"),
+    ("SOA", "Zone authority"),
+    ("PTR", "Reverse: IP to name"),
+    ("SRV", "Services, e.g. _ldap._tcp.company.local"),
+    ("CAA", "Allowed certificate authorities"),
+    ("ANY", "Everything (many servers refuse)"),
 ];
 
 fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
@@ -4668,16 +4668,16 @@ fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
 fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
     let mut go = false;
     egui::Grid::new(tr("dns_form")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-        ui.label(tr("Name oder IP"));
+        ui.label(tr("Name or IP"));
         ui.horizontal(|ui| {
-            let r = ui.add(egui::TextEdit::singleline(&mut d.host).desired_width(260.0).hint_text(tr("firma.de")));
+            let r = ui.add(egui::TextEdit::singleline(&mut d.host).desired_width(260.0).hint_text("example.com"));
             go |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.add(egui::Button::new(RichText::new(tr("Abfragen")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+            if ui.add(egui::Button::new(RichText::new(tr("Query")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
                 go = true;
             }
         });
         ui.end_row();
-        ui.label(tr("Typ"));
+        ui.label(tr("Type"));
         ui.horizontal_wrapped(|ui| {
             for (ty, what) in DNS_TYPES {
                 if ui.selectable_label(d.rtype == ty, ty).on_hover_text(tr(what)).clicked() {
@@ -4687,8 +4687,8 @@ fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
             }
         });
         ui.end_row();
-        ui.label(tr("DNS-Server"));
-        ui.add(egui::TextEdit::singleline(&mut d.server).desired_width(260.0).hint_text(tr("leer = Standard dieses PCs, z. B. 1.1.1.1")));
+        ui.label(tr("DNS server"));
+        ui.add(egui::TextEdit::singleline(&mut d.server).desired_width(260.0).hint_text(tr("empty = this PC's default, e.g. 1.1.1.1")));
         ui.end_row();
     });
     if go {
@@ -4698,11 +4698,11 @@ fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
     if let Some(r) = d.result.lock().unwrap().as_ref() {
         match r {
             Ok(ips) => {
-                ui.label(RichText::new(tr("Adressen")).strong());
+                ui.label(RichText::new(tr("Addresses")).strong());
                 for ip in ips {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(ip).monospace().size(15.0));
-                        if ui.small_button(tr("kopieren")).clicked() {
+                        if ui.small_button(tr("copy")).clicked() {
                             ui.ctx().copy_text(ip.clone());
                         }
                     });
@@ -4714,15 +4714,15 @@ fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
         }
         ui.add_space(8.0);
     }
-    ui.label(RichText::new(tf("Antwort ({0}-Einträge)", &[&d.rtype])).strong());
+    ui.label(RichText::new(tf("Answer ({0} records)", &[&d.rtype])).strong());
     output_box(ui, &d.runner.lines.lock().unwrap());
 }
 
 fn wol_ui(ui: &mut egui::Ui, w: &mut WolTab) {
-    ui.label(tr("Schaltet einen PC über das Netzwerk ein (Wake-on-LAN muss im BIOS/Netzwerkadapter aktiv sein)."));
+    ui.label(tr("Switches a PC on over the network (Wake-on-LAN must be enabled in BIOS/network adapter)."));
     ui.add_space(6.0);
     egui::Grid::new(tr("wol")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-        ui.label(tr("MAC-Adresse"));
+        ui.label(tr("MAC address"));
         ui.add(egui::TextEdit::singleline(&mut w.mac).hint_text("00:11:22:33:44:55").desired_width(220.0));
         ui.end_row();
         ui.label(tr("Broadcast"));
@@ -4732,7 +4732,7 @@ fn wol_ui(ui: &mut egui::Ui, w: &mut WolTab) {
         ui.add(egui::DragValue::new(&mut w.port).range(1..=65535));
         ui.end_row();
     });
-    if ui.add(egui::Button::new(RichText::new(tr("Aufwecken")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+    if ui.add(egui::Button::new(RichText::new(tr("Wake up")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
         w.result = Some(tools::wake_on_lan(&w.mac, &w.broadcast, w.port));
     }
     match &w.result {

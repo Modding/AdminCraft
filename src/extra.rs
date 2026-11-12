@@ -72,9 +72,9 @@ pub enum NetScanAct {
 
 fn change_badge(ui: &mut egui::Ui, c: Change) {
     let (text, col) = match c {
-        Change::New => (tr("NEU"), OK_GREEN),
-        Change::Gone => (tr("WEG"), BAD_RED),
-        Change::Changed => (tr("GEÄNDERT"), WARN),
+        Change::New => (tr("NEW"), OK_GREEN),
+        Change::Gone => (tr("GONE"), BAD_RED),
+        Change::Changed => (tr("CHANGED"), WARN),
         Change::Same => ("", Color32::TRANSPARENT),
     };
     if text.is_empty() {
@@ -90,42 +90,42 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
     let mut acts = Vec::new();
     let running = t.scan.as_ref().map(|s| !s.state.lock().unwrap().finished).unwrap_or(false);
     egui::Grid::new("netscan_form").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-        ui.label(tr("Bereich"));
+        ui.label(tr("Range"));
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut t.range).desired_width(240.0).hint_text("192.168.1.0/24"));
             if r.lost_focus() {
                 t.saved = netscan::load(&t.range);
             }
             for s in netscan::local_subnets() {
-                if ui.small_button(&s).on_hover_text(tr("Netz dieses PCs")).clicked() {
+                if ui.small_button(&s).on_hover_text(tr("This PC's network")).clicked() {
                     t.range = s.clone();
                     t.saved = netscan::load(&t.range);
                 }
             }
-            ui.weak(tr("z. B. 10.0.0.0/24, 10.0.0.1-50, 10.0.0.1-10.0.1.254"));
+            ui.weak(tr("e.g. 10.0.0.0/24, 10.0.0.1-50, 10.0.0.1-10.0.1.254"));
         });
         ui.end_row();
         ui.label(tr("Ports"));
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut t.ports).desired_width(240.0));
-            ui.weak(tr("werden auf jedem gefundenen Gerät geprüft"));
+            ui.weak(tr("are checked on every device found"));
         });
         ui.end_row();
-        ui.label(tr("Wartezeit"));
+        ui.label(tr("Timeout"));
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut t.timeout).range(100..=5000).suffix(" ms"));
-            ui.checkbox(&mut t.names, tr("Namen auflösen"));
+            ui.checkbox(&mut t.names, tr("Resolve names"));
         });
         ui.end_row();
     });
     ui.horizontal(|ui| {
         if running {
-            if ui.button(tr("Abbrechen")).clicked() {
+            if ui.button(tr("Cancel")).clicked() {
                 if let Some(s) = &t.scan {
                     s.cancel();
                 }
             }
-        } else if ui.add(egui::Button::new(RichText::new(tr("Scannen")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+        } else if ui.add(egui::Button::new(RichText::new(tr("Scan")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
             match (netscan::parse_targets(&t.range), crate::tools::parse_ports(if t.ports.trim().is_empty() { "80" } else { &t.ports })) {
                 (Ok(targets), Ok(ports)) => {
                     t.error = None;
@@ -139,20 +139,20 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
         }
         let finished = t.scan.as_ref().map(|s| s.state.lock().unwrap().finished).unwrap_or(false);
         if ui
-            .add_enabled(finished, egui::Button::new(tr("Als Vergleichsstand speichern")))
-            .on_hover_text(tr("Der nächste Scan dieses Bereichs zeigt dann, was neu, weg oder geändert ist."))
+            .add_enabled(finished, egui::Button::new(tr("Save as comparison baseline")))
+            .on_hover_text(tr("The next scan of this range then shows what is new, gone or changed."))
             .clicked()
         {
             let hosts = t.scan.as_ref().map(|s| s.state.lock().unwrap().hosts.clone()).unwrap_or_default();
             match netscan::save(&t.range, &hosts) {
                 Ok(s) => {
-                    t.msg = Some(tf("Gespeichert: {0} Geräte.", &[&s.hosts.len()]));
+                    t.msg = Some(tf("Saved: {0} devices.", &[&s.hosts.len()]));
                     t.saved = Some(s);
                 }
                 Err(e) => t.error = Some(e),
             }
         }
-        if ui.add_enabled(finished, egui::Button::new(tr("Als Text kopieren"))).clicked() {
+        if ui.add_enabled(finished, egui::Button::new(tr("Copy as text"))).clicked() {
             if let Some(s) = &t.scan {
                 let st = s.state.lock().unwrap();
                 let text: String = st
@@ -163,7 +163,7 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                 ui.ctx().copy_text(text);
             }
         }
-        ui.checkbox(&mut t.only_changes, tr("Nur Änderungen"));
+        ui.checkbox(&mut t.only_changes, tr("Changes only"));
         if let Some(e) = &t.error {
             ui.label(RichText::new(e).color(BAD_RED));
         }
@@ -172,20 +172,20 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
         }
     });
     match &t.saved {
-        Some(s) => ui.weak(tf("Vergleich mit gespeichertem Stand vom {0} ({1} Geräte).", &[&fmt_time(s.time), &s.hosts.len()])),
-        None => ui.weak(tr("Für diesen Bereich ist noch kein Vergleichsstand gespeichert.")),
+        Some(s) => ui.weak(tf("Compared with the saved state of {0} ({1} devices).", &[&fmt_time(s.time), &s.hosts.len()])),
+        None => ui.weak(tr("No comparison baseline saved for this range yet.")),
     };
     ui.separator();
     let Some(scan) = &t.scan else {
-        ui.weak(tr("Findet Geräte im Netz per Ping und Port-Abfrage. Nur in eigenen Netzen verwenden."));
+        ui.weak(tr("Finds devices in the network by ping and port checks. Only use in your own networks."));
         return acts;
     };
     let st = scan.state.lock().unwrap();
     let frac = if st.total == 0 { 0.0 } else { st.done as f32 / st.total as f32 };
     let status = if st.finished {
-        tf("{0} Adressen geprüft in {1} s · {2} Geräte gefunden", &[&st.total, &format!("{:.1}", st.seconds), &st.hosts.len()])
+        tf("{0} addresses checked in {1} s · {2} devices found", &[&st.total, &format!("{:.1}", st.seconds), &st.hosts.len()])
     } else {
-        tf("{0} / {1} geprüft · {2} gefunden", &[&st.done, &st.total, &st.hosts.len()])
+        tf("{0} / {1} checked · {2} found", &[&st.done, &st.total, &st.hosts.len()])
     };
     ui.add(egui::ProgressBar::new(frac).text(status));
     let rows: Vec<(ScanHost, Change, Option<ScanHost>)> = match (&t.saved, st.finished) {
@@ -201,14 +201,14 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
     });
     if t.saved.is_some() && scan.state.lock().unwrap().finished {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tf("{0} neu", &[&n_new])).color(OK_GREEN).strong());
-            ui.label(RichText::new(tf("{0} weg", &[&n_gone])).color(BAD_RED).strong());
-            ui.label(RichText::new(tf("{0} geändert", &[&n_chg])).color(WARN).strong());
+            ui.label(RichText::new(tf("{0} new", &[&n_new])).color(OK_GREEN).strong());
+            ui.label(RichText::new(tf("{0} gone", &[&n_gone])).color(BAD_RED).strong());
+            ui.label(RichText::new(tf("{0} changed", &[&n_chg])).color(WARN).strong());
         });
     }
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         egui::Grid::new("netscan_rows").striped(true).num_columns(7).spacing([16.0, 4.0]).show(ui, |ui| {
-            for h in [tr("Status"), tr("IP-Adresse"), tr("Name"), tr("MAC-Adresse"), tr("Antwort"), tr("Offene Ports"), ""] {
+            for h in [tr("Status"), tr("IP address"), tr("Name"), tr("MAC address"), tr("Reply"), tr("Open ports"), ""] {
                 ui.label(RichText::new(h).strong());
             }
             ui.end_row();
@@ -218,13 +218,13 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                 ui.label(&h.name);
                 let mac = ui.label(RichText::new(&h.mac).monospace());
                 if let (Change::Changed, Some(o)) = (change, old) {
-                    mac.on_hover_text(tf("Vorher: {0}", &[&o.mac]));
+                    mac.on_hover_text(tf("Before: {0}", &[&o.mac]));
                 }
                 ui.label(h.rtt_ms.map(|r| format!("{r} ms")).unwrap_or_default());
                 ui.label(h.ports.iter().map(|p| format!("{p} {}", crate::tools::well_known(*p))).collect::<Vec<_>>().join(", "));
                 ui.horizontal(|ui| {
                     if *change != Change::Gone {
-                        // what the open ports offer first, every other type below "Andere"
+                        // what the open ports offer first, every other type below "Other"
                         let found = netscan::protocol_candidates(&h.ports);
                         let others: Vec<Protocol> = Protocol::ALL.iter().copied().filter(|p| *p != Protocol::LocalShell && !found.contains(p)).collect();
                         let pick = |ui: &mut egui::Ui, acts: &mut Vec<NetScanAct>, add: bool| {
@@ -237,7 +237,7 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                             if !found.is_empty() {
                                 ui.separator();
                             }
-                            ui.menu_button(tr("Andere"), |ui| {
+                            ui.menu_button(tr("Other"), |ui| {
                                 for p in &others {
                                     if ui.button(p.label()).clicked() {
                                         chosen = Some(*p);
@@ -249,11 +249,11 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                                 ui.close();
                             }
                         };
-                        ui.menu_button(tr("Öffnen …"), |ui| pick(ui, &mut acts, false));
-                        ui.menu_button(tr("+ Verbindung …"), |ui| pick(ui, &mut acts, true))
+                        ui.menu_button(tr("Open …"), |ui| pick(ui, &mut acts, false));
+                        ui.menu_button(tr("+ Connection …"), |ui| pick(ui, &mut acts, true))
                             .response
-                            .on_hover_text(tr("Als Verbindung im Ordner „Netzwerk-Scan“ anlegen – Verbindungsart wählen"));
-                        if ui.small_button(tr("kopieren")).clicked() {
+                            .on_hover_text(tr("Create as connection in the folder \"Network scan\" – choose the type"));
+                        if ui.small_button(tr("copy")).clicked() {
                             ui.ctx().copy_text(h.ip.to_string());
                         }
                     }
@@ -275,31 +275,31 @@ pub struct SubnetTab {
 pub fn subnet_ui(ui: &mut egui::Ui, t: &mut SubnetTab) -> Option<String> {
     let mut scan = None;
     ui.horizontal(|ui| {
-        ui.label(tr("Adresse / Maske"));
-        ui.add(egui::TextEdit::singleline(&mut t.input).desired_width(260.0).hint_text("192.168.10.77/26  oder  192.168.10.77 255.255.255.192"));
+        ui.label(tr("Address / mask"));
+        ui.add(egui::TextEdit::singleline(&mut t.input).desired_width(260.0).hint_text("192.168.10.77/26  or  192.168.10.77 255.255.255.192"));
     });
     ui.separator();
     if t.input.trim().is_empty() {
-        ui.weak(tr("Rechnet Netz, Broadcast, Maske und nutzbare Adressen aus."));
+        ui.weak(tr("Works out network, broadcast, mask and usable addresses."));
         return None;
     }
     match admintools::subnet(&t.input) {
         Ok(s) => {
             egui::Grid::new("subnet_res").num_columns(2).striped(true).spacing([24.0, 6.0]).show(ui, |ui| {
                 let rows: Vec<(&str, String)> = vec![
-                    (tr("Netz"), format!("{}/{}", s.network, s.prefix)),
-                    (tr("Subnetzmaske"), s.mask.to_string()),
+                    (tr("Network"), format!("{}/{}", s.network, s.prefix)),
+                    (tr("Subnet mask"), s.mask.to_string()),
                     (tr("Wildcard"), s.wildcard.to_string()),
                     (tr("Broadcast"), s.broadcast.to_string()),
-                    (tr("Erste Adresse"), s.first.to_string()),
-                    (tr("Letzte Adresse"), s.last.to_string()),
-                    (tr("Nutzbare Adressen"), s.hosts.to_string()),
+                    (tr("First address"), s.first.to_string()),
+                    (tr("Last address"), s.last.to_string()),
+                    (tr("Usable addresses"), s.hosts.to_string()),
                 ];
                 for (k, v) in rows {
                     ui.label(k);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&v).monospace().size(15.0));
-                        if ui.small_button(tr("kopieren")).clicked() {
+                        if ui.small_button(tr("copy")).clicked() {
                             ui.ctx().copy_text(v.clone());
                         }
                     });
@@ -307,7 +307,7 @@ pub fn subnet_ui(ui: &mut egui::Ui, t: &mut SubnetTab) -> Option<String> {
                 }
             });
             ui.add_space(8.0);
-            if s.prefix >= 16 && ui.button(tr("Dieses Netz scannen")).clicked() {
+            if s.prefix >= 16 && ui.button(tr("Scan this network")).clicked() {
                 scan = Some(format!("{}/{}", s.network, s.prefix));
             }
         }
@@ -340,11 +340,11 @@ pub fn cert_ui(ui: &mut egui::Ui, t: &mut CertTab, ctx: &egui::Context) {
     let mut go = false;
     ui.horizontal(|ui| {
         ui.label(tr("Host"));
-        let r = ui.add(egui::TextEdit::singleline(&mut t.host).desired_width(260.0).hint_text("firma.de"));
+        let r = ui.add(egui::TextEdit::singleline(&mut t.host).desired_width(260.0).hint_text("example.com"));
         go |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         ui.label(tr("Port"));
         ui.add(egui::DragValue::new(&mut t.port).range(1..=65535));
-        if ui.add_enabled(!busy, egui::Button::new(RichText::new(tr("Prüfen")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+        if ui.add_enabled(!busy, egui::Button::new(RichText::new(tr("Check")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
             go = true;
         }
         if busy {
@@ -365,30 +365,30 @@ pub fn cert_ui(ui: &mut egui::Ui, t: &mut CertTab, ctx: &egui::Context) {
     let res = t.result.lock().unwrap();
     match res.as_ref() {
         None => {
-            ui.weak(tr("Zeigt das TLS-Zertifikat eines Servers: für wen, von wem, wie lange gültig, vertrauenswürdig?"));
+            ui.weak(tr("Shows a server's TLS certificate: for whom, from whom, how long valid, trusted?"));
         }
         Some(Err(e)) => {
             ui.label(RichText::new(e).color(BAD_RED));
         }
         Some(Ok(c)) => {
             let col = if c.days_left < 0 { BAD_RED } else if c.days_left < 30 { WARN } else { OK_GREEN };
-            let headline = if c.days_left < 0 { tf("Abgelaufen seit {0} Tagen", &[&-c.days_left]) } else { tf("Noch {0} Tage gültig", &[&c.days_left]) };
+            let headline = if c.days_left < 0 { tf("Expired {0} days ago", &[&-c.days_left]) } else { tf("Valid for {0} more days", &[&c.days_left]) };
             ui.label(RichText::new(headline).size(18.0).strong().color(col));
             match &c.trusted {
-                Ok(()) => ui.label(RichText::new(tr("Vertrauenswürdig (Kette und Name passen)")).color(OK_GREEN)),
-                Err(e) => ui.label(RichText::new(tf("Nicht vertrauenswürdig: {0}", &[e])).color(WARN)),
+                Ok(()) => ui.label(RichText::new(tr("Trusted (chain and name match)")).color(OK_GREEN)),
+                Err(e) => ui.label(RichText::new(tf("Not trusted: {0}", &[e])).color(WARN)),
             };
             ui.add_space(6.0);
             egui::Grid::new("cert_rows").num_columns(2).striped(true).spacing([20.0, 5.0]).show(ui, |ui| {
                 let rows: Vec<(&str, String)> = vec![
-                    (tr("Ausgestellt für"), c.subject.clone()),
-                    (tr("Ausgestellt von"), c.issuer.clone()),
-                    (tr("Namen (SAN)"), c.names.join(", ")),
-                    (tr("Gültig ab"), c.not_before.clone()),
-                    (tr("Gültig bis"), c.not_after.clone()),
-                    (tr("Seriennummer"), c.serial.clone()),
-                    (tr("Protokoll"), c.protocol.clone()),
-                    (tr("Zertifikate in der Kette"), c.chain_len.to_string()),
+                    (tr("Issued to"), c.subject.clone()),
+                    (tr("Issued by"), c.issuer.clone()),
+                    (tr("Names (SAN)"), c.names.join(", ")),
+                    (tr("Valid from"), c.not_before.clone()),
+                    (tr("Valid until"), c.not_after.clone()),
+                    (tr("Serial number"), c.serial.clone()),
+                    (tr("Protocol"), c.protocol.clone()),
+                    (tr("Certificates in the chain"), c.chain_len.to_string()),
                 ];
                 for (k, v) in rows {
                     ui.label(k);
@@ -406,7 +406,7 @@ pub struct PwGen {
     pub open: bool,
     pub opts: PwOptions,
     pub value: String,
-    /// Connection whose password field "Übernehmen" fills.
+    /// Connection whose password field "Apply" fills.
     pub target: Option<u64>,
 }
 
@@ -426,29 +426,29 @@ pub fn pwgen_window(ctx: &egui::Context, g: &mut PwGen) -> Option<(u64, String)>
     }
     let mut apply = None;
     let mut open = true;
-    egui::Window::new(tr("Passwort-Generator")).open(&mut open).resizable(false).show(ctx, |ui| {
+    egui::Window::new(tr("Password generator")).open(&mut open).resizable(false).show(ctx, |ui| {
         let mut changed = false;
-        changed |= ui.add(egui::Slider::new(&mut g.opts.length, 8..=64).text(tr("Länge"))).changed();
+        changed |= ui.add(egui::Slider::new(&mut g.opts.length, 8..=64).text(tr("Length"))).changed();
         ui.horizontal_wrapped(|ui| {
             changed |= ui.checkbox(&mut g.opts.upper, "A-Z").changed();
             changed |= ui.checkbox(&mut g.opts.lower, "a-z").changed();
             changed |= ui.checkbox(&mut g.opts.digits, "0-9").changed();
             changed |= ui.checkbox(&mut g.opts.symbols, "!#$%").changed();
-            changed |= ui.checkbox(&mut g.opts.no_similar, tr("ohne Verwechsler (0 O l 1)")).changed();
+            changed |= ui.checkbox(&mut g.opts.no_similar, tr("no look-alikes (0 O l 1)")).changed();
         });
         if changed {
             g.value = admintools::generate_password(&g.opts);
         }
         ui.add(egui::TextEdit::singleline(&mut g.value).font(egui::TextStyle::Monospace).desired_width(360.0));
         ui.horizontal(|ui| {
-            if ui.button(tr("Neu")).clicked() {
+            if ui.button(tr("New")).clicked() {
                 g.value = admintools::generate_password(&g.opts);
             }
-            if ui.button(tr("Kopieren")).clicked() {
+            if ui.button(tr("Copy")).clicked() {
                 ui.ctx().copy_text(g.value.clone());
             }
             if let Some(id) = g.target {
-                if ui.add(egui::Button::new(RichText::new(tr("Für die Verbindung übernehmen")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(tr("Use for the connection")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
                     apply = Some((id, g.value.clone()));
                 }
             }
@@ -470,7 +470,7 @@ pub struct TunnelRun {
 /// `ssh -N -L local:remote_host:remote_port user@host` in the background (password via
 /// AdminCraft's askpass, jump hosts as -J).
 pub fn start_tunnel(e: &Entry, c: &Creds, jumps: &[JumpHop], t: &Tunnel, settings: &Settings) -> Result<Child, String> {
-    let ssh = crate::programs::find("ssh", settings).ok_or_else(|| tr("OpenSSH (ssh) nicht gefunden.").to_string())?;
+    let ssh = crate::programs::find("ssh", settings).ok_or_else(|| tr("OpenSSH (ssh) not found.").to_string())?;
     let port = if e.port == 0 { 22 } else { e.port };
     let mut args: Vec<String> = vec![
         "-N".into(),
@@ -527,12 +527,12 @@ pub enum TunnelAct {
 
 pub fn tunnels_ui(ui: &mut egui::Ui, entries: &[Entry], runs: &mut HashMap<(u64, usize), TunnelRun>) -> Vec<TunnelAct> {
     let mut acts = Vec::new();
-    ui.label(tr("Portweiterleitungen über SSH: ein lokaler Port auf diesem PC führt zu einem Dienst hinter dem Server."));
-    ui.weak(tr("Tunnel legst du an der SSH-Verbindung an (Eigenschaften » Tunnel)."));
+    ui.label(tr("Port forwarding over SSH: a local port on this PC leads to a service behind the server."));
+    ui.weak(tr("Create tunnels on the SSH connection (Properties » Tunnels)."));
     ui.separator();
     let mut any = false;
     egui::Grid::new("tunnel_rows").striped(true).num_columns(5).spacing([18.0, 6.0]).show(ui, |ui| {
-        for h in [tr("Verbindung"), tr("Lokal"), tr("Ziel (vom Server aus)"), tr("Status"), ""] {
+        for h in [tr("Connection"), tr("Local"), tr("Target (seen from the server)"), tr("Status"), ""] {
             ui.label(RichText::new(h).strong());
         }
         ui.end_row();
@@ -545,21 +545,21 @@ pub fn tunnels_ui(ui: &mut egui::Ui, entries: &[Entry], runs: &mut HashMap<(u64,
                 let mut run = runs.get_mut(&(e.id, i));
                 let alive = run.as_mut().and_then(|r| r.child.as_mut()).map(|c| matches!(c.try_wait(), Ok(None))).unwrap_or(false);
                 if alive {
-                    ui.label(RichText::new(tr("läuft")).color(OK_GREEN));
+                    ui.label(RichText::new(tr("running")).color(OK_GREEN));
                 } else if let Some(err) = run.and_then(|r| r.error.clone()) {
                     ui.label(RichText::new(err).color(BAD_RED));
                 } else {
-                    ui.label(RichText::new(tr("aus")).weak());
+                    ui.label(RichText::new(tr("off")).weak());
                 }
                 ui.horizontal(|ui| {
                     if alive {
-                        if ui.small_button(tr("Stoppen")).clicked() {
+                        if ui.small_button(tr("Stop")).clicked() {
                             acts.push(TunnelAct::Stop(e.id, i));
                         }
-                        if ui.small_button(tr("Im Browser")).on_hover_text(tr("http://localhost:<Port> öffnen")).clicked() {
+                        if ui.small_button(tr("In browser")).on_hover_text(tr("Open http://localhost:<port>")).clicked() {
                             let _ = crate::launch::open_url(&format!("http://localhost:{}", t.local_port));
                         }
-                    } else if ui.small_button(tr("Starten")).clicked() {
+                    } else if ui.small_button(tr("Start")).clicked() {
                         acts.push(TunnelAct::Start(e.id, i));
                     }
                 });
@@ -569,7 +569,7 @@ pub fn tunnels_ui(ui: &mut egui::Ui, entries: &[Entry], runs: &mut HashMap<(u64,
     });
     if !any {
         ui.add_space(10.0);
-        ui.weak(tr("Noch keine Tunnel angelegt."));
+        ui.weak(tr("No tunnels created yet."));
     }
     acts
 }
@@ -585,7 +585,7 @@ pub fn poll_tunnels(runs: &mut HashMap<(u64, usize), TunnelRun>) {
                     let _ = err.read_to_string(&mut text);
                 }
                 let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
-                r.error = Some(if line.is_empty() { tf("beendet (Code {0})", &[&status.code().unwrap_or(-1)]) } else { line });
+                r.error = Some(if line.is_empty() { tf("ended (code {0})", &[&status.code().unwrap_or(-1)]) } else { line });
                 r.child = None;
             }
         }
@@ -610,7 +610,7 @@ pub fn open_windows_tool(tool: WinTool, host: &str) -> Result<String, String> {
         WinTool::Manage => ("mmc", vec!["compmgmt.msc".into(), format!("/computer=\\\\{host}")]),
         WinTool::Share => ("explorer", vec![format!("\\\\{host}\\c$")]),
     };
-    Command::new(prog).args(&args).spawn().map(|_| tf("{0} geöffnet: {1}", &[&prog, &host])).map_err(|e| e.to_string())
+    Command::new(prog).args(&args).spawn().map(|_| tf("{0} opened: {1}", &[&prog, &host])).map_err(|e| e.to_string())
 }
 
 /// Windows computers: shutdown /r or /s on the remote machine (needs admin rights there).
@@ -621,10 +621,10 @@ pub fn windows_power(host: &str, reboot: bool) -> Result<String, String> {
     hidden(&mut cmd);
     let out = cmd.output().map_err(|e| e.to_string())?;
     if out.status.success() {
-        Ok(if reboot { tf("Neustart an {0} geschickt.", &[&host]) } else { tf("Herunterfahren an {0} geschickt.", &[&host]) })
+        Ok(if reboot { tf("Restart sent to {0}.", &[&host]) } else { tf("Shutdown sent to {0}.", &[&host]) })
     } else {
         let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if msg.is_empty() { tf("shutdown meldet Code {0} (Rechte? Firewall?)", &[&out.status.code().unwrap_or(-1)]) } else { msg })
+        Err(if msg.is_empty() { tf("shutdown reports code {0} (rights? firewall?)", &[&out.status.code().unwrap_or(-1)]) } else { msg })
     }
 }
 

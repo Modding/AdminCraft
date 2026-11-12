@@ -68,7 +68,7 @@ fn collect(store: &Store, root: Option<u64>) -> Vec<Entry> {
 pub fn export(store: &Store, root: Option<u64>, mode: PwMode, export_pw: &str, path: &Path) -> Result<usize, String> {
     let entries = collect(store, root);
     if entries.is_empty() {
-        return Err(tr("Nichts zu exportieren.").into());
+        return Err(tr("Nothing to export.").into());
     }
     let count = entries.iter().filter(|e| !e.folder).count();
     let passwords: BTreeMap<u64, String> = if mode == PwMode::Without {
@@ -90,7 +90,7 @@ pub fn export(store: &Store, root: Option<u64>, mode: PwMode, export_pw: &str, p
         }
         PwMode::Encrypted => {
             if export_pw.is_empty() {
-                return Err(tr("Bitte ein Export-Passwort eingeben.").into());
+                return Err(tr("Please enter an export password.").into());
             }
             let salt = new_salt();
             let v = Vault::derive(export_pw, &salt);
@@ -121,7 +121,7 @@ pub enum ReadError {
 pub fn read(text: &str, export_pw: &str) -> Result<(Vec<Entry>, BTreeMap<u64, String>), ReadError> {
     let file: ExportFile = serde_json::from_str(text).map_err(|e| ReadError::Other(e.to_string()))?;
     if file.format != FORMAT {
-        return Err(ReadError::Other(tr("Das ist keine AdminCraft-Exportdatei.").into()));
+        return Err(ReadError::Other(tr("This is not an AdminCraft export file.").into()));
     }
     if file.passwords == "encrypted" {
         if export_pw.is_empty() {

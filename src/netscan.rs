@@ -51,44 +51,44 @@ pub fn parse_targets(text: &str) -> Result<Vec<Ipv4Addr>, String> {
     let mut out: Vec<Ipv4Addr> = Vec::new();
     for part in text.split([',', ';', ' ']).map(str::trim).filter(|p| !p.is_empty()) {
         if let Some((ip, bits)) = part.split_once('/') {
-            let ip: Ipv4Addr = ip.trim().parse().map_err(|_| tf("Ungültige Adresse: {0}", &[&ip]))?;
-            let bits: u32 = bits.trim().parse().ok().filter(|b| *b <= 32).ok_or_else(|| tf("Ungültige Maske: {0}", &[&part]))?;
+            let ip: Ipv4Addr = ip.trim().parse().map_err(|_| tf("Invalid address: {0}", &[&ip]))?;
+            let bits: u32 = bits.trim().parse().ok().filter(|b| *b <= 32).ok_or_else(|| tf("Invalid mask: {0}", &[&part]))?;
             let mask = if bits == 0 { 0 } else { u32::MAX << (32 - bits) };
             let net = u32_of(ip) & mask;
             let size = 1u64 << (32 - bits);
             if size as usize > MAX_HOSTS {
-                return Err(tr("Bereich zu groß (höchstens /16).").into());
+                return Err(tr("Range too large (at most /16).").into());
             }
             let (first, last) = if bits >= 31 { (net, net + size as u32 - 1) } else { (net + 1, net + size as u32 - 2) };
             out.extend((first..=last).map(Ipv4Addr::from));
         } else if let Some((a, b)) = part.split_once('-') {
-            let start: Ipv4Addr = a.trim().parse().map_err(|_| tf("Ungültige Adresse: {0}", &[&a]))?;
+            let start: Ipv4Addr = a.trim().parse().map_err(|_| tf("Invalid address: {0}", &[&a]))?;
             let end: Ipv4Addr = if b.contains('.') {
-                b.trim().parse().map_err(|_| tf("Ungültige Adresse: {0}", &[&b]))?
+                b.trim().parse().map_err(|_| tf("Invalid address: {0}", &[&b]))?
             } else {
-                let last: u8 = b.trim().parse().map_err(|_| tf("Ungültige Adresse: {0}", &[&b]))?;
+                let last: u8 = b.trim().parse().map_err(|_| tf("Invalid address: {0}", &[&b]))?;
                 let o = start.octets();
                 Ipv4Addr::new(o[0], o[1], o[2], last)
             };
             let (s, e) = (u32_of(start), u32_of(end));
             if e < s {
-                return Err(tf("Ungültiger Bereich: {0}", &[&part]));
+                return Err(tf("Invalid range: {0}", &[&part]));
             }
             if (e - s) as usize >= MAX_HOSTS {
-                return Err(tr("Bereich zu groß (höchstens /16).").into());
+                return Err(tr("Range too large (at most /16).").into());
             }
             out.extend((s..=e).map(Ipv4Addr::from));
         } else {
-            out.push(part.parse().map_err(|_| tf("Ungültige Adresse: {0}", &[&part]))?);
+            out.push(part.parse().map_err(|_| tf("Invalid address: {0}", &[&part]))?);
         }
     }
     out.sort();
     out.dedup();
     if out.is_empty() {
-        return Err(tr("Bitte einen Bereich eingeben, z. B. 192.168.1.0/24").into());
+        return Err(tr("Please enter a range, e.g. 192.168.1.0/24").into());
     }
     if out.len() > MAX_HOSTS {
-        return Err(tr("Bereich zu groß (höchstens /16).").into());
+        return Err(tr("Range too large (at most /16).").into());
     }
     Ok(out)
 }
@@ -139,7 +139,7 @@ fn ping_once(ip: Ipv4Addr, timeout_ms: u64, names: bool) -> (bool, Option<u32>, 
     let rtt = parse_rtt(&low);
     let mut name = String::new();
     if names && cfg!(windows) {
-        // "Ping wird ausgeführt für NAME [10.0.0.5] ..." / "Pinging NAME [10.0.0.5] ..."
+        // the header line of Windows ping (any language): "... NAME [10.0.0.5] ..."
         let needle = format!(" [{ip}]");
         if let Some(line) = text.lines().find(|l| l.contains(&needle)) {
             if let Some(end) = line.find(&needle) {

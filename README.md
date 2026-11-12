@@ -85,7 +85,8 @@
 
 **More**
 - Import from **mRemoteNG** (`confCons.xml`) and OpenSSH (`~/.ssh/config`, including ProxyJump).
-- German and English built in, more languages as plain text files (`AdminCraftLang/xx.lang`);
+- English (the program's own text) and German (`lang/de.lang`) built in; more languages as plain text
+  files (`AdminCraftLang/xx.lang`, copy `de.lang.example` there and translate the right side);
   the system language is used by default.
 - A settings page for the paths of helper programs, or simply drop portable programs such as
   `putty.exe` into the `AdminCraftTools` folder next to AdminCraft.

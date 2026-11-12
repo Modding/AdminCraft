@@ -93,11 +93,11 @@ impl Terminal {
         let cols = 110;
         let pair = native_pty_system()
             .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .map_err(|e| tf("Terminal konnte nicht geöffnet werden: {0}", &[&e]))?;
+            .map_err(|e| tf("Terminal could not be opened: {0}", &[&e]))?;
         let child = pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| tf("Programm konnte nicht gestartet werden: {0}", &[&e]))?;
+            .map_err(|e| tf("Program could not be started: {0}", &[&e]))?;
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -280,9 +280,9 @@ impl Terminal {
         if self.exited.is_none() {
             if let Ok(Some(status)) = self.child.try_wait() {
                 self.exited = Some(if status.success() {
-                    tr("Sitzung beendet.").to_string()
+                    tr("Session ended.").to_string()
                 } else {
-                    tf("Sitzung beendet (Code {0}).", &[&(status.exit_code())])
+                    tf("Session ended (code {0}).", &[&(status.exit_code())])
                 });
             }
         }
@@ -393,7 +393,7 @@ impl Terminal {
             }
         }
         if screen.scrollback() > 0 {
-            let t = tf("Verlauf: {0} Zeilen zurück – Taste drücken für aktuell", &[&(screen.scrollback())]);
+            let t = tf("History: {0} lines back – press a key for current", &[&(screen.scrollback())]);
             painter.text(
                 rect.right_top() + Vec2::new(-8.0, 6.0),
                 egui::Align2::RIGHT_TOP,

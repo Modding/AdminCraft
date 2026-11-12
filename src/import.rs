@@ -69,7 +69,7 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
     let mut password = if master.is_empty() { "mR3m".to_string() } else { master.to_string() };
     let mut saw_root = false;
     loop {
-        let ev = reader.read_event().map_err(|e| tf("XML-Fehler: {0}", &[&e]))?;
+        let ev = reader.read_event().map_err(|e| tf("XML error: {0}", &[&e]))?;
         let (e, has_children) = match &ev {
             Event::Start(e) => (e.clone(), true),
             Event::Empty(e) => (e.clone(), false),
@@ -90,7 +90,7 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
             saw_root = true;
             let a = attrs(&e);
             if a.get("FullFileEncryption").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false) {
-                return Err(tr("Diese Datei ist komplett verschlüsselt. Bitte in mRemoteNG ohne \"Vollständige Dateiverschlüsselung\" exportieren.").into());
+                return Err(tr("This file is fully encrypted. Please export it in mRemoteNG without \"full file encryption\".").into());
             }
             if let Some(k) = a.get("KdfIterations").and_then(|v| v.parse().ok()) {
                 iterations = k;
@@ -116,7 +116,7 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
             parent: *stack.last().unwrap_or(&parent),
             folder: is_folder,
             expanded: true,
-            name: if get("Name").is_empty() { tr("Unbenannt").into() } else { get("Name") },
+            name: if get("Name").is_empty() { tr("Unnamed").into() } else { get("Name") },
             description: get("Descr"),
             username: get("Username"),
             domain: get("Domain"),
@@ -155,7 +155,7 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
         }
     }
     if !saw_root && out.entries.is_empty() {
-        return Err(tr("Keine mRemoteNG-Verbindungen in der Datei gefunden.").into());
+        return Err(tr("No mRemoteNG connections found in the file.").into());
     }
     Ok(out)
 }
@@ -223,7 +223,7 @@ pub fn import_ssh_config(text: &str, first_id: u64, parent: Option<u64>) -> Vec<
             ssh_key: h.key.clone(),
             inherit_credentials: false,
             jump_mode: crate::model::JumpMode::ProxyJump,
-            description: tr("Aus ~/.ssh/config").into(),
+            description: tr("From ~/.ssh/config").into(),
             ..Default::default()
         })
         .collect();

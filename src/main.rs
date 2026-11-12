@@ -70,7 +70,7 @@ fn main() -> eframe::Result<()> {
         if a.len() >= 4 && a[1] == "--netscan-check" {
             // admincraft --netscan-check <range> <report file>: scans and writes what it found
             let report = match netscan::parse_targets(&a[2]) {
-                Err(e) => format!("FEHLER: {e}\n"),
+                Err(e) => format!("ERROR: {e}\n"),
                 Ok(targets) => {
                     let ctx = egui::Context::default();
                     let ports = tools::parse_ports(netscan::DEFAULT_PORTS).unwrap_or_default();
@@ -109,7 +109,7 @@ fn main() -> eframe::Result<()> {
         .map(std::path::PathBuf::from);
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("AdminCraft – Remote-Verbindungen")
+        .with_title("AdminCraft")
         .with_inner_size([1360.0, 820.0])
         .with_min_inner_size([900.0, 560.0]);
     if let Some(icon) = window_icon() {

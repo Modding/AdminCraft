@@ -21,35 +21,35 @@ pub struct ProgDef {
 
 #[cfg(windows)]
 pub const PROGRAMS: &[ProgDef] = &[
-    ProgDef { key: "ssh", label: "OpenSSH ssh", purpose: "SSH im Tab, Jump-Host", names: &["ssh"], known: &[r"C:\Windows\System32\OpenSSH\ssh.exe"] },
-    ProgDef { key: "sftp", label: "OpenSSH sftp", purpose: "Dateien (SFTP)", names: &["sftp"], known: &[r"C:\Windows\System32\OpenSSH\sftp.exe"] },
-    ProgDef { key: "scp", label: "OpenSSH scp", purpose: "Dateien (SCP)", names: &["scp"], known: &[r"C:\Windows\System32\OpenSSH\scp.exe"] },
-    ProgDef { key: "putty", label: "PuTTY", purpose: "SSH/Telnet im Tab", names: &["putty"], known: &[r"C:\Program Files\PuTTY\putty.exe", r"C:\Program Files (x86)\PuTTY\putty.exe"] },
-    ProgDef { key: "plink", label: "PuTTY plink", purpose: "Jump-Host für PuTTY, SCP-Liste", names: &["plink"], known: &[r"C:\Program Files\PuTTY\plink.exe", r"C:\Program Files (x86)\PuTTY\plink.exe"] },
-    ProgDef { key: "psftp", label: "PuTTY psftp", purpose: "Dateien (SFTP) ohne OpenSSH", names: &["psftp"], known: &[r"C:\Program Files\PuTTY\psftp.exe", r"C:\Program Files (x86)\PuTTY\psftp.exe"] },
-    ProgDef { key: "pscp", label: "PuTTY pscp", purpose: "Dateien (SCP) ohne OpenSSH", names: &["pscp"], known: &[r"C:\Program Files\PuTTY\pscp.exe", r"C:\Program Files (x86)\PuTTY\pscp.exe"] },
-    ProgDef { key: "mstsc", label: "Remotedesktop (mstsc)", purpose: "RDP im Tab", names: &["mstsc"], known: &[r"C:\Windows\System32\mstsc.exe"] },
-    ProgDef { key: "vnc", label: "VNC-Viewer", purpose: "VNC im Tab", names: &["vncviewer", "tvnviewer", "vncviewer64"], known: &[r"C:\Program Files\TigerVNC\vncviewer.exe", r"C:\Program Files\RealVNC\VNC Viewer\vncviewer.exe", r"C:\Program Files\TightVNC\tvnviewer.exe", r"C:\Program Files\uvnc bvba\UltraVNC\vncviewer.exe"] },
-    ProgDef { key: "telnet", label: "Telnet", purpose: "Telnet im Tab", names: &["telnet"], known: &[r"C:\Windows\System32\telnet.exe"] },
-    ProgDef { key: "winscp", label: "WinSCP", purpose: "Optional: Dateien extern öffnen", names: &["winscp"], known: &[r"C:\Program Files (x86)\WinSCP\WinSCP.exe", r"C:\Program Files\WinSCP\WinSCP.exe"] },
-    ProgDef { key: "filezilla", label: "FileZilla", purpose: "Optional: FTP extern öffnen", names: &["filezilla"], known: &[r"C:\Program Files\FileZilla FTP Client\filezilla.exe"] },
-    ProgDef { key: "browser", label: "Edge / Chrome", purpose: "Weboberflächen im Tab", names: &["msedge", "chrome"], known: &[r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Google\Chrome\Application\chrome.exe"] },
+    ProgDef { key: "ssh", label: "OpenSSH ssh", purpose: "SSH in tab, jump host", names: &["ssh"], known: &[r"C:\Windows\System32\OpenSSH\ssh.exe"] },
+    ProgDef { key: "sftp", label: "OpenSSH sftp", purpose: "Files (SFTP)", names: &["sftp"], known: &[r"C:\Windows\System32\OpenSSH\sftp.exe"] },
+    ProgDef { key: "scp", label: "OpenSSH scp", purpose: "Files (SCP)", names: &["scp"], known: &[r"C:\Windows\System32\OpenSSH\scp.exe"] },
+    ProgDef { key: "putty", label: "PuTTY", purpose: "SSH/Telnet in tab", names: &["putty"], known: &[r"C:\Program Files\PuTTY\putty.exe", r"C:\Program Files (x86)\PuTTY\putty.exe"] },
+    ProgDef { key: "plink", label: "PuTTY plink", purpose: "Jump host for PuTTY, SCP listing", names: &["plink"], known: &[r"C:\Program Files\PuTTY\plink.exe", r"C:\Program Files (x86)\PuTTY\plink.exe"] },
+    ProgDef { key: "psftp", label: "PuTTY psftp", purpose: "Files (SFTP) without OpenSSH", names: &["psftp"], known: &[r"C:\Program Files\PuTTY\psftp.exe", r"C:\Program Files (x86)\PuTTY\psftp.exe"] },
+    ProgDef { key: "pscp", label: "PuTTY pscp", purpose: "Files (SCP) without OpenSSH", names: &["pscp"], known: &[r"C:\Program Files\PuTTY\pscp.exe", r"C:\Program Files (x86)\PuTTY\pscp.exe"] },
+    ProgDef { key: "mstsc", label: "Remote desktop (mstsc)", purpose: "RDP in tab", names: &["mstsc"], known: &[r"C:\Windows\System32\mstsc.exe"] },
+    ProgDef { key: "vnc", label: "VNC viewer", purpose: "VNC in tab", names: &["vncviewer", "tvnviewer", "vncviewer64"], known: &[r"C:\Program Files\TigerVNC\vncviewer.exe", r"C:\Program Files\RealVNC\VNC Viewer\vncviewer.exe", r"C:\Program Files\TightVNC\tvnviewer.exe", r"C:\Program Files\uvnc bvba\UltraVNC\vncviewer.exe"] },
+    ProgDef { key: "telnet", label: "Telnet", purpose: "Telnet in tab", names: &["telnet"], known: &[r"C:\Windows\System32\telnet.exe"] },
+    ProgDef { key: "winscp", label: "WinSCP", purpose: "Optional: open files externally", names: &["winscp"], known: &[r"C:\Program Files (x86)\WinSCP\WinSCP.exe", r"C:\Program Files\WinSCP\WinSCP.exe"] },
+    ProgDef { key: "filezilla", label: "FileZilla", purpose: "Optional: open FTP externally", names: &["filezilla"], known: &[r"C:\Program Files\FileZilla FTP Client\filezilla.exe"] },
+    ProgDef { key: "browser", label: "Edge / Chrome", purpose: "Web interfaces in a tab", names: &["msedge", "chrome"], known: &[r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Google\Chrome\Application\chrome.exe"] },
 ];
 
 #[cfg(not(windows))]
 pub const PROGRAMS: &[ProgDef] = &[
-    ProgDef { key: "ssh", label: "OpenSSH ssh", purpose: "SSH im Tab, Jump-Host", names: &["ssh"], known: &["/usr/bin/ssh"] },
-    ProgDef { key: "sftp", label: "OpenSSH sftp", purpose: "Dateien (SFTP)", names: &["sftp"], known: &["/usr/bin/sftp"] },
-    ProgDef { key: "scp", label: "OpenSSH scp", purpose: "Dateien (SCP)", names: &["scp"], known: &["/usr/bin/scp"] },
-    ProgDef { key: "putty", label: "PuTTY", purpose: "SSH in eigenem Fenster", names: &["putty"], known: &["/usr/bin/putty", "/opt/homebrew/bin/putty", "/usr/local/bin/putty"] },
-    ProgDef { key: "plink", label: "PuTTY plink", purpose: "Jump-Host für PuTTY", names: &["plink"], known: &["/usr/bin/plink", "/opt/homebrew/bin/plink"] },
-    ProgDef { key: "psftp", label: "PuTTY psftp", purpose: "Dateien (SFTP) ohne OpenSSH", names: &["psftp"], known: &["/usr/bin/psftp"] },
-    ProgDef { key: "pscp", label: "PuTTY pscp", purpose: "Dateien (SCP) ohne OpenSSH", names: &["pscp"], known: &["/usr/bin/pscp"] },
+    ProgDef { key: "ssh", label: "OpenSSH ssh", purpose: "SSH in tab, jump host", names: &["ssh"], known: &["/usr/bin/ssh"] },
+    ProgDef { key: "sftp", label: "OpenSSH sftp", purpose: "Files (SFTP)", names: &["sftp"], known: &["/usr/bin/sftp"] },
+    ProgDef { key: "scp", label: "OpenSSH scp", purpose: "Files (SCP)", names: &["scp"], known: &["/usr/bin/scp"] },
+    ProgDef { key: "putty", label: "PuTTY", purpose: "SSH in its own window", names: &["putty"], known: &["/usr/bin/putty", "/opt/homebrew/bin/putty", "/usr/local/bin/putty"] },
+    ProgDef { key: "plink", label: "PuTTY plink", purpose: "Jump host for PuTTY", names: &["plink"], known: &["/usr/bin/plink", "/opt/homebrew/bin/plink"] },
+    ProgDef { key: "psftp", label: "PuTTY psftp", purpose: "Files (SFTP) without OpenSSH", names: &["psftp"], known: &["/usr/bin/psftp"] },
+    ProgDef { key: "pscp", label: "PuTTY pscp", purpose: "Files (SCP) without OpenSSH", names: &["pscp"], known: &["/usr/bin/pscp"] },
     ProgDef { key: "rdp", label: "FreeRDP", purpose: "RDP", names: &["xfreerdp3", "xfreerdp", "wlfreerdp3", "wlfreerdp", "sdl-freerdp3", "sdl-freerdp"], known: &["/opt/homebrew/bin/xfreerdp", "/usr/local/bin/xfreerdp"] },
-    ProgDef { key: "vnc", label: "VNC-Viewer", purpose: "VNC", names: &["vncviewer", "xtigervncviewer", "gvncviewer"], known: &["/Applications/TigerVNC Viewer.app/Contents/MacOS/TigerVNC Viewer"] },
-    ProgDef { key: "telnet", label: "Telnet", purpose: "Telnet im Tab", names: &["telnet"], known: &["/usr/bin/telnet", "/opt/homebrew/bin/telnet"] },
+    ProgDef { key: "vnc", label: "VNC viewer", purpose: "VNC", names: &["vncviewer", "xtigervncviewer", "gvncviewer"], known: &["/Applications/TigerVNC Viewer.app/Contents/MacOS/TigerVNC Viewer"] },
+    ProgDef { key: "telnet", label: "Telnet", purpose: "Telnet in tab", names: &["telnet"], known: &["/usr/bin/telnet", "/opt/homebrew/bin/telnet"] },
     ProgDef { key: "remmina", label: "Remmina", purpose: "RDP/VNC (Linux)", names: &["remmina"], known: &[] },
-    ProgDef { key: "filezilla", label: "FileZilla", purpose: "Optional: FTP extern öffnen", names: &["filezilla"], known: &["/Applications/FileZilla.app/Contents/MacOS/filezilla"] },
+    ProgDef { key: "filezilla", label: "FileZilla", purpose: "Optional: open FTP externally", names: &["filezilla"], known: &["/Applications/FileZilla.app/Contents/MacOS/filezilla"] },
 ];
 
 pub fn def(key: &str) -> Option<&'static ProgDef> {
@@ -79,15 +79,15 @@ pub fn tools_dir() -> PathBuf {
 pub fn ensure_tools_dir() -> PathBuf {
     let d = tools_dir();
     if std::fs::create_dir_all(&d).is_ok() {
-        let readme = d.join("LIESMICH.txt");
-        if !readme.exists() {
+        let readme = d.join("README.txt");
+        if !readme.exists() && !d.join("LIESMICH.txt").exists() {
             let _ = std::fs::write(
                 readme,
-                "Hier portable Programme ablegen, AdminCraft findet sie von selbst:\r\n\
+                "Put portable programs here, AdminCraft finds them by itself:\r\n\
                  - putty.exe, plink.exe, psftp.exe, pscp.exe (PuTTY)\r\n\
-                 - vncviewer.exe (TigerVNC) oder tvnviewer.exe (TightVNC)\r\n\
+                 - vncviewer.exe (TigerVNC) or tvnviewer.exe (TightVNC)\r\n\
                  - WinSCP.exe, filezilla.exe\r\n\
-                 Unterordner (eine Ebene) werden mit durchsucht, z. B. AdminCraftTools\\PuTTY\\putty.exe.\r\n",
+                 Subfolders (one level) are searched too, e.g. AdminCraftTools\\PuTTY\\putty.exe.\r\n",
             );
         }
     }
@@ -150,10 +150,10 @@ pub enum Source {
 impl Source {
     pub fn label(self) -> &'static str {
         tr(match self {
-            Source::Settings => "eigener Pfad",
-            Source::ToolsFolder => "Programme-Ordner",
-            Source::System => "System",
-            Source::Installed => "installiert",
+            Source::Settings => "own path",
+            Source::ToolsFolder => "Programs folder",
+            Source::System => "system",
+            Source::Installed => "installed",
         })
     }
 }
@@ -231,7 +231,7 @@ pub fn spawn_in_terminal(
             cmd.env(k, v);
         }
         let _ = title;
-        cmd.spawn().map(|_| tr("Konsolenfenster").to_string()).map_err(|e| e.to_string())
+        cmd.spawn().map(|_| tr("console window").to_string()).map_err(|e| e.to_string())
     }
     #[cfg(target_os = "macos")]
     {
@@ -278,6 +278,6 @@ pub fn spawn_in_terminal(
             }
         }
         let _ = sh_quote("");
-        Err(tr("Kein Terminal-Programm gefunden (gnome-terminal, konsole, xterm …).").into())
+        Err(tr("No terminal program found (gnome-terminal, konsole, xterm …).").into())
     }
 }
