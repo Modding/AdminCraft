@@ -250,6 +250,28 @@ fn whole_list_encrypted_with_master_password() {
 }
 
 #[test]
+fn mcp_server_protocol() {
+    let mut out: Vec<u8> = Vec::new();
+    crate::agent::handle("\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}", &mut out);
+    crate::agent::handle("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", &mut out);
+    crate::agent::handle("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", &mut out);
+    crate::agent::handle(
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"subnet\",\"arguments\":{\"cidr\":\"10.1.2.3/24\"}}}",
+        &mut out,
+    );
+    crate::agent::handle("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"nope\"}", &mut out);
+    let lines: Vec<serde_json::Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(lines.len(), 4, "the notification gets no answer");
+    assert_eq!(lines[0]["result"]["serverInfo"]["name"], "admincraft");
+    assert!(lines[1]["result"]["tools"].as_array().unwrap().len() >= 7);
+    let text = lines[2]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("10.1.2.255") && lines[2]["result"]["isError"] == false);
+    assert_eq!(lines[3]["error"]["code"], -32601);
+    // never a password anywhere in the tool descriptions' promises
+    assert!(lines[1].to_string().contains("Never includes passwords"));
+}
+
+#[test]
 fn credential_sources() {
     let mut s = temp_store("creds");
     let id = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;

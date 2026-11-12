@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod admintools;
+mod agent;
 mod app;
 mod embed;
 mod extra;
@@ -24,6 +25,19 @@ use eframe::egui;
 /// The program icon / logo (honey badger, rounded square, 256 px).
 pub const LOGO_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
 
+/// The release build is a window program; started from a terminal, its text output goes to
+/// that terminal (unless it is already redirected, e.g. to a pipe).
+fn attach_console() {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Console::{AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_OUTPUT_HANDLE};
+        let h = GetStdHandle(STD_OUTPUT_HANDLE);
+        if h.is_null() || h as isize == -1 {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
 fn window_icon() -> Option<egui::IconData> {
     let img = image::load_from_memory(LOGO_PNG).ok()?.to_rgba8();
     Some(egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() })
@@ -35,7 +49,19 @@ fn main() -> eframe::Result<()> {
         let prompt = std::env::args().nth(1).unwrap_or_default();
         std::process::exit(transfer::askpass_main(&prompt));
     }
+    {
+        let a: Vec<String> = std::env::args().collect();
+        match a.get(1).map(String::as_str) {
+            Some("cli") => {
+                attach_console();
+                std::process::exit(agent::cli(&a[2..]));
+            }
+            Some("mcp") => std::process::exit(agent::mcp_main()),
+            _ => {}
+        }
+    }
     if std::env::args().any(|a| a == "--version" || a == "-V") {
+        attach_console();
         println!("AdminCraft {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }

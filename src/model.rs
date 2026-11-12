@@ -690,6 +690,12 @@ impl Store {
                 }
             }
         }
+        // command line / MCP server: the master password may come from the environment
+        if store.locked() {
+            if let Ok(pw) = std::env::var("AC_MASTER") {
+                store.unlock(&pw);
+            }
+        }
         store
     }
 

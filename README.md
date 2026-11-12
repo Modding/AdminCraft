@@ -125,6 +125,34 @@ cargo test
 Command line for checks: `--screenshot <file.png>` (draws ~120 frames, saves the window, exits),
 `--lang de|en`, `--data <folder>`.
 
+## For agents: CLI and MCP
+
+The same tools the window offers are available to scripts and AI agents — passwords are never returned.
+
+```sh
+admincraft cli list [filter]          # saved connections as JSON
+admincraft cli scan 192.168.1.0/24    # network scan incl. new/gone/changed against the saved baseline
+admincraft cli ports <host> [ports]   # TCP port scan
+admincraft cli dns <name> | subnet <cidr> | cert <host> [port]
+admincraft cli open <name>            # open a connection in the window
+admincraft mcp                        # MCP server on stdin/stdout
+```
+
+MCP client configuration (Claude Desktop, Claude Code, Cursor …):
+
+```json
+{ "mcpServers": { "admincraft": { "command": "C:\\Tools\\AdminCraft\\AdminCraft.exe", "args": ["mcp"] } } }
+```
+
+Tools: `list_connections`, `open_connection`, `scan_network`, `port_scan`, `dns_lookup`, `subnet`,
+`check_certificate`. A fully encrypted connection list is read with the master password in `AC_MASTER`.
+
+## Keyboard
+
+`Ctrl+Tab` / `Ctrl+Shift+Tab` switch tabs, `Ctrl+Shift+W` closes, `Ctrl+Shift+N` new connection,
+`Ctrl+Shift+F` search, `Ctrl+Shift+S` screenshot, `Ctrl+Shift+L` network scan, `Ctrl+,` settings,
+`F1` all shortcuts (Cmd on macOS). Shift keeps the plain Ctrl keys free for programs in a terminal tab.
+
 ## Releases
 
 Versions follow semantic versioning (`0.x.y`) like the other Craft apps. Each release
