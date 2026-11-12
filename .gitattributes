@@ -1,0 +1,9 @@
+# Same line endings for everyone; Windows scripts keep CRLF.
+* text=auto
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.lang text eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.exe binary
