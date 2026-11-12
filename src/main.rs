@@ -21,6 +21,14 @@ mod tests;
 
 use eframe::egui;
 
+/// The program icon / logo (honey badger, rounded square, 256 px).
+pub const LOGO_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
+
+fn window_icon() -> Option<egui::IconData> {
+    let img = image::load_from_memory(LOGO_PNG).ok()?.to_rgba8();
+    Some(egui::IconData { width: img.width(), height: img.height(), rgba: img.into_raw() })
+}
+
 fn main() -> eframe::Result<()> {
     // OpenSSH asks AdminCraft for a password (file transfer, outside terminal window).
     if std::env::var_os("AC_ASKPASS").is_some() {
@@ -74,6 +82,9 @@ fn main() -> eframe::Result<()> {
         .with_title("AdminCraft – Remote-Verbindungen")
         .with_inner_size([1360.0, 820.0])
         .with_min_inner_size([900.0, 560.0]);
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
     if screenshot.is_some() {
         viewport = viewport.with_active(false);
         #[cfg(windows)]

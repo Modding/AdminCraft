@@ -2854,7 +2854,7 @@ impl AdminApp {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                logo(ui, 44.0);
+                logo(ui, 60.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new(tr("AdminCraft")).size(28.0).strong());
                     ui.label(tr("Alle Server, Switches und PCs an einem Ort – RDP, SSH, VNC, Telnet, PowerShell und Web."));
@@ -4698,15 +4698,24 @@ fn card(ui: &mut egui::Ui, title: &str, sub: &str, color: Color32) -> egui::Resp
 }
 
 /// Simple drawn mark: two linked screens.
+/// The AdminCraft logo (honey badger), loaded once into a texture.
 fn logo(ui: &mut egui::Ui, size: f32) {
-    let (r, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(r, size * 0.22, ACCENT);
-    let s = size / 44.0;
-    let a = Rect::from_min_size(r.min + Vec2::new(7.0, 9.0) * s, Vec2::new(17.0, 12.0) * s);
-    let b = Rect::from_min_size(r.min + Vec2::new(20.0, 22.0) * s, Vec2::new(17.0, 12.0) * s);
-    p.rect_stroke(a, 2.0 * s, Stroke::new(2.0 * s, Color32::WHITE), egui::StrokeKind::Middle);
-    p.rect_filled(b, 2.0 * s, Color32::WHITE);
-    p.line_segment([a.center_bottom(), Pos2::new(a.center().x, b.center().y)], Stroke::new(2.0 * s, Color32::WHITE));
-    p.line_segment([Pos2::new(a.center().x, b.center().y), b.left_center()], Stroke::new(2.0 * s, Color32::WHITE));
+    let ctx = ui.ctx().clone();
+    let id = egui::Id::new("admincraft-logo");
+    let tex = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        Some(t) => t,
+        None => {
+            let img = match image::load_from_memory(crate::LOGO_PNG) {
+                Ok(i) => {
+                    let i = i.to_rgba8();
+                    egui::ColorImage::from_rgba_unmultiplied([i.width() as usize, i.height() as usize], i.as_raw())
+                }
+                Err(_) => egui::ColorImage::new([1, 1], vec![ACCENT]),
+            };
+            let t = ctx.load_texture("admincraft-logo", img, egui::TextureOptions::LINEAR);
+            ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+            t
+        }
+    };
+    ui.add(egui::Image::new((tex.id(), Vec2::splat(size))));
 }
