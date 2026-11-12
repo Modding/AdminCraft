@@ -20,7 +20,20 @@
 - mRemoteNG password import with real `confCons.xml` files.
 - Linux and macOS builds (compiled and run there).
 
+## Craft principles
+
+| Principle | Status |
+|---|---|
+| Open source | Yes — MIT OR Apache-2.0, everything on GitHub. |
+| Native, not wrapped | Yes — pure Rust + egui, no Electron. Optional extras start the system's own programs (mstsc, PuTTY, Edge app window for web interfaces) and place their windows in a tab. |
+| Familiar from day one | Yes — the mRemoteNG / Royal TS layout (tree, tabs, properties), right-click menus, tab drag & drop and the usual shortcuts. |
+| Your files, your machine | Yes — local data next to the program; central storage (SMB/WebDAV) only when chosen. |
+| Agent-ready | Yes — `admincraft cli …` (JSON) and `admincraft mcp` (MCP server). A JSON control channel into the running window is not there yet. |
+| Also in your browser | No — SSH, RDP, terminals, port scans and file transfer need direct sockets and processes, which a browser tab doesn't allow. A web build could only offer the calculators; not planned for now. |
+
 ## Ideas
+
+- JSON control channel to the running window (open tabs, read terminal text) for agents.
 
 - Native RDP/VNC rendering on Linux and macOS inside the tab.
 - Writing passwords back to KeePass.

@@ -241,6 +241,9 @@ pub struct AdminApp {
     import_pw: String,
     import_msg: Option<(bool, String)>,
     show_about: bool,
+    show_keys: bool,
+    focus_search: bool,
+    close_request: Option<usize>,
     show_props: bool,
     confirm_delete: Option<u64>,
     show_password: bool,
@@ -335,6 +338,9 @@ impl AdminApp {
             import_pw: String::new(),
             import_msg: None,
             show_about: false,
+            show_keys: false,
+            focus_search: false,
+            close_request: None,
             show_props: true,
             confirm_delete: None,
             show_password: false,
@@ -649,6 +655,72 @@ impl AdminApp {
             });
         }
         self.show_ximport = open;
+    }
+
+    /// Keyboard shortcuts. Ctrl+Shift so they don't take keys a shell in a terminal tab needs.
+    fn shortcuts(&mut self, ctx: &egui::Context, now: f64) {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        let cs = |k| KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, k);
+        let hit = |sc: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&sc));
+        let n = self.tabs.len().max(1);
+        if hit(cs(Key::Tab)) {
+            self.active = (self.active + n - 1) % n;
+        } else if hit(KeyboardShortcut::new(Modifiers::COMMAND, Key::Tab)) {
+            self.active = (self.active + 1) % n;
+        }
+        if hit(cs(Key::W)) {
+            self.close_request = Some(self.active);
+        }
+        if hit(cs(Key::N)) {
+            let p = self.new_parent_for_selection();
+            self.apply(Act::NewConn(p), ctx, now);
+        }
+        if hit(cs(Key::F)) {
+            self.focus_search = true;
+        }
+        if hit(cs(Key::S)) {
+            self.shot_tab = Some(self.last_content);
+        }
+        if hit(cs(Key::E)) {
+            self.open_export(None);
+        }
+        if hit(cs(Key::L)) {
+            self.open_netscan(String::new());
+        }
+        if hit(KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma)) {
+            self.open_settings();
+        }
+        if hit(KeyboardShortcut::new(Modifiers::NONE, Key::F1)) {
+            self.show_keys = true;
+        }
+        if self.show_keys {
+            let mut open = true;
+            egui::Window::new(tr("Tastenkürzel")).open(&mut open).resizable(false).show(ctx, |ui| {
+                egui::Grid::new("keys").num_columns(2).striped(true).spacing([24.0, 6.0]).show(ui, |ui| {
+                    for (k, what) in [
+                        ("Ctrl+Tab", tr("Nächster Tab")),
+                        ("Ctrl+Shift+Tab", tr("Vorheriger Tab")),
+                        ("Ctrl+Shift+W", tr("Tab schließen")),
+                        ("Ctrl+Shift+N", tr("Neue Verbindung")),
+                        ("Ctrl+Shift+F", tr("Verbindungen durchsuchen")),
+                        ("Ctrl+Shift+S", tr("Bildschirmfoto des Tabs")),
+                        ("Ctrl+Shift+E", tr("Verbindungen exportieren")),
+                        ("Ctrl+Shift+L", tr("Netzwerk-Scan")),
+                        ("Ctrl+,", tr("Einstellungen")),
+                        ("F1", tr("Diese Übersicht")),
+                        (tr("Doppelklick"), tr("Verbindung öffnen / Tab umbenennen")),
+                        (tr("Mittlere Maustaste"), tr("Tab schließen")),
+                    ] {
+                        ui.label(RichText::new(k).monospace().strong());
+                        ui.label(what);
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(4.0);
+                ui.weak(tr("Mit Shift, damit Terminal-Programme ihre eigenen Strg-Tasten behalten. macOS: Cmd statt Ctrl."));
+            });
+            self.show_keys = open;
+        }
     }
 
     fn open_netscan(&mut self, range: String) {
@@ -1504,6 +1576,9 @@ impl AdminApp {
                 }
             });
             ui.menu_button(tr("Hilfe"), |ui| {
+                if ui.add(egui::Button::new(tr("Tastenkürzel")).shortcut_text("F1")).clicked() {
+                    self.show_keys = true;
+                }
                 if ui.button(tr("Über AdminCraft")).clicked() {
                     self.show_about = true;
                 }
@@ -1623,7 +1698,10 @@ impl AdminApp {
         ui.horizontal(|ui| {
             ui.heading(tr("Verbindungen"));
         });
-        ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text(tr("Suchen (Name, Host, Benutzer) …")).desired_width(f32::INFINITY));
+        let search = ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text(tr("Suchen (Name, Host, Benutzer) …")).desired_width(f32::INFINITY));
+        if std::mem::take(&mut self.focus_search) {
+            search.request_focus();
+        }
         ui.horizontal(|ui| {
             if ui.button(tr("+ Verbindung")).clicked() {
                 acts.push(Act::NewConn(self.new_parent_for_selection()));
@@ -2408,7 +2486,7 @@ impl AdminApp {
     }
 
     fn tab_strip(&mut self, ui: &mut egui::Ui) {
-        let mut close: Option<usize> = None;
+        let mut close: Option<usize> = self.close_request.take().filter(|&i| i > 0 && i < self.tabs.len());
         let mut swap: Option<(usize, usize)> = None;
         let mut rename_start: Option<(u64, String)> = None;
         let mut rename_done: Option<(u64, Option<String>)> = None;
@@ -3716,6 +3794,7 @@ impl eframe::App for AdminApp {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         self.apply_theme(&ctx);
+        self.shortcuts(&ctx, now);
         if self.parent_hwnd.is_none() {
             self.parent_hwnd = embed::parent_handle(frame);
             if let Some(h) = self.parent_hwnd {

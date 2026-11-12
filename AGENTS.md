@@ -42,6 +42,7 @@ Windows without Visual Studio: `cargo.cmd` runs a local Rust + LLVM-MinGW toolch
 | `src/admintools.rs` | subnet math, TLS certificate check, passwords, TOTP |
 | `src/sharing.rs` | export / import for colleagues |
 | `src/remote.rs` | WebDAV storage |
+| `src/agent.rs` | `admincraft cli …` (JSON) and `admincraft mcp` (MCP server over stdio); never returns passwords |
 | `src/keepass_vault.rs` | reading KeePass databases |
 | `src/i18n.rs`, `lang/en.lang` | translations |
 | `src/programs.rs` | finding helper programs (settings path, `AdminCraftTools`, PATH) |
