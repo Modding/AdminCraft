@@ -1,0 +1,46 @@
+# ---- build output and local build tools (several GB, rebuilt anywhere) ----
+/target/
+/target-*/
+/.toolchain/
+/dist/
+/shots/
+# diagnostic notes written next to screenshots
+docs/images/*.txt
+*.pdb
+
+# ---- personal data: never check in ----
+# connections, encrypted passwords, settings, backups
+AdminCraftData/
+*.json.bak
+*.json.tmp
+connections.json
+# programs put next to AdminCraft (PuTTY, VNC viewer, WinSCP ...)
+AdminCraftTools/
+# own language files and the generated template (the built-in ones live in lang/)
+AdminCraftLang/
+# password databases, keys and certificates
+*.kdbx
+*.key
+*.keyx
+*.pem
+*.ppk
+*.pfx
+*.p12
+id_rsa*
+id_ed25519*
+id_ecdsa*
+known_hosts
+# connection files that may hold logins
+*.rdp
+confCons.xml
+.env
+.env.*
+
+# ---- editor / system clutter ----
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

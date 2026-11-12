@@ -1,0 +1,50 @@
+[package]
+name = "admincraft"
+version = "0.1.0"
+edition = "2021"
+description = "Portable remote connection manager (SSH, RDP, VNC, Telnet, PowerShell, SFTP/FTP) with admin tools"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Modding/AdminCraft"
+readme = "README.md"
+keywords = ["remote-desktop", "ssh", "rdp", "sysadmin", "portable"]
+categories = ["network-programming", "gui"]
+
+[dependencies]
+aes-gcm = "0.11.1"
+argon2 = "0.6.0"
+base64 = "0.23.1"
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "links", "glow", "wayland", "x11"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+keepass = "0.17.0"
+pbkdf2 = { version = "0.13.0", features = ["hmac"] }
+portable-pty = "0.9.0"
+quick-xml = "0.42.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha1 = "0.11.0"
+# FTPS through rustls: one TLS setup shared by control and data connections, so servers
+# that demand TLS session reuse (FileZilla Server, vsftpd) work.
+suppaftp = { version = "12.2.1", features = ["rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
+vt100 = "0.18.1"
+raw-window-handle = "0.6"
+sys-locale = "0.3.2"
+x509-parser = "0.18.1"
+getrandom = "0.3"
+ureq = "3.5.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+winit = "0.30"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
+
+[dev-dependencies]
+# only the self-tests write a KeePass file
+keepass = { version = "0.17.0", features = ["save_kdbx4"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
