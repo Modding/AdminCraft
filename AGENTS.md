@@ -46,6 +46,21 @@ Windows without Visual Studio: `cargo.cmd` runs a local Rust + LLVM-MinGW toolch
 | `src/i18n.rs`, `lang/en.lang` | translations |
 | `src/programs.rs` | finding helper programs (settings path, `AdminCraftTools`, PATH) |
 
+## Versions and releases
+
+Same scheme as the other Craft apps:
+
+- Semantic versioning, `0.x.y` while the app is young: `x` for new features, `y` for fixes.
+- The version lives only in `Cargo.toml` (`version = "…"`); the app shows it in *Help » About* and
+  with `admincraft --version`.
+- To release: raise the version in `Cargo.toml` (run `cargo build` so `Cargo.lock` follows), commit
+  to `main`, then push `main` to the `release` branch (`git push origin main:release`).
+  `.github/workflows/release.yml` builds Windows, Linux and macOS and publishes **AdminCraft vX.Y.Z**
+  with the tag `vX.Y.Z`, the files `admincraft-X.Y.Z-<system>-<arch>[-portable].zip|tar.gz`,
+  `SHA256SUMS.txt` and GitHub's generated release notes. A version that already has a release is refused.
+- A nightly dry run builds everything from `main` without publishing; *Run workflow* can test a
+  version such as `0.2.0-rc.1` (pre-release).
+
 ## Rules
 
 - **Translations:** every user-visible text is German source text wrapped in `tr("…")` or
