@@ -1177,8 +1177,8 @@ impl AdminApp {
                     self.note(w, true, now);
                 }
                 if how == How::Default && e.protocol == Protocol::Ssh {
-                    for idx in 0..e.tunnels.len() {
-                        if e.tunnels[idx].auto && !self.tunnel_running(id, idx) {
+                    for (idx, tunnel) in e.tunnels.iter().enumerate() {
+                        if tunnel.auto && !self.tunnel_running(id, idx) {
                             self.start_tunnel(id, idx, now);
                         }
                     }

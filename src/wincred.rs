@@ -77,11 +77,6 @@ pub fn store(_target: &str, _user: &str, _password: &str) -> Result<bool, String
 }
 
 #[cfg(not(windows))]
-pub fn exists(_target: &str) -> bool {
-    false
-}
-
-#[cfg(not(windows))]
 pub fn delete(_target: &str) -> bool {
     false
 }
