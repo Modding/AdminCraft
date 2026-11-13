@@ -2,8 +2,8 @@
 
 #[allow(unused_imports)]
 use crate::i18n::{t as tr, tf};
-use aes_gcm::aead::{Aead, Generate, KeyInit};
 use aes_gcm::Aes256Gcm;
+use aes_gcm::aead::{Aead, Generate, KeyInit};
 use base64::Engine as _;
 use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
@@ -502,22 +502,30 @@ pub struct Vault {
 }
 
 impl Vault {
-    pub fn derive(password: &str, salt: &[u8]) -> Vault {
+    /// Fails for a salt Argon2 refuses (shorter than 8 bytes) — a salt read from a file is
+    /// input like any other and must not bring the program down.
+    pub fn derive(password: &str, salt: &[u8]) -> Result<Vault, String> {
+        use zeroize::Zeroize;
         let mut key = [0u8; 32];
-        let pw = format!("AdminCraft:{password}");
-        argon2::Argon2::default()
-            .hash_password_into(pw.as_bytes(), salt, &mut key)
-            .expect("argon2");
-        Vault { key }
+        let mut pw = format!("AdminCraft:{password}");
+        let done = argon2::Argon2::default().hash_password_into(pw.as_bytes(), salt, &mut key);
+        pw.zeroize();
+        match done {
+            Ok(()) => Ok(Vault { key }),
+            Err(e) => {
+                key.zeroize();
+                Err(e.to_string())
+            }
+        }
     }
 
-    pub fn encrypt(&self, plain: &str) -> String {
-        let cipher = Aes256Gcm::new_from_slice(&self.key).expect("key");
+    pub fn encrypt(&self, plain: &str) -> Result<String, String> {
+        let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|e| e.to_string())?;
         let nonce = aes_gcm::aead::Nonce::<Aes256Gcm>::generate();
-        let ct = cipher.encrypt(&nonce, plain.as_bytes()).expect("encrypt");
+        let ct = cipher.encrypt(&nonce, plain.as_bytes()).map_err(|e| e.to_string())?;
         let mut out = nonce.to_vec();
         out.extend_from_slice(&ct);
-        B64.encode(out)
+        Ok(B64.encode(out))
     }
 
     pub fn decrypt(&self, text: &str) -> Option<String> {
@@ -529,6 +537,14 @@ impl Vault {
         let nonce = aes_gcm::aead::Nonce::<Aes256Gcm>::try_from(&raw[..12]).ok()?;
         let plain = cipher.decrypt(&nonce, &raw[12..]).ok()?;
         String::from_utf8(plain).ok()
+    }
+}
+
+/// The key is wiped from memory when the vault goes away.
+impl Drop for Vault {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
     }
 }
 
@@ -597,33 +613,27 @@ fn hash_text(t: &str) -> u64 {
 /// Portable first: a folder next to the program. Falls back to the home folder when that
 /// place can't be written (e.g. inside a macOS app bundle or a read-only share).
 pub fn data_dir(create: bool) -> PathBuf {
-    if let Some(dir) = std::env::args()
-        .skip_while(|a| a != "--data")
-        .nth(1)
-    {
+    if let Some(dir) = std::env::args().skip_while(|a| a != "--data").nth(1) {
         return PathBuf::from(dir);
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let d = dir.join("AdminCraftData");
-            if d.is_dir() {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let d = dir.join("AdminCraftData");
+        if d.is_dir() {
+            return d;
+        }
+        if create && std::fs::create_dir_all(&d).is_ok() {
+            let probe = d.join(".write-test");
+            if std::fs::write(&probe, b"ok").is_ok() {
+                let _ = std::fs::remove_file(probe);
                 return d;
             }
-            if create && std::fs::create_dir_all(&d).is_ok() {
-                let probe = d.join(".write-test");
-                if std::fs::write(&probe, b"ok").is_ok() {
-                    let _ = std::fs::remove_file(probe);
-                    return d;
-                }
-            } else if !create && dir_writable(dir) {
-                return d;
-            }
+        } else if !create && dir_writable(dir) {
+            return d;
         }
     }
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     home.join(".admincraft")
 }
 
@@ -712,17 +722,17 @@ impl Store {
                 store.data = sample_data();
                 store.data.salt = B64.encode(new_salt());
                 let salt = store.salt();
-                store.vault = Some(Vault::derive("", &salt));
+                store.vault = Vault::derive("", &salt).ok();
                 if !read_only {
                     store.save();
                 }
             }
         }
         // command line / MCP server: the master password may come from the environment
-        if store.vault.is_none() {
-            if let Ok(pw) = std::env::var("AC_MASTER") {
-                store.unlock(&pw);
-            }
+        if store.vault.is_none()
+            && let Ok(pw) = std::env::var("AC_MASTER")
+        {
+            store.unlock(&pw);
         }
         if store.kdbx_mode() {
             store.data.entries.clear();
@@ -796,25 +806,26 @@ impl Store {
     /// kept, so a reload doesn't ask for the password again.
     fn load_text(&mut self, text: &str) -> Result<(), String> {
         self.text_hash = hash_text(text);
-        if let Ok(sealed) = serde_json::from_str::<SealedFile>(text) {
-            if sealed.format == SEALED_FORMAT {
-                let keep = self.vault.clone().filter(|v| self.data.salt == sealed.salt && v.decrypt(&sealed.verifier).as_deref() == Some(VERIFY_TEXT));
-                self.data = DataFile { salt: sealed.salt, master: true, verifier: sealed.verifier, ..Default::default() };
-                self.sealed_payload = Some(sealed.payload);
-                self.vault = None;
-                if let Some(v) = keep {
-                    self.open_sealed(v)?;
-                }
-                return Ok(());
+        if let Ok(sealed) = serde_json::from_str::<SealedFile>(text)
+            && sealed.format == SEALED_FORMAT
+        {
+            let keep = self.vault.clone().filter(|v| self.data.salt == sealed.salt && v.decrypt(&sealed.verifier).as_deref() == Some(VERIFY_TEXT));
+            self.data = DataFile { salt: sealed.salt, master: true, verifier: sealed.verifier, ..Default::default() };
+            self.sealed_payload = Some(sealed.payload);
+            self.vault = None;
+            if let Some(v) = keep {
+                self.open_sealed(v)?;
             }
+            return Ok(());
         }
         let data = serde_json::from_str::<DataFile>(text).map_err(|e| e.to_string())?;
-        let keep = self.vault.clone().filter(|v| data.salt == self.data.salt && (!data.master || v.decrypt(&data.verifier).as_deref() == Some(VERIFY_TEXT)));
+        let keep =
+            self.vault.clone().filter(|v| data.salt == self.data.salt && (!data.master || v.decrypt(&data.verifier).as_deref() == Some(VERIFY_TEXT)));
         self.sealed_payload = None;
         self.data = data;
         if !self.data.master {
             let salt = self.salt();
-            self.vault = Some(Vault::derive("", &salt));
+            self.vault = Vault::derive("", &salt).ok();
         } else {
             self.vault = keep;
         }
@@ -900,7 +911,7 @@ impl Store {
         let Some(r) = self.remote.clone() else { return };
         let state = self.remote_state.clone();
         {
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
             if st.busy {
                 return;
             }
@@ -908,7 +919,7 @@ impl Store {
         }
         std::thread::spawn(move || {
             let res = crate::remote::fetch(&r);
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
             st.busy = false;
             match res {
                 Ok(Some(t)) => {
@@ -922,7 +933,7 @@ impl Store {
     }
 
     fn apply_fetched(&mut self) -> bool {
-        let fetched = self.remote_state.lock().unwrap().fetched.take();
+        let fetched = self.remote_state.lock().unwrap_or_else(|e| e.into_inner()).fetched.take();
         match fetched {
             Some(t) => {
                 let changed = self.replace_if_same_key(&t);
@@ -937,11 +948,7 @@ impl Store {
 
     pub fn salt(&self) -> Vec<u8> {
         let s = B64.decode(&self.data.salt).unwrap_or_default();
-        if s.len() >= 8 {
-            s
-        } else {
-            b"admincraft-salt!".to_vec()
-        }
+        if s.len() >= 8 { s } else { b"admincraft-salt!".to_vec() }
     }
 
     pub fn locked(&self) -> bool {
@@ -952,7 +959,7 @@ impl Store {
         if self.waiting_for_keepass() {
             return self.unlock_keepass(password);
         }
-        let vault = Vault::derive(password, &self.salt());
+        let Ok(vault) = Vault::derive(password, &self.salt()) else { return false };
         if vault.decrypt(&self.data.verifier).as_deref() != Some(VERIFY_TEXT) {
             return false;
         }
@@ -971,21 +978,27 @@ impl Store {
     fn decrypt_all(&mut self) {
         let Some(v) = self.vault.clone() else { return };
         for e in &mut self.data.entries {
-            e.password = e
-                .password_enc
-                .as_deref()
-                .and_then(|p| v.decrypt(p))
-                .unwrap_or_default();
+            e.password = e.password_enc.as_deref().and_then(|p| v.decrypt(p)).unwrap_or_default();
         }
     }
 
     /// Sets, changes (non-empty) or removes (empty) the master password.
     pub fn set_master(&mut self, password: &str) {
-        self.data.salt = B64.encode(new_salt());
-        let salt = self.salt();
-        let vault = Vault::derive(password, &salt);
-        self.data.master = !password.is_empty();
-        self.data.verifier = if self.data.master { vault.encrypt(VERIFY_TEXT) } else { String::new() };
+        // nothing changes unless the new key and its check text exist (never a half-set password)
+        let salt = new_salt();
+        let master = !password.is_empty();
+        let made = Vault::derive(password, &salt)
+            .and_then(|vault| if master { vault.encrypt(VERIFY_TEXT).map(|check| (vault, check)) } else { Ok((vault, String::new())) });
+        let (vault, verifier) = match made {
+            Ok(v) => v,
+            Err(e) => {
+                self.last_error = Some(e);
+                return;
+            }
+        };
+        self.data.salt = B64.encode(&salt);
+        self.data.master = master;
+        self.data.verifier = verifier;
         self.vault = Some(vault);
         self.save();
     }
@@ -996,7 +1009,8 @@ impl Store {
         }
         let Some(v) = self.vault.clone() else { return };
         for e in &mut self.data.entries {
-            e.password_enc = if e.password.is_empty() { None } else { Some(v.encrypt(&e.password)) };
+            // if encrypting should ever fail, the stored password stays as it was
+            e.password_enc = if e.password.is_empty() { None } else { v.encrypt(&e.password).ok().or_else(|| e.password_enc.take()) };
         }
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -1008,13 +1022,14 @@ impl Store {
         // KeePass as connection list: the connections go there, this file keeps the settings
         let kdbx = self.kdbx_mode();
         let mut kdbx_error = None;
-        if kdbx && !self.kdbx_waiting {
-            if let Some(key) = self.kdbx_key.clone() {
-                let path = self.data.settings.keepass_path.clone();
-                match crate::kdbx::save(&path, &key, &mut self.data.entries) {
-                    Ok(()) => self.kdbx_mtime = std::fs::metadata(path.trim().trim_matches('"')).and_then(|m| m.modified()).ok(),
-                    Err(e) => kdbx_error = Some(e),
-                }
+        if kdbx
+            && !self.kdbx_waiting
+            && let Some(key) = self.kdbx_key.clone()
+        {
+            let path = self.data.settings.keepass_path.clone();
+            match crate::kdbx::save(&path, &key, &mut self.data.entries) {
+                Ok(()) => self.kdbx_mtime = std::fs::metadata(path.trim().trim_matches('"')).and_then(|m| m.modified()).ok(),
+                Err(e) => kdbx_error = Some(e),
             }
         }
         let kept = if kdbx { std::mem::take(&mut self.data.entries) } else { Vec::new() };
@@ -1027,7 +1042,7 @@ impl Store {
                     version: 1,
                     salt: self.data.salt.clone(),
                     verifier: self.data.verifier.clone(),
-                    payload: v.encrypt(&json),
+                    payload: v.encrypt(&json)?,
                 };
                 serde_json::to_string_pretty(&sealed).map_err(|e| e.to_string())
             } else {
@@ -1050,7 +1065,7 @@ impl Store {
                 let state = self.remote_state.clone();
                 std::thread::spawn(move || {
                     let res = crate::remote::upload(&r, &t);
-                    let mut st = state.lock().unwrap();
+                    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                     match res {
                         Ok(()) => {
                             st.last_error = None;
@@ -1079,12 +1094,7 @@ impl Store {
     }
 
     pub fn children(&self, parent: Option<u64>) -> Vec<u64> {
-        self.data
-            .entries
-            .iter()
-            .filter(|e| e.parent == parent)
-            .map(|e| e.id)
-            .collect()
+        self.data.entries.iter().filter(|e| e.parent == parent).map(|e| e.id).collect()
     }
 
     /// User, domain and password after following "inherit from folder".
@@ -1216,14 +1226,8 @@ impl Store {
     }
 
     pub fn folders(&self) -> Vec<(u64, String)> {
-        let mut v: Vec<(u64, String)> = self
-            .data
-            .entries
-            .iter()
-            .filter(|e| e.folder)
-            .map(|e| (e.id, self.path_of(e.id)))
-            .collect();
-        v.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        let mut v: Vec<(u64, String)> = self.data.entries.iter().filter(|e| e.folder).map(|e| (e.id, self.path_of(e.id))).collect();
+        v.sort_by_key(|a| a.1.to_lowercase());
         v
     }
 
@@ -1260,14 +1264,7 @@ impl Store {
     pub fn shift(&mut self, id: u64, up: bool) {
         let Some(idx) = self.index_of(id) else { return };
         let parent = self.data.entries[idx].parent;
-        let siblings: Vec<usize> = self
-            .data
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| e.parent == parent)
-            .map(|(i, _)| i)
-            .collect();
+        let siblings: Vec<usize> = self.data.entries.iter().enumerate().filter(|(_, e)| e.parent == parent).map(|(i, _)| i).collect();
         let pos = siblings.iter().position(|&i| i == idx).unwrap_or(0);
         let other = if up {
             if pos == 0 {
@@ -1285,27 +1282,11 @@ impl Store {
 }
 
 fn folder(id: u64, parent: Option<u64>, name: &str) -> Entry {
-    Entry {
-        id,
-        parent,
-        folder: true,
-        name: name.into(),
-        inherit_credentials: false,
-        ..Default::default()
-    }
+    Entry { id, parent, folder: true, name: name.into(), inherit_credentials: false, ..Default::default() }
 }
 
 fn conn(id: u64, parent: Option<u64>, name: &str, p: Protocol, host: &str, user: &str) -> Entry {
-    Entry {
-        id,
-        parent,
-        name: name.into(),
-        protocol: p,
-        host: host.into(),
-        port: p.default_port(),
-        username: user.into(),
-        ..Default::default()
-    }
+    Entry { id, parent, name: name.into(), protocol: p, host: host.into(), port: p.default_port(), username: user.into(), ..Default::default() }
 }
 
 /// What a new, empty installation shows: an example layout the person can edit or delete.

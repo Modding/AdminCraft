@@ -94,17 +94,7 @@ fn handshake(host: &str, port: u16, cfg: Arc<rustls::ClientConfig>) -> Result<ru
 }
 
 fn fmt_ts(ts: i64) -> String {
-    let days = ts.div_euclid(86400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    format!("{d:02}.{m:02}.{y}")
+    crate::timefmt::date(ts)
 }
 
 /// Connects with TLS, reads the server certificate and says whether it is trusted.

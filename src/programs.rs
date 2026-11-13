@@ -24,16 +24,73 @@ pub const PROGRAMS: &[ProgDef] = &[
     ProgDef { key: "ssh", label: "OpenSSH ssh", purpose: "SSH in tab, jump host", names: &["ssh"], known: &[r"C:\Windows\System32\OpenSSH\ssh.exe"] },
     ProgDef { key: "sftp", label: "OpenSSH sftp", purpose: "Files (SFTP)", names: &["sftp"], known: &[r"C:\Windows\System32\OpenSSH\sftp.exe"] },
     ProgDef { key: "scp", label: "OpenSSH scp", purpose: "Files (SCP)", names: &["scp"], known: &[r"C:\Windows\System32\OpenSSH\scp.exe"] },
-    ProgDef { key: "putty", label: "PuTTY", purpose: "SSH/Telnet in tab", names: &["putty"], known: &[r"C:\Program Files\PuTTY\putty.exe", r"C:\Program Files (x86)\PuTTY\putty.exe"] },
-    ProgDef { key: "plink", label: "PuTTY plink", purpose: "Jump host for PuTTY, SCP listing", names: &["plink"], known: &[r"C:\Program Files\PuTTY\plink.exe", r"C:\Program Files (x86)\PuTTY\plink.exe"] },
-    ProgDef { key: "psftp", label: "PuTTY psftp", purpose: "Files (SFTP) without OpenSSH", names: &["psftp"], known: &[r"C:\Program Files\PuTTY\psftp.exe", r"C:\Program Files (x86)\PuTTY\psftp.exe"] },
-    ProgDef { key: "pscp", label: "PuTTY pscp", purpose: "Files (SCP) without OpenSSH", names: &["pscp"], known: &[r"C:\Program Files\PuTTY\pscp.exe", r"C:\Program Files (x86)\PuTTY\pscp.exe"] },
+    ProgDef {
+        key: "putty",
+        label: "PuTTY",
+        purpose: "SSH/Telnet in tab",
+        names: &["putty"],
+        known: &[r"C:\Program Files\PuTTY\putty.exe", r"C:\Program Files (x86)\PuTTY\putty.exe"],
+    },
+    ProgDef {
+        key: "plink",
+        label: "PuTTY plink",
+        purpose: "Jump host for PuTTY, SCP listing",
+        names: &["plink"],
+        known: &[r"C:\Program Files\PuTTY\plink.exe", r"C:\Program Files (x86)\PuTTY\plink.exe"],
+    },
+    ProgDef {
+        key: "psftp",
+        label: "PuTTY psftp",
+        purpose: "Files (SFTP) without OpenSSH",
+        names: &["psftp"],
+        known: &[r"C:\Program Files\PuTTY\psftp.exe", r"C:\Program Files (x86)\PuTTY\psftp.exe"],
+    },
+    ProgDef {
+        key: "pscp",
+        label: "PuTTY pscp",
+        purpose: "Files (SCP) without OpenSSH",
+        names: &["pscp"],
+        known: &[r"C:\Program Files\PuTTY\pscp.exe", r"C:\Program Files (x86)\PuTTY\pscp.exe"],
+    },
     ProgDef { key: "mstsc", label: "Remote desktop (mstsc)", purpose: "RDP in tab", names: &["mstsc"], known: &[r"C:\Windows\System32\mstsc.exe"] },
-    ProgDef { key: "vnc", label: "VNC viewer", purpose: "VNC in tab", names: &["vncviewer", "tvnviewer", "vncviewer64"], known: &[r"C:\Program Files\TigerVNC\vncviewer.exe", r"C:\Program Files\RealVNC\VNC Viewer\vncviewer.exe", r"C:\Program Files\TightVNC\tvnviewer.exe", r"C:\Program Files\uvnc bvba\UltraVNC\vncviewer.exe"] },
+    ProgDef {
+        key: "vnc",
+        label: "VNC viewer",
+        purpose: "VNC in tab",
+        names: &["vncviewer", "tvnviewer", "vncviewer64"],
+        known: &[
+            r"C:\Program Files\TigerVNC\vncviewer.exe",
+            r"C:\Program Files\RealVNC\VNC Viewer\vncviewer.exe",
+            r"C:\Program Files\TightVNC\tvnviewer.exe",
+            r"C:\Program Files\uvnc bvba\UltraVNC\vncviewer.exe",
+        ],
+    },
     ProgDef { key: "telnet", label: "Telnet", purpose: "Telnet in tab", names: &["telnet"], known: &[r"C:\Windows\System32\telnet.exe"] },
-    ProgDef { key: "winscp", label: "WinSCP", purpose: "Optional: open files externally", names: &["winscp"], known: &[r"C:\Program Files (x86)\WinSCP\WinSCP.exe", r"C:\Program Files\WinSCP\WinSCP.exe"] },
-    ProgDef { key: "filezilla", label: "FileZilla", purpose: "Optional: open FTP externally", names: &["filezilla"], known: &[r"C:\Program Files\FileZilla FTP Client\filezilla.exe"] },
-    ProgDef { key: "browser", label: "Edge / Chrome", purpose: "Web interfaces in a tab", names: &["msedge", "chrome"], known: &[r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Microsoft\Edge\Application\msedge.exe", r"C:\Program Files\Google\Chrome\Application\chrome.exe"] },
+    ProgDef {
+        key: "winscp",
+        label: "WinSCP",
+        purpose: "Optional: open files externally",
+        names: &["winscp"],
+        known: &[r"C:\Program Files (x86)\WinSCP\WinSCP.exe", r"C:\Program Files\WinSCP\WinSCP.exe"],
+    },
+    ProgDef {
+        key: "filezilla",
+        label: "FileZilla",
+        purpose: "Optional: open FTP externally",
+        names: &["filezilla"],
+        known: &[r"C:\Program Files\FileZilla FTP Client\filezilla.exe"],
+    },
+    ProgDef {
+        key: "browser",
+        label: "Edge / Chrome",
+        purpose: "Web interfaces in a tab",
+        names: &["msedge", "chrome"],
+        known: &[
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        ],
+    },
 ];
 
 #[cfg(not(windows))]
@@ -41,15 +98,45 @@ pub const PROGRAMS: &[ProgDef] = &[
     ProgDef { key: "ssh", label: "OpenSSH ssh", purpose: "SSH in tab, jump host", names: &["ssh"], known: &["/usr/bin/ssh"] },
     ProgDef { key: "sftp", label: "OpenSSH sftp", purpose: "Files (SFTP)", names: &["sftp"], known: &["/usr/bin/sftp"] },
     ProgDef { key: "scp", label: "OpenSSH scp", purpose: "Files (SCP)", names: &["scp"], known: &["/usr/bin/scp"] },
-    ProgDef { key: "putty", label: "PuTTY", purpose: "SSH in its own window", names: &["putty"], known: &["/usr/bin/putty", "/opt/homebrew/bin/putty", "/usr/local/bin/putty"] },
-    ProgDef { key: "plink", label: "PuTTY plink", purpose: "Jump host for PuTTY", names: &["plink"], known: &["/usr/bin/plink", "/opt/homebrew/bin/plink"] },
+    ProgDef {
+        key: "putty",
+        label: "PuTTY",
+        purpose: "SSH in its own window",
+        names: &["putty"],
+        known: &["/usr/bin/putty", "/opt/homebrew/bin/putty", "/usr/local/bin/putty"],
+    },
+    ProgDef {
+        key: "plink",
+        label: "PuTTY plink",
+        purpose: "Jump host for PuTTY",
+        names: &["plink"],
+        known: &["/usr/bin/plink", "/opt/homebrew/bin/plink"],
+    },
     ProgDef { key: "psftp", label: "PuTTY psftp", purpose: "Files (SFTP) without OpenSSH", names: &["psftp"], known: &["/usr/bin/psftp"] },
     ProgDef { key: "pscp", label: "PuTTY pscp", purpose: "Files (SCP) without OpenSSH", names: &["pscp"], known: &["/usr/bin/pscp"] },
-    ProgDef { key: "rdp", label: "FreeRDP", purpose: "RDP", names: &["xfreerdp3", "xfreerdp", "wlfreerdp3", "wlfreerdp", "sdl-freerdp3", "sdl-freerdp"], known: &["/opt/homebrew/bin/xfreerdp", "/usr/local/bin/xfreerdp"] },
-    ProgDef { key: "vnc", label: "VNC viewer", purpose: "VNC", names: &["vncviewer", "xtigervncviewer", "gvncviewer"], known: &["/Applications/TigerVNC Viewer.app/Contents/MacOS/TigerVNC Viewer"] },
+    ProgDef {
+        key: "rdp",
+        label: "FreeRDP",
+        purpose: "RDP",
+        names: &["xfreerdp3", "xfreerdp", "wlfreerdp3", "wlfreerdp", "sdl-freerdp3", "sdl-freerdp"],
+        known: &["/opt/homebrew/bin/xfreerdp", "/usr/local/bin/xfreerdp"],
+    },
+    ProgDef {
+        key: "vnc",
+        label: "VNC viewer",
+        purpose: "VNC",
+        names: &["vncviewer", "xtigervncviewer", "gvncviewer"],
+        known: &["/Applications/TigerVNC Viewer.app/Contents/MacOS/TigerVNC Viewer"],
+    },
     ProgDef { key: "telnet", label: "Telnet", purpose: "Telnet in tab", names: &["telnet"], known: &["/usr/bin/telnet", "/opt/homebrew/bin/telnet"] },
     ProgDef { key: "remmina", label: "Remmina", purpose: "RDP/VNC (Linux)", names: &["remmina"], known: &[] },
-    ProgDef { key: "filezilla", label: "FileZilla", purpose: "Optional: open FTP externally", names: &["filezilla"], known: &["/Applications/FileZilla.app/Contents/MacOS/filezilla"] },
+    ProgDef {
+        key: "filezilla",
+        label: "FileZilla",
+        purpose: "Optional: open FTP externally",
+        names: &["filezilla"],
+        known: &["/Applications/FileZilla.app/Contents/MacOS/filezilla"],
+    },
 ];
 
 pub fn def(key: &str) -> Option<&'static ProgDef> {
@@ -59,17 +146,17 @@ pub fn def(key: &str) -> Option<&'static ProgDef> {
 /// "AdminCraftTools" next to the program (portable), or inside the data folder when the
 /// program's own folder can't be written (macOS app bundle, read-only share).
 pub fn tools_dir() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let d = dir.join("AdminCraftTools");
-            if d.is_dir() {
-                return d;
-            }
-            let probe = dir.join(".admincraft-write-test");
-            if std::fs::write(&probe, b"ok").is_ok() {
-                let _ = std::fs::remove_file(probe);
-                return d;
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let d = dir.join("AdminCraftTools");
+        if d.is_dir() {
+            return d;
+        }
+        let probe = dir.join(".admincraft-write-test");
+        if std::fs::write(&probe, b"ok").is_ok() {
+            let _ = std::fs::remove_file(probe);
+            return d;
         }
     }
     crate::model::data_dir(false).join("AdminCraftTools")
@@ -95,11 +182,7 @@ pub fn ensure_tools_dir() -> PathBuf {
 }
 
 fn exe_names(name: &str) -> Vec<String> {
-    if cfg!(windows) {
-        vec![format!("{name}.exe"), format!("{name}.EXE"), name.to_string()]
-    } else {
-        vec![name.to_string()]
-    }
+    if cfg!(windows) { vec![format!("{name}.exe"), format!("{name}.EXE"), name.to_string()] } else { vec![name.to_string()] }
 }
 
 fn find_in_dir(dir: &Path, names: &[&str]) -> Option<PathBuf> {
@@ -126,13 +209,13 @@ fn find_in_dir(dir: &Path, names: &[&str]) -> Option<PathBuf> {
         }
     }
     // case-insensitive match (WinSCP.exe vs winscp)
-    if cfg!(windows) {
-        if let Ok(rd) = std::fs::read_dir(dir) {
-            for e in rd.flatten() {
-                let fname = e.file_name().to_string_lossy().to_lowercase();
-                if names.iter().any(|n| fname == format!("{n}.exe")) {
-                    return Some(e.path());
-                }
+    if cfg!(windows)
+        && let Ok(rd) = std::fs::read_dir(dir)
+    {
+        for e in rd.flatten() {
+            let fname = e.file_name().to_string_lossy().to_lowercase();
+            if names.iter().any(|n| fname == format!("{n}.exe")) {
+                return Some(e.path());
             }
         }
     }
@@ -169,12 +252,11 @@ pub fn find_with_source(key: &str, settings: &Settings) -> Option<(PathBuf, Sour
         if p.is_file() {
             return Some((p, Source::Settings));
         }
-        if p.is_dir() {
-            if let Some(d) = def(key) {
-                if let Some(f) = find_in_dir(&p, d.names) {
-                    return Some((f, Source::Settings));
-                }
-            }
+        if p.is_dir()
+            && let Some(d) = def(key)
+            && let Some(f) = find_in_dir(&p, d.names)
+        {
+            return Some((f, Source::Settings));
         }
         if let Some(w) = crate::launch::which(own) {
             return Some((w, Source::Settings));
@@ -208,12 +290,7 @@ fn sh_quote(s: &str) -> String {
 }
 
 /// Starts a program in its own terminal window (e.g. OpenSSH "outside" AdminCraft).
-pub fn spawn_in_terminal(
-    program: &Path,
-    args: &[String],
-    title: &str,
-    env: &[(String, String)],
-) -> Result<String, String> {
+pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(String, String)]) -> Result<String, String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

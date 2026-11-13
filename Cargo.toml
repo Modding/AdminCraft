@@ -1,7 +1,8 @@
 [package]
 name = "admincraft"
 version = "0.1.0-alpha.3"
-edition = "2021"
+edition = "2024"
+rust-version = "1.95"
 description = "Portable remote connection manager (SSH, RDP, VNC, Telnet, PowerShell, SFTP/FTP) with admin tools"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Modding/AdminCraft"
@@ -13,6 +14,8 @@ categories = ["network-programming", "gui"]
 aes-gcm = "0.11.1"
 argon2 = "0.6.0"
 base64 = "0.23.1"
+# All date/time conversion goes through chrono (no hand-written calendar code; AGENTS.md).
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "links", "glow", "wayland", "x11"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 keepass = { version = "0.17.0", features = ["save_kdbx4"] }
@@ -33,6 +36,8 @@ sys-locale = "0.3.2"
 x509-parser = "0.18.1"
 getrandom = "0.3"
 ureq = "3.5.2"
+# Keys and passwords are wiped from memory when they are dropped.
+zeroize = "1.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 winit = "0.30"
@@ -40,14 +45,19 @@ winit = "0.30"
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Console", "Win32_Security_Credentials"] }
 
-[dev-dependencies]
-# only the self-tests write a KeePass file
-keepass = { version = "0.17.0", features = ["save_kdbx4"] }
+[build-dependencies]
+embed-resource = "3.0.12"
+
+# Never crash (AGENTS.md): `unsafe` only in the modules named there, which allow it for their
+# file. The panic lints (unwrap, expect, panic …) are denied at the crate root in src/main.rs.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
 
 [profile.release]
 opt-level = 3
 lto = "thin"
 strip = true
-
-[build-dependencies]
-embed-resource = "3.0.12"

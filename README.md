@@ -70,7 +70,7 @@
   create, rename, delete, drag files in from the explorer. Through OpenSSH or PuTTY's psftp/pscp.
 
 **Passwords**
-- Stored encrypted (AES-256-GCM, optional master password), read from a **KeePass/KeePassXC** database,
+- Stored encrypted with a master password (AES-256-GCM, key from Argon2), read from a **KeePass/KeePassXC** database,
   or asked every time. **2FA codes (TOTP)** from KeePass entries, password generator.
 - The whole list can be encrypted with the master password and kept centrally on a
   **network share (SMB)** or a **WebDAV server** (Nextcloud, ownCloud …); changes by others are reloaded.
@@ -120,6 +120,11 @@ Helper programs AdminCraft can use: OpenSSH (built into Windows 10/11, macOS and
   `AdminCraftTools` (helper programs), `AdminCraftLang` (own languages). Copy the folder, done.
   If that folder can't be written (e.g. inside a macOS app bundle), `~/.admincraft` is used.
 - Passwords never leave the computer unencrypted unless you explicitly export them in plain text.
+- **Set a master password** (Settings) when the folder travels on a USB stick or lives on a share.
+  With it, saved passwords are encrypted with AES-256-GCM. **Without it they are only obscured:**
+  whoever has `connections.json` can read them. The same goes for the saved WebDAV password.
+- Known limits, listed in the [roadmap](ROADMAP.md): PuTTY and FreeRDP get the password as a
+  command-line argument, which other programs of the same user can see while they start.
 - AdminCraft talks to nothing on the internet by itself; it only connects where you tell it to.
 
 ## Building
@@ -129,10 +134,12 @@ Rust from [rustup.rs](https://rustup.rs), then:
 ```sh
 cargo build --release      # target/release/admincraft(.exe)
 cargo test
+cargo fmt --check && cargo clippy --all-targets -- -D warnings   # what CI checks
 ```
 
 - **Windows:** the default MSVC toolchain works. Without Visual Studio, the
-  `x86_64-pc-windows-gnullvm` toolchain with LLVM-MinGW works too (see `.cargo/config.toml`).
+  `x86_64-pc-windows-gnullvm` toolchain with LLVM-MinGW works too (point its linker and C compiler
+  at your LLVM-MinGW in your own `~/.cargo/config.toml`).
 - **Linux:** `pkg-config libxkbcommon-dev libwayland-dev libx11-dev libgl1-mesa-dev` and a C compiler.
 - **macOS:** the Xcode command line tools.
 

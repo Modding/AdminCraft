@@ -85,7 +85,7 @@ impl ToolTab {
         let (slot, running, ctx) = (self.result.clone(), self.running.clone(), ctx.clone());
         let (kind, input, community, walk_oid) = (self.kind, self.input.trim().to_string(), self.community.clone(), self.walk_oid.clone());
         let port = self.port.trim().parse::<u16>().unwrap_or(161);
-        *running.lock().unwrap() = true;
+        *running.lock().unwrap_or_else(|e| e.into_inner()) = true;
         std::thread::spawn(move || {
             let t = Duration::from_secs(8);
             let r = match kind {
@@ -94,15 +94,15 @@ impl ToolTab {
                 ToolKind::Snmp if walk => Res::Walk(nettools::snmp_walk(&input, port, &community, &walk_oid, 2000, Duration::from_secs(3))),
                 ToolKind::Snmp => Res::Snmp(nettools::snmp_overview(&input, port, &community, t.min(Duration::from_secs(3)))),
             };
-            *slot.lock().unwrap() = Some(r);
-            *running.lock().unwrap() = false;
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+            *running.lock().unwrap_or_else(|e| e.into_inner()) = false;
             ctx.request_repaint();
         });
     }
 
     /// The result as text (for agents and the copy button).
     pub fn text(&self) -> String {
-        let g = self.result.lock().unwrap();
+        let g = self.result.lock().unwrap_or_else(|e| e.into_inner());
         match &*g {
             None => String::new(),
             Some(Res::Whois(Ok(w))) => w.text.clone(),
@@ -127,7 +127,10 @@ impl ToolTab {
             Some(Res::Snmp(Ok(o))) => {
                 let mut s = format!("{}\n{}\nuptime {}\ncontact {}\nlocation {}\n", o.name, o.descr, o.uptime, o.contact, o.location);
                 for i in &o.interfaces {
-                    s += &format!("{} {} oper={:?} speed={:?}Mbit mac={} in={:?} out={:?}\n", i.index, i.name, i.oper_up, i.speed_mbit, i.mac, i.in_octets, i.out_octets);
+                    s += &format!(
+                        "{} {} oper={:?} speed={:?}Mbit mac={} in={:?} out={:?}\n",
+                        i.index, i.name, i.oper_up, i.speed_mbit, i.mac, i.in_octets, i.out_octets
+                    );
                 }
                 s
             }
@@ -145,11 +148,7 @@ fn bytes_h(n: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 {
-        format!("{n} B")
-    } else {
-        format!("{v:.1} {}", units[i])
-    }
+    if i == 0 { format!("{n} B") } else { format!("{v:.1} {}", units[i]) }
 }
 
 pub fn tool_ui(ui: &mut egui::Ui, t: &mut ToolTab) {
@@ -196,7 +195,7 @@ pub fn tool_ui(ui: &mut egui::Ui, t: &mut ToolTab) {
         });
     }
     ui.separator();
-    let guard = t.result.lock().unwrap();
+    let guard = t.result.lock().unwrap_or_else(|e| e.into_inner());
     let Some(res) = &*guard else {
         if !busy {
             ui.weak(match t.kind {
@@ -255,7 +254,13 @@ fn http_ui(ui: &mut egui::Ui, h: &HttpReport) {
     egui::Grid::new("sec").striped(true).num_columns(3).spacing([14.0, 4.0]).show(ui, |ui| {
         for x in &h.security {
             let ok = x.present && x.advice == tr("OK");
-            ui.label(RichText::new("•").size(20.0).color(if ok { OK } else if x.present { WARN } else { BAD }));
+            ui.label(RichText::new("•").size(20.0).color(if ok {
+                OK
+            } else if x.present {
+                WARN
+            } else {
+                BAD
+            }));
             ui.label(RichText::new(x.name).monospace());
             ui.vertical(|ui| {
                 if !x.value.is_empty() {

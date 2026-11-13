@@ -1,6 +1,6 @@
 //! Quick self-tests: `cargo test`.
 
-use crate::model::{new_salt, sample_data, Protocol, Store, Vault};
+use crate::model::{Protocol, Store, Vault, new_salt, sample_data};
 use crate::tools::{parse_mac, parse_ports};
 
 fn temp_store(name: &str) -> Store {
@@ -11,16 +11,16 @@ fn temp_store(name: &str) -> Store {
     s.path = dir.join("connections.json");
     s.data = sample_data();
     s.data.salt = String::new();
-    s.vault = Some(Vault::derive("", &s.salt()));
+    s.vault = Vault::derive("", &s.salt()).ok();
     s
 }
 
 #[test]
 fn vault_roundtrip() {
-    let v = Vault::derive("secret", &new_salt());
-    let c = v.encrypt("P@ssw0rd äöü");
+    let v = Vault::derive("secret", &new_salt()).unwrap();
+    let c = v.encrypt("P@ssw0rd äöü").unwrap();
     assert_eq!(v.decrypt(&c).as_deref(), Some("P@ssw0rd äöü"));
-    let other = Vault::derive("falsch", &new_salt());
+    let other = Vault::derive("falsch", &new_salt()).unwrap();
     assert_eq!(other.decrypt(&c), None);
 }
 
@@ -125,7 +125,7 @@ fn translation_placeholders() {
 
 #[test]
 fn user_guide_in_every_language() {
-    use crate::help::{parse, sections, Block, TOPIC_COUNT};
+    use crate::help::{Block, TOPIC_COUNT, parse, sections};
     for (code, text) in crate::help::builtin() {
         let blocks = parse(text);
         assert!(matches!(blocks.first(), Some(Block::Title(_))), "{code}: title first");
@@ -150,7 +150,7 @@ fn user_guide_in_every_language() {
 
 #[test]
 fn netscan_ranges_and_diff() {
-    use crate::netscan::{diff, parse_targets, Change, ScanHost};
+    use crate::netscan::{Change, ScanHost, diff, parse_targets};
     use std::net::Ipv4Addr;
     assert_eq!(parse_targets("192.168.1.0/24").unwrap().len(), 254);
     assert_eq!(parse_targets("10.0.0.1-50").unwrap().len(), 50);
@@ -231,7 +231,7 @@ fn scan_protocol_choices() {
 
 #[test]
 fn export_and_import_with_password_modes() {
-    use crate::sharing::{export, merge, read, PwMode, ReadError};
+    use crate::sharing::{PwMode, ReadError, export, merge, read};
     let mut s = temp_store("export");
     let web = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;
     let i = s.index_of(web).unwrap();
@@ -296,7 +296,10 @@ fn whole_list_encrypted_with_master_password() {
 #[test]
 fn mcp_server_protocol() {
     let mut out: Vec<u8> = Vec::new();
-    crate::agent::handle("\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}", &mut out);
+    crate::agent::handle(
+        "\u{feff}{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}",
+        &mut out,
+    );
     crate::agent::handle("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}", &mut out);
     crate::agent::handle("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", &mut out);
     crate::agent::handle(
@@ -447,10 +450,7 @@ fn import_mremoteng_tree() {
 
 #[test]
 fn split_words_quotes() {
-    assert_eq!(
-        crate::launch::split_words(r#"xfreerdp "/v:my host" /u:{user}"#),
-        vec!["xfreerdp", "/v:my host", "/u:{user}"]
-    );
+    assert_eq!(crate::launch::split_words(r#"xfreerdp "/v:my host" /u:{user}"#), vec!["xfreerdp", "/v:my host", "/u:{user}"]);
 }
 
 #[test]
@@ -511,7 +511,11 @@ fn keepass_as_connection_list() {
         let id = db.root().groups().find(|g| g.name == kdbx::GROUP).unwrap().id();
         let eid = {
             let g = db.group(id).unwrap();
-            let x = g.groups().flat_map(|sg| sg.entries().map(|e| (e.id(), e.get_title().unwrap_or("").to_string())).collect::<Vec<_>>()).find(|(_, t)| t.starts_with("web01 – L")).unwrap();
+            let x = g
+                .groups()
+                .flat_map(|sg| sg.entries().map(|e| (e.id(), e.get_title().unwrap_or("").to_string())).collect::<Vec<_>>())
+                .find(|(_, t)| t.starts_with("web01 – L"))
+                .unwrap();
             x.0
         };
         db.entry_mut(eid).unwrap().set_unprotected(fields::TITLE, "web01 – renamed in KeePass");
@@ -535,7 +539,7 @@ fn keepass_as_connection_list() {
     // locked until the KeePass password is entered
     let mut fresh = temp_store("kdbxlist2");
     fresh.data.settings = s.data.settings.clone();
-    assert!(fresh.unlock_keepass("wrong") == false && fresh.unlock_keepass("kp-test"));
+    assert!(!fresh.unlock_keepass("wrong") && fresh.unlock_keepass("kp-test"));
     assert_eq!(fresh.data.entries.len(), count);
     // a single password into KeePass
     let p = kdbx::store_password(&ps, &key, "printer", "admin", "pw1", "http://10.0.1.50/").unwrap();
@@ -557,7 +561,7 @@ fn keepass_urls() {
 
 #[test]
 fn session_recording_and_playback() {
-    use crate::playback::{compress_pauses, parse_cast, Ev};
+    use crate::playback::{Ev, compress_pauses, parse_cast};
     let path = std::env::temp_dir().join(format!("admincraft-rec-{}.cast", std::process::id()));
     {
         let mut r = crate::terminal::Recorder::create(&path, 100, 30, "web01").unwrap();
@@ -595,11 +599,11 @@ fn guide_table_columns_fit() {
 
 #[test]
 fn snmp_ber_encoding() {
-    use crate::nettools::{decode_oid, decode_response, encode_get, encode_oid, oid_name, SnmpValue, PDU_GET};
+    use crate::nettools::{PDU_GET, SnmpValue, decode_oid, decode_response, encode_get, encode_oid, oid_name};
     let req = encode_get("public", 1, PDU_GET, &["1.3.6.1.2.1.1.1.0"]).unwrap();
     let want = [
-        0x30, 0x26, 0x02, 0x01, 0x01, 0x04, 0x06, b'p', b'u', b'b', b'l', b'i', b'c', 0xa0, 0x19, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b,
-        0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00,
+        0x30, 0x26, 0x02, 0x01, 0x01, 0x04, 0x06, b'p', b'u', b'b', b'l', b'i', b'c', 0xa0, 0x19, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01,
+        0x00, 0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00,
     ];
     assert_eq!(req, want);
     let big = "1.3.6.1.4.1.311.21.20";
@@ -654,7 +658,12 @@ fn whois_and_http_reading() {
     assert_eq!(parse_referral("% IANA\nrefer:        whois.verisign-grs.com\n\ndomain: COM").as_deref(), Some("whois.verisign-grs.com"));
     assert_eq!(parse_referral("domain: EXAMPLE.COM\nsource: IANA"), None);
     let h = |k: &str, v: &str| (k.to_string(), v.to_string());
-    let headers = vec![h("strict-transport-security", "max-age=63072000; includeSubDomains"), h("x-content-type-options", "nosniff"), h("set-cookie", "sid=abc; Secure; HttpOnly; SameSite=Lax"), h("set-cookie", "theme=dark")];
+    let headers = vec![
+        h("strict-transport-security", "max-age=63072000; includeSubDomains"),
+        h("x-content-type-options", "nosniff"),
+        h("set-cookie", "sid=abc; Secure; HttpOnly; SameSite=Lax"),
+        h("set-cookie", "theme=dark"),
+    ];
     let sec = evaluate_security(&headers, true);
     let hsts = sec.iter().find(|s| s.name == "Strict-Transport-Security").unwrap();
     assert!(hsts.present);
@@ -686,4 +695,29 @@ fn rdp_login_through_the_credential_manager() {
     assert_eq!(crate::wincred::store(&target, "DOMAIN\\user", "other"), Ok(true), "was there before");
     assert!(crate::wincred::delete(&target));
     assert!(!crate::wincred::exists(&target));
+}
+
+#[test]
+fn damaged_export_file_is_an_error_not_a_crash() {
+    use crate::sharing::{PwMode, ReadError, export, read};
+    // the key derivation refuses a salt shorter than 8 bytes; that used to be a panic
+    assert!(Vault::derive("x", b"short").is_err());
+    let s = temp_store("export-damaged");
+    let dir = std::env::temp_dir().join(format!("admincraft-export-damaged-{}", std::process::id()));
+    let file = dir.join("enc.json");
+    export(&s, None, PwMode::Encrypted, "Export-PW", &file).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    v["salt"] = "AAAA".into();
+    assert!(matches!(read(&v.to_string(), "Export-PW"), Err(ReadError::Other(_))));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn dates_through_chrono() {
+    use crate::timefmt::{date, date_time, iso_minutes};
+    assert_eq!(date(0), "01.01.1970");
+    assert_eq!(date(951_782_400), "29.02.2000", "leap day");
+    assert_eq!(date_time(1_798_761_540), "31.12.2026 23:59");
+    assert_eq!(iso_minutes(1_798_761_540), "2026-12-31 23:59 UTC");
+    assert_eq!(date(i64::MAX), "", "out of range is empty, not a panic");
 }

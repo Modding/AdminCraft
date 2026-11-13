@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -134,12 +134,12 @@ impl Transfer {
     }
 
     pub fn send(&self, job: Job) {
-        self.shared.lock().unwrap().queued += 1;
+        self.shared.lock().unwrap_or_else(|e| e.into_inner()).queued += 1;
         let _ = self.tx.send(job);
     }
 
     pub fn busy(&self) -> bool {
-        let s = self.shared.lock().unwrap();
+        let s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
         s.busy.is_some() || s.queued > 0
     }
 }
@@ -168,7 +168,7 @@ pub fn base_name(p: &str) -> String {
 }
 
 fn log(shared: &Arc<Mutex<Shared>>, ok: bool, text: impl Into<String>) {
-    let mut s = shared.lock().unwrap();
+    let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
     s.log.push((ok, text.into()));
     if s.log.len() > 300 {
         s.log.remove(0);
@@ -180,7 +180,7 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, ctx: egui
     let mut cwd = String::new();
     while let Ok(job) = rx.recv() {
         {
-            let mut s = shared.lock().unwrap();
+            let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
             s.queued = s.queued.saturating_sub(1);
             s.busy = Some(job.describe());
         }
@@ -193,7 +193,7 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, ctx: egui
         };
         match result {
             Ok(Outcome::Listing(dir, items)) => {
-                let mut s = shared.lock().unwrap();
+                let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
                 s.cwd = dir.clone();
                 s.items = items;
                 s.connected = true;
@@ -202,19 +202,19 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, ctx: egui
             Ok(Outcome::Done(msg)) => {
                 log(&shared, true, msg);
                 if matches!(job, Job::Download { .. }) {
-                    shared.lock().unwrap().local_changed = true;
+                    shared.lock().unwrap_or_else(|e| e.into_inner()).local_changed = true;
                 }
             }
             Err(e) => {
                 log(&shared, false, format!("{}: {e}", job.describe()));
-                if is_list && !shared.lock().unwrap().connected {
+                if is_list && !shared.lock().unwrap_or_else(|e| e.into_inner()).connected {
                     ftp = None;
                 }
             }
         }
         // after a change on the server, show the folder again
         if !is_list {
-            let again = shared.lock().unwrap().queued == 0;
+            let again = shared.lock().unwrap_or_else(|e| e.into_inner()).queued == 0;
             if again {
                 let dir = cwd.clone();
                 let r = match ep.kind {
@@ -223,14 +223,14 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, ctx: egui
                     Kind::Scp => run_scp(&ep, &Job::List(dir.clone()), &mut cwd),
                 };
                 if let Ok(Outcome::Listing(d, items)) = r {
-                    let mut s = shared.lock().unwrap();
+                    let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
                     s.cwd = d.clone();
                     s.items = items;
                     cwd = d;
                 }
             }
         }
-        shared.lock().unwrap().busy = None;
+        shared.lock().unwrap_or_else(|e| e.into_inner()).busy = None;
         ctx.request_repaint();
     }
 }
@@ -314,11 +314,7 @@ fn hops_all(ep: &Endpoint) -> Vec<Hop> {
 }
 
 fn user_host(h: &Hop) -> String {
-    if h.user.is_empty() {
-        h.host.clone()
-    } else {
-        format!("{}@{}", h.user, h.host)
-    }
+    if h.user.is_empty() { h.host.clone() } else { format!("{}@{}", h.user, h.host) }
 }
 
 fn jump_arg(ep: &Endpoint) -> Option<String> {
@@ -371,10 +367,10 @@ fn run(program: &Path, args: &[String], stdin: Option<&str>, env: &[(String, Str
     }
     no_window(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| tf("{0} could not be started: {1}", &[&(program.display()), &e]))?;
-    if let Some(text) = stdin {
-        if let Some(mut si) = child.stdin.take() {
-            let _ = si.write_all(text.as_bytes());
-        }
+    if let Some(text) = stdin
+        && let Some(mut si) = child.stdin.take()
+    {
+        let _ = si.write_all(text.as_bytes());
     }
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
     Ok(RunOut {
@@ -435,10 +431,8 @@ pub fn parse_ls_line(line: &str) -> Option<RemoteItem> {
         return None;
     }
     let is_link = first == 'l';
-    if is_link {
-        if let Some(i) = name.find(" -> ") {
-            name.truncate(i);
-        }
+    if is_link && let Some(i) = name.find(" -> ") {
+        name.truncate(i);
     }
     if name == "." || name == ".." {
         return None;
@@ -461,13 +455,11 @@ fn sort_items(items: &mut [RemoteItem]) {
 
 fn sftp_program(ep: &Endpoint) -> Result<(PathBuf, bool), String> {
     let use_putty = ep.tool == Tool::Putty || ep.progs.sftp.is_none();
-    if use_putty {
-        if let Some(p) = &ep.progs.psftp {
-            if !ep.jumps.is_empty() {
-                return Err(tr("A jump host for file transfer needs OpenSSH (sftp).").into());
-            }
-            return Ok((p.clone(), true));
+    if use_putty && let Some(p) = &ep.progs.psftp {
+        if !ep.jumps.is_empty() {
+            return Err(tr("A jump host for file transfer needs OpenSSH (sftp).").into());
         }
+        return Ok((p.clone(), true));
     }
     if let Some(p) = &ep.progs.sftp {
         return Ok((p.clone(), false));
@@ -618,17 +610,15 @@ fn sh(s: &str) -> String {
 fn ssh_command(ep: &Endpoint, command: &str) -> Result<RunOut, String> {
     let t = &ep.target;
     let use_putty = ep.tool == Tool::Putty || ep.progs.ssh.is_none();
-    if use_putty {
-        if let Some(plink) = &ep.progs.plink {
-            let mut args = vec!["-batch".to_string(), "-ssh".into(), "-P".into(), t.port.to_string()];
-            if !t.password.is_empty() {
-                args.push("-pw".into());
-                args.push(t.password.clone());
-            }
-            args.push(user_host(t));
-            args.push(command.to_string());
-            return run(plink, &args, None, &[]);
+    if use_putty && let Some(plink) = &ep.progs.plink {
+        let mut args = vec!["-batch".to_string(), "-ssh".into(), "-P".into(), t.port.to_string()];
+        if !t.password.is_empty() {
+            args.push("-pw".into());
+            args.push(t.password.clone());
         }
+        args.push(user_host(t));
+        args.push(command.to_string());
+        return run(plink, &args, None, &[]);
     }
     let ssh = ep.progs.ssh.clone().ok_or(tr("No ssh program found (OpenSSH client or plink.exe)."))?;
     let mut args = openssh_opts(ep);
@@ -642,20 +632,18 @@ fn ssh_command(ep: &Endpoint, command: &str) -> Result<RunOut, String> {
 fn scp_copy(ep: &Endpoint, recursive: bool, from: &str, to: &str) -> Result<RunOut, String> {
     let t = &ep.target;
     let use_putty = ep.tool == Tool::Putty || ep.progs.scp.is_none();
-    if use_putty {
-        if let Some(pscp) = &ep.progs.pscp {
-            let mut args = vec!["-batch".to_string(), "-scp".into(), "-P".into(), t.port.to_string()];
-            if !t.password.is_empty() {
-                args.push("-pw".into());
-                args.push(t.password.clone());
-            }
-            if recursive {
-                args.push("-r".into());
-            }
-            args.push(from.into());
-            args.push(to.into());
-            return run(pscp, &args, None, &[]);
+    if use_putty && let Some(pscp) = &ep.progs.pscp {
+        let mut args = vec!["-batch".to_string(), "-scp".into(), "-P".into(), t.port.to_string()];
+        if !t.password.is_empty() {
+            args.push("-pw".into());
+            args.push(t.password.clone());
         }
+        if recursive {
+            args.push("-r".into());
+        }
+        args.push(from.into());
+        args.push(to.into());
+        return run(pscp, &args, None, &[]);
     }
     let scp = ep.progs.scp.clone().ok_or(tr("No scp program found (OpenSSH client or pscp.exe)."))?;
     let mut args = openssh_opts(ep);
@@ -702,10 +690,9 @@ fn run_scp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, String
             let flag = if *is_dir { "-rf" } else { "-f" };
             done(ssh_command(ep, &format!("rm {0} -- {1}", flag, sh(path)))?, tf("Deleted: {0}", &[&path]))
         }
-        Job::Rename { from, to } => done(
-            ssh_command(ep, &format!("mv -- {} {}", sh(from), sh(to)))?,
-            tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]),
-        ),
+        Job::Rename { from, to } => {
+            done(ssh_command(ep, &format!("mv -- {} {}", sh(from), sh(to)))?, tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
+        }
     }
 }
 
@@ -766,9 +753,7 @@ impl rustls::client::danger::ServerCertVerifier for AnyCert {
 
 pub fn tls_config(check_cert: bool) -> Result<Arc<rustls::ClientConfig>, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .map_err(|e| e.to_string())?;
+    let builder = rustls::ClientConfig::builder_with_provider(provider.clone()).with_safe_default_protocol_versions().map_err(|e| e.to_string())?;
     let cfg = if check_cert {
         let mut roots = rustls::RootCertStore::empty();
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -781,11 +766,7 @@ pub fn tls_config(check_cert: bool) -> Result<Arc<rustls::ClientConfig>, String>
 
 fn ftp_err(e: suppaftp::FtpError) -> String {
     let t = e.to_string();
-    if t.contains("530") {
-        tf("Login refused (check user/password): {0}", &[&t])
-    } else {
-        t
-    }
+    if t.contains("530") { tf("Login refused (check user/password): {0}", &[&t]) } else { t }
 }
 
 fn ftp_connect(ep: &Endpoint) -> Result<FtpConn, String> {
@@ -828,8 +809,8 @@ fn ftp_list_dir(conn: &mut FtpConn, path: &str) -> Result<(String, Vec<RemoteIte
         for l in lines {
             if let Some(it) = parse_ls_line(&l) {
                 items.push(it);
-            } else if let Ok(f) = suppaftp::list::File::from_dos_line(&l) {
-                if f.name() != "." && f.name() != ".." {
+            } else if let Ok(f) = suppaftp::list::File::from_dos_line(&l)
+                && f.name() != "." && f.name() != ".." {
                     items.push(RemoteItem {
                         name: f.name().to_string(),
                         is_dir: f.is_directory(),
@@ -839,7 +820,6 @@ fn ftp_list_dir(conn: &mut FtpConn, path: &str) -> Result<(String, Vec<RemoteIte
                         perms: String::new(),
                     });
                 }
-            }
         }
         sort_items(&mut items);
         Ok((dir, items))
@@ -917,9 +897,12 @@ fn run_ftp(ep: &Endpoint, slot: &mut Option<FtpConn>, job: &Job, cwd: &mut Strin
         None => false,
     };
     if !alive {
-        *slot = Some(ftp_connect(ep)?);
+        *slot = None;
     }
-    let conn = slot.as_mut().unwrap();
+    let conn = match slot {
+        Some(c) => c,
+        None => slot.insert(ftp_connect(ep)?),
+    };
     let result = match job {
         Job::List(p) => {
             let (dir, items) = ftp_list_dir(conn, p)?;
@@ -992,31 +975,14 @@ pub fn list_local(dir: &Path, show_hidden: bool) -> Result<Vec<LocalItem>, Strin
 /// Drive letters on Windows ("C:\", "D:\" ...).
 pub fn drives() -> Vec<PathBuf> {
     if cfg!(windows) {
-        (b'A'..=b'Z')
-            .map(|c| PathBuf::from(format!("{}:\\", c as char)))
-            .filter(|p| p.exists())
-            .collect()
+        (b'A'..=b'Z').map(|c| PathBuf::from(format!("{}:\\", c as char))).filter(|p| p.exists()).collect()
     } else {
         vec![PathBuf::from("/")]
     }
 }
 
 fn fmt_time(t: std::time::SystemTime) -> String {
-    let secs = t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-    let days = secs.div_euclid(86400);
-    let rem = secs.rem_euclid(86400);
-    // civil from days (Howard Hinnant)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{d:02}.{m:02}.{y} {:02}:{:02}", rem / 3600, (rem % 3600) / 60)
+    crate::timefmt::date_time(crate::timefmt::unix_secs(t))
 }
 
 pub fn human_size(n: u64) -> String {
@@ -1027,22 +993,14 @@ pub fn human_size(n: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 {
-        format!("{n} B")
-    } else {
-        format!("{v:.1} {}", U[i])
-    }
+    if i == 0 { format!("{n} B") } else { format!("{v:.1} {}", U[i]) }
 }
 
 /// Default local folder: Downloads, else home.
 pub fn default_local_dir() -> PathBuf {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     let dl = home.join("Downloads");
-    if dl.is_dir() {
-        dl
-    } else {
-        home
-    }
+    if dl.is_dir() { dl } else { home }
 }
 
 #[allow(dead_code)]

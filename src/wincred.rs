@@ -3,6 +3,7 @@
 //! Written through the Windows API and not through `cmdkey /pass:…`, so the password never
 //! appears on a command line that other programs can read. The entry is removed again a moment
 //! after the connection started, unless it was there before AdminCraft touched it.
+#![allow(unsafe_code)] // Windows credential API; named exception in AGENTS.md
 
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ const KEEP: Duration = Duration::from_secs(90);
 /// this target existed before (then it must stay afterwards).
 #[cfg(windows)]
 pub fn store(target: &str, user: &str, password: &str) -> Result<bool, String> {
-    use windows_sys::Win32::Security::Credentials::{CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC};
+    use windows_sys::Win32::Security::Credentials::{CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredWriteW};
     let existed = exists(target);
     let mut target_w = wide(target);
     let mut user_w = wide(user);
@@ -38,16 +39,12 @@ pub fn store(target: &str, user: &str, password: &str) -> Result<bool, String> {
     // the strings end with a zero and the blob size matches the blob.
     let ok = unsafe { CredWriteW(&cred, 0) } != 0;
     blob.fill(0);
-    if ok {
-        Ok(existed)
-    } else {
-        Err(std::io::Error::last_os_error().to_string())
-    }
+    if ok { Ok(existed) } else { Err(std::io::Error::last_os_error().to_string()) }
 }
 
 #[cfg(windows)]
 pub fn exists(target: &str) -> bool {
-    use windows_sys::Win32::Security::Credentials::{CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC};
+    use windows_sys::Win32::Security::Credentials::{CRED_TYPE_GENERIC, CREDENTIALW, CredFree, CredReadW};
     let target_w = wide(target);
     let mut found: *mut CREDENTIALW = std::ptr::null_mut();
     // SAFETY: `target_w` ends with a zero; `found` receives a buffer that is freed right below.
@@ -63,7 +60,7 @@ pub fn exists(target: &str) -> bool {
 
 #[cfg(windows)]
 pub fn delete(target: &str) -> bool {
-    use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
+    use windows_sys::Win32::Security::Credentials::{CRED_TYPE_GENERIC, CredDeleteW};
     let target_w = wide(target);
     // SAFETY: `target_w` ends with a zero and lives until after the call.
     unsafe { CredDeleteW(target_w.as_ptr(), CRED_TYPE_GENERIC, 0) != 0 }

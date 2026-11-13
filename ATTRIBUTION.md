@@ -51,6 +51,7 @@ target platforms). Each crate keeps its own license; see the crate for the full 
 | argon2 | 0.6.0 | MIT OR Apache-2.0 |
 | base64 | 0.22.1 | MIT OR Apache-2.0 |
 | base64 | 0.23.1 | MIT OR Apache-2.0 |
+| chrono | 0.4.45 | MIT OR Apache-2.0 |
 | eframe | 0.37.0 | MIT OR Apache-2.0 |
 | getrandom | 0.2.17 | MIT OR Apache-2.0 |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 |
@@ -76,6 +77,30 @@ target platforms). Each crate keeps its own license; see the crate for the full 
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 |
 | winit | 0.30.13 | Apache-2.0 |
 | x509-parser | 0.18.1 | MIT OR Apache-2.0 |
+| zeroize | 1.9.1 | Apache-2.0 OR MIT |
+
+## Licences outside the Craft allowlist
+
+The house rules in `AGENTS.md` list the licences a Craft repository may depend on. These crates
+of the dependency graph carry a licence that is not on that list. All three licences are
+permissive; they are named here until `storytold/craft-contrib` decides on them or the crates
+are replaced. Don't add to this list.
+
+| Crate | License | Comes in through |
+|---|---|---|
+| foldhash, slotmap, zlib-rs | Zlib | egui / image (PNG) |
+| clipboard-win, error-code | BSL-1.0 | egui's clipboard on Windows (arboard) |
+| webpki-roots | CDLA-Permissive-2.0 | the list of trusted certificate authorities for TLS |
+
+## Assets
+
+Every asset file in this repository, with author, source and licence.
+
+| File | Author | Source | Licence |
+|---|---|---|---|
+| `assets/logo-512.png`, `assets/icon-256.png`, `assets/admincraft.ico` | provided by the project owner | the AdminCraft logo (honey badger), handed in for this project; the icon sizes are scaled from it | to be confirmed by the project owner — not covered by the code licence until then |
+| `docs/images/main.png`, `certificate.png`, `subnet.png`, `export.png` | AdminCraft contributors | screenshots of AdminCraft itself (`--screenshot`) with invented example data | MIT OR Apache-2.0 |
+| `lang/*.lang`, `docs/help/*.md` | AdminCraft contributors | written for this project | MIT OR Apache-2.0 |
 
 ## All crates
 

@@ -97,13 +97,12 @@ pub fn parse_targets(text: &str) -> Result<Vec<Ipv4Addr>, String> {
 pub fn local_subnets() -> Vec<String> {
     let mut v = Vec::new();
     // the address used for outgoing traffic, without sending anything
-    if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if s.connect("192.0.2.1:9").is_ok() {
-            if let Ok(SocketAddr::V4(a)) = s.local_addr() {
-                let o = a.ip().octets();
-                v.push(format!("{}.{}.{}.0/24", o[0], o[1], o[2]));
-            }
-        }
+    if let Ok(s) = std::net::UdpSocket::bind("0.0.0.0:0")
+        && s.connect("192.0.2.1:9").is_ok()
+        && let Ok(SocketAddr::V4(a)) = s.local_addr()
+    {
+        let o = a.ip().octets();
+        v.push(format!("{}.{}.{}.0/24", o[0], o[1], o[2]));
     }
     v
 }
@@ -141,10 +140,10 @@ fn ping_once(ip: Ipv4Addr, timeout_ms: u64, names: bool) -> (bool, Option<u32>, 
     if names && cfg!(windows) {
         // the header line of Windows ping (any language): "... NAME [10.0.0.5] ..."
         let needle = format!(" [{ip}]");
-        if let Some(line) = text.lines().find(|l| l.contains(&needle)) {
-            if let Some(end) = line.find(&needle) {
-                name = line[..end].rsplit(' ').next().unwrap_or("").to_string();
-            }
+        if let Some(line) = text.lines().find(|l| l.contains(&needle))
+            && let Some(end) = line.find(&needle)
+        {
+            name = line[..end].rsplit(' ').next().unwrap_or("").to_string();
         }
     }
     (alive, rtt, name)
@@ -205,11 +204,11 @@ pub fn arp_table() -> BTreeMap<Ipv4Addr, String> {
             let mut ip = None;
             let mut mac = None;
             for tok in line.split(|c: char| c.is_whitespace() || c == '(' || c == ')') {
-                if ip.is_none() {
-                    if let Ok(a) = tok.parse::<Ipv4Addr>() {
-                        ip = Some(a);
-                        continue;
-                    }
+                if ip.is_none()
+                    && let Ok(a) = tok.parse::<Ipv4Addr>()
+                {
+                    ip = Some(a);
+                    continue;
                 }
                 let parts: Vec<&str> = tok.split([':', '-']).collect();
                 if parts.len() == 6 && parts.iter().all(|p| !p.is_empty() && p.len() <= 2 && p.chars().all(|c| c.is_ascii_hexdigit())) {
@@ -283,7 +282,7 @@ impl NetScan {
                     if name == ip.to_string() {
                         name.clear();
                     }
-                    let mut s = state.lock().unwrap();
+                    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
                     s.done += 1;
                     if alive {
                         s.hosts.push(ScanHost { ip, name, mac: String::new(), rtt_ms: rtt, ports: open });
@@ -294,7 +293,7 @@ impl NetScan {
                 if fw.fetch_add(1, Ordering::SeqCst) + 1 == workers {
                     // last worker: add MAC addresses and sort
                     let arp = arp_table();
-                    let mut s = state.lock().unwrap();
+                    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
                     for h in &mut s.hosts {
                         if let Some(m) = arp.get(&h.ip) {
                             h.mac = m.clone();

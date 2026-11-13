@@ -7,11 +7,11 @@
 //! use it, nothing from other computers. Passwords are never returned; typing into terminals
 //! needs its own switch in the settings.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 /// One request from a client, waiting for the window to answer it.

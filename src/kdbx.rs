@@ -125,7 +125,15 @@ fn take_id(wanted: u64, next: &mut u64, used: &mut HashSet<u64>) -> u64 {
     *next
 }
 
-fn walk_group(db: &keepass::Database, g: keepass::db::GroupRef<'_>, parent: Option<u64>, out: &mut Vec<Entry>, next: &mut u64, used: &mut HashSet<u64>, depth: usize) {
+fn walk_group(
+    db: &keepass::Database,
+    g: keepass::db::GroupRef<'_>,
+    parent: Option<u64>,
+    out: &mut Vec<Entry>,
+    next: &mut u64,
+    used: &mut HashSet<u64>,
+    depth: usize,
+) {
     if depth > 32 {
         return;
     }
@@ -197,12 +205,12 @@ fn find_group(db: &keepass::Database) -> Option<GroupId> {
 pub fn load(path: &str, key: &Key) -> Result<Vec<Entry>, String> {
     let db = open(path, key)?;
     let mut out = Vec::new();
-    if let Some(gid) = find_group(&db) {
-        if let Some(g) = db.group(gid) {
-            let mut used = HashSet::new();
-            let mut next = 1;
-            walk_group(&db, g, None, &mut out, &mut next, &mut used, 0);
-        }
+    if let Some(gid) = find_group(&db)
+        && let Some(g) = db.group(gid)
+    {
+        let mut used = HashSet::new();
+        let mut next = 1;
+        walk_group(&db, g, None, &mut out, &mut next, &mut used, 0);
     }
     Ok(out)
 }
@@ -364,17 +372,17 @@ pub fn save(path: &str, key: &Key, list: &mut [Entry]) -> Result<(), String> {
 
     // what was deleted in AdminCraft goes (KeePass records the deletion for merging)
     for (_, id) in old_entries {
-        if !kept_entries.contains(&id) {
-            if let Some(mut em) = db.entry_mut(id) {
-                let _ = em.track_changes().remove();
-            }
+        if !kept_entries.contains(&id)
+            && let Some(mut em) = db.entry_mut(id)
+        {
+            em.track_changes().remove();
         }
     }
     for (_, g) in old_groups {
-        if !kept_groups.contains(&g) {
-            if let Some(mut gm) = db.group_mut(g) {
-                let _ = gm.track_changes().remove();
-            }
+        if !kept_groups.contains(&g)
+            && let Some(mut gm) = db.group_mut(g)
+        {
+            let _ = gm.track_changes().remove();
         }
     }
     write(&db, path, key)

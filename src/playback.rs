@@ -25,7 +25,8 @@ pub struct Cast {
 /// Reads an asciicast v2 file (header line, then `[time, "o"|"r"|"i", data]` lines).
 pub fn parse_cast(text: &str) -> Result<Cast, String> {
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let header: serde_json::Value = serde_json::from_str(lines.next().ok_or_else(|| tr("The recording is empty.").to_string())?).map_err(|e| e.to_string())?;
+    let header: serde_json::Value =
+        serde_json::from_str(lines.next().ok_or_else(|| tr("The recording is empty.").to_string())?).map_err(|e| e.to_string())?;
     if header["version"].as_u64() != Some(2) {
         return Err(tr("Not a recording AdminCraft can play (asciicast version 2 expected).").into());
     }
@@ -42,10 +43,10 @@ pub fn parse_cast(text: &str) -> Result<Cast, String> {
         match kind {
             "o" => cast.events.push((t, Ev::Out(data.to_string()))),
             "r" => {
-                if let Some((c, r)) = data.split_once('x') {
-                    if let (Ok(c), Ok(r)) = (c.parse::<u16>(), r.parse::<u16>()) {
-                        cast.events.push((t, Ev::Resize(c.clamp(10, 500), r.clamp(5, 300))));
-                    }
+                if let Some((c, r)) = data.split_once('x')
+                    && let (Ok(c), Ok(r)) = (c.parse::<u16>(), r.parse::<u16>())
+                {
+                    cast.events.push((t, Ev::Resize(c.clamp(10, 500), r.clamp(5, 300))));
                 }
             }
             _ => {}
@@ -105,7 +106,7 @@ pub fn list() -> Vec<RecFile> {
                 .collect()
         })
         .unwrap_or_default();
-    v.sort_by(|a, b| b.modified.cmp(&a.modified));
+    v.sort_by_key(|a| std::cmp::Reverse(a.modified));
     v
 }
 

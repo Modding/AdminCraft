@@ -3,6 +3,7 @@
 //! window of ours and follows the tab's position and size.
 //!
 //! Windows only. Elsewhere the program keeps its own window and the tab shows its state.
+#![allow(unsafe_code)] // Windows window API; named exception in AGENTS.md
 
 /// Physical pixel rectangle inside our window's client area.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -38,32 +39,34 @@ mod imp {
     /// Our window's message handler in front of winit's: a click into an embedded window
     /// gives it the keyboard (like mRemoteNG), a click on AdminCraft itself takes it back.
     unsafe extern "system" fn parent_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-        let old: WNDPROC = std::mem::transmute(OLD_PROC.load(Ordering::Relaxed));
-        let active = ACTIVE.load(Ordering::Relaxed) as HWND;
-        match msg {
-            WM_PARENTNOTIFY if !active.is_null() => {
-                let ev = (wp & 0xFFFF) as u32;
-                if ev == WM_LBUTTONDOWN || ev == WM_RBUTTONDOWN || ev == WM_MBUTTONDOWN {
-                    let pt = POINT { x: (lp & 0xFFFF) as i16 as i32, y: ((lp >> 16) & 0xFFFF) as i16 as i32 };
-                    let child = ChildWindowFromPointEx(h, pt, CWP_SKIPINVISIBLE);
-                    if child == active && !is_inside(GetFocus(), active) {
-                        SetFocus(active);
+        unsafe {
+            let old: WNDPROC = std::mem::transmute(OLD_PROC.load(Ordering::Relaxed));
+            let active = ACTIVE.load(Ordering::Relaxed) as HWND;
+            match msg {
+                WM_PARENTNOTIFY if !active.is_null() => {
+                    let ev = (wp & 0xFFFF) as u32;
+                    if ev == WM_LBUTTONDOWN || ev == WM_RBUTTONDOWN || ev == WM_MBUTTONDOWN {
+                        let pt = POINT { x: (lp & 0xFFFF) as i16 as i32, y: ((lp >> 16) & 0xFFFF) as i16 as i32 };
+                        let child = ChildWindowFromPointEx(h, pt, CWP_SKIPINVISIBLE);
+                        if child == active && !is_inside(GetFocus(), active) {
+                            SetFocus(active);
+                        }
                     }
                 }
-            }
-            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
-                if GetFocus() != h {
-                    SetFocus(h);
+                WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+                    if GetFocus() != h {
+                        SetFocus(h);
+                    }
                 }
+                WM_ACTIVATE if !active.is_null() && (wp & 0xFFFF) as u32 == WA_ACTIVE => {
+                    let r = CallWindowProcW(old, h, msg, wp, lp);
+                    SetFocus(active);
+                    return r;
+                }
+                _ => {}
             }
-            WM_ACTIVATE if !active.is_null() && (wp & 0xFFFF) as u32 == WA_ACTIVE => {
-                let r = CallWindowProcW(old, h, msg, wp, lp);
-                SetFocus(active);
-                return r;
-            }
-            _ => {}
+            CallWindowProcW(old, h, msg, wp, lp)
         }
-        CallWindowProcW(old, h, msg, wp, lp)
     }
 
     pub fn install_focus_hook(parent: isize) {
@@ -105,7 +108,7 @@ mod imp {
             if lines == 0 {
                 return None;
             }
-            for px in buf.chunks_exact_mut(4) {
+            for px in buf.as_chunks_mut::<4>().0 {
                 px.swap(0, 2); // BGRA -> RGBA
                 px[3] = 255;
             }
@@ -141,35 +144,37 @@ mod imp {
     }
 
     unsafe extern "system" fn enum_cb(h: HWND, lp: LPARAM) -> i32 {
-        let s = &mut *(lp as *mut Search);
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(h, &mut pid);
-        if pid != s.pid || IsWindowVisible(h) == 0 {
-            return 1;
+        unsafe {
+            let s = &mut *(lp as *mut Search);
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(h, &mut pid);
+            if pid != s.pid || IsWindowVisible(h) == 0 {
+                return 1;
+            }
+            let class = class_name(h);
+            if class.starts_with("IME") || class == "MSCTFIME UI" {
+                return 1;
+            }
+            // with a known main window class, dialogs (certificate warning, "connecting...") stay
+            // floating; without one, a dialog-based program may still be its own main window
+            let dialog = class == "#32770";
+            if dialog && !s.hints.is_empty() {
+                return 1;
+            }
+            let mut r: RECT = std::mem::zeroed();
+            GetWindowRect(h, &mut r);
+            let (w, hgt) = ((r.right - r.left) as i64, (r.bottom - r.top) as i64);
+            let area = w.max(0) * hgt.max(0);
+            let mut score = area;
+            if s.hints.iter().any(|c| class.eq_ignore_ascii_case(c)) {
+                score += 1 << 40;
+            }
+            if score > s.best_score && w >= 300 && hgt >= 200 {
+                s.best_score = score;
+                s.best = h;
+            }
+            1
         }
-        let class = class_name(h);
-        if class.starts_with("IME") || class == "MSCTFIME UI" {
-            return 1;
-        }
-        // with a known main window class, dialogs (certificate warning, "connecting...") stay
-        // floating; without one, a dialog-based program may still be its own main window
-        let dialog = class == "#32770";
-        if dialog && !s.hints.is_empty() {
-            return 1;
-        }
-        let mut r: RECT = std::mem::zeroed();
-        GetWindowRect(h, &mut r);
-        let (w, hgt) = ((r.right - r.left) as i64, (r.bottom - r.top) as i64);
-        let area = w.max(0) * hgt.max(0);
-        let mut score = area;
-        if s.hints.iter().any(|c| class.eq_ignore_ascii_case(c)) {
-            score += 1 << 40;
-        }
-        if score > s.best_score && w >= 300 && hgt >= 200 {
-            s.best_score = score;
-            s.best = h;
-        }
-        1
     }
 
     impl Embedded {
@@ -191,11 +196,7 @@ mod imp {
         }
 
         pub fn handle(&self) -> isize {
-            if self.attached() {
-                self.hwnd as isize
-            } else {
-                0
-            }
+            if self.attached() { self.hwnd as isize } else { 0 }
         }
 
         pub fn lost(&self) -> bool {
@@ -254,7 +255,15 @@ mod imp {
                         MapWindowPoints(std::ptr::null_mut(), GetParent(self.hwnd), pts.as_mut_ptr(), 2);
                         let actual = PxRect { x: pts[0].x, y: pts[0].y, w: pts[1].x - pts[0].x, h: pts[1].y - pts[0].y };
                         if r != self.last || !self.visible || actual != r {
-                            SetWindowPos(self.hwnd, std::ptr::null_mut(), r.x, r.y, r.w, r.h, SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                            SetWindowPos(
+                                self.hwnd,
+                                std::ptr::null_mut(),
+                                r.x,
+                                r.y,
+                                r.w,
+                                r.h,
+                                SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                            );
                             self.last = r;
                         }
                         if !self.visible {
@@ -348,7 +357,7 @@ mod imp {
     }
 }
 
-pub use imp::{capture, install_focus_hook, set_active, Embedded};
+pub use imp::{Embedded, capture, install_focus_hook, set_active};
 
 /// Can this system put other programs' windows into tabs?
 pub const SUPPORTED: bool = cfg!(windows);
