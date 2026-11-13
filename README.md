@@ -75,12 +75,17 @@
 - The whole list can be encrypted with the master password and kept centrally on a
   **network share (SMB)** or a **WebDAV server** (Nextcloud, ownCloud …); changes by others are reloaded.
 - **Export / import** to hand connections to a colleague — with or without passwords.
+- **KeePass as the connection list:** every connection is a KeePass entry (group *AdminCraft*), editable
+  in KeePass/KeePassXC too; or save single passwords into KeePass.
 
 **Admin tools**
 - **Network scanner** (in the spirit of Angry IP Scanner): ping and port checks over an IP range,
   names, MAC addresses; save a baseline and see what is **new, gone or changed** on the next scan.
 - Ping / traceroute, port scan, DNS lookup (A, AAAA, MX, TXT, CNAME, NS, SOA, PTR, SRV, CAA),
   Wake-on-LAN, subnet calculator, TLS certificate check, reachability monitoring with alerts.
+- **Whois**, **HTTP header check** (redirects, security headers, cookie flags) and **SNMP query**
+  (system info and interfaces of switches, printers, servers).
+- **Session recording:** terminal sessions recorded with their timing and played back like a video.
 - Windows management per right-click (services, event viewer, computer management, `C$`),
   restart / shut down (Windows via `shutdown /m`, Linux via `sudo reboot` over SSH).
 
@@ -90,6 +95,7 @@
   More languages as plain text files (`AdminCraftLang/xx.lang`: copy `de.lang.example` there and
   translate the right side).
 - **Built-in user guide** (F1, *Help » User guide*) with contents, search and a `?` next to settings.
+- **Check for updates** button in the settings (asks GitHub only when pressed).
 - A settings page for the paths of helper programs, or simply drop portable programs such as
   `putty.exe` into the `AdminCraftTools` folder next to AdminCraft.
 
@@ -153,7 +159,14 @@ MCP client configuration (Claude Desktop, Claude Code, Cursor …):
 ```
 
 Tools: `list_connections`, `open_connection`, `scan_network`, `port_scan`, `dns_lookup`, `subnet`,
-`check_certificate`. A fully encrypted connection list is read with the master password in `AC_MASTER`.
+`check_certificate`, and for the open window `window_status`, `window_list_tabs`, `window_read_tab`,
+`window_type`, `window_switch_tab`, `window_close_tab`, `window_open_tool`, `window_notify`.
+A fully encrypted connection list is read with the master password in `AC_MASTER`, a list kept in
+KeePass with `AC_KEEPASS`.
+
+**Control the open window** (Settings » AI agents): `admincraft cli window tabs | read [n] | type <n> <text> |
+switch <n> | close <n> | tool <tool> [target]`. The window listens on 127.0.0.1 only, with a token in
+the data folder; typing into terminals has to be allowed separately.
 
 ## Keyboard
 

@@ -452,3 +452,215 @@ fn split_words_quotes() {
         vec!["xfreerdp", "/v:my host", "/u:{user}"]
     );
 }
+
+#[test]
+fn update_versions_compare() {
+    use crate::update::{newest, parse_version};
+    let v = |s: &str| parse_version(s).unwrap();
+    assert!(v("0.1.0-alpha.2") > v("0.1.0-alpha.1"));
+    assert!(v("0.1.0-alpha.10") > v("0.1.0-alpha.9"));
+    assert!(v("0.1.0-beta.1") > v("0.1.0-alpha.9"));
+    assert!(v("0.1.0") > v("0.1.0-rc.3"));
+    assert!(v("v0.2.0") > v("0.1.9"));
+    assert_eq!(v("1.2"), v("1.2.0"));
+    assert!(parse_version("next").is_none());
+    let json = r#"[
+        {"tag_name":"v0.1.0-alpha.2","name":"AdminCraft v0.1.0-alpha.2","prerelease":true,"draft":false,"html_url":"u2","published_at":"2026-11-13T08:32:58Z"},
+        {"tag_name":"v0.3.0","name":"draft","prerelease":false,"draft":true,"html_url":"d"},
+        {"tag_name":"v0.1.0-alpha.1","name":"AdminCraft v0.1.0-alpha.1","prerelease":true,"draft":false,"html_url":"u1"}
+    ]"#;
+    let best = newest(json, true).unwrap().unwrap();
+    assert_eq!((best.url.as_str(), best.published.as_str()), ("u2", "2026-11-13"));
+    assert!(newest(json, false).unwrap().is_none(), "only test versions and a draft");
+}
+
+#[test]
+fn keepass_as_connection_list() {
+    use crate::kdbx::{self, Key};
+    use keepass::db::fields;
+    let path = std::env::temp_dir().join(format!("admincraft-kdbx-list-{}.kdbx", std::process::id()));
+    let ps = path.to_str().unwrap().to_string();
+    let key = Key { password: "kp-test".into(), keyfile: String::new() };
+    {
+        let db = keepass::Database::new();
+        let mut f = std::fs::File::create(&path).unwrap();
+        db.save(&mut f, keepass::DatabaseKey::new().with_password("kp-test")).unwrap();
+    }
+    let mut s = temp_store("kdbxlist");
+    let web = s.data.entries.iter().position(|e| e.name.starts_with("web01 – L")).unwrap();
+    s.data.entries[web].password = "secret!".into();
+    let count = s.data.entries.len();
+    s.data.settings.keepass_path = ps.clone();
+    assert!(s.use_keepass(key.clone()).unwrap().contains(&count.to_string()));
+    assert!(s.kdbx_mode());
+    // the JSON file keeps the settings only
+    let json = std::fs::read_to_string(&s.path).unwrap();
+    assert!(!json.contains("10.0.0.30") && json.contains("keepass_db"));
+    // everything is in KeePass: names, folders, passwords, URLs
+    let back = kdbx::load(&ps, &key).unwrap();
+    assert_eq!(back.len(), count);
+    let w = back.iter().find(|e| e.name.starts_with("web01 – L")).unwrap();
+    assert_eq!((w.password.as_str(), w.host.as_str(), w.protocol), ("secret!", "10.0.0.30", Protocol::Ssh));
+    let dc = back.iter().find(|e| e.name.starts_with("DC01")).unwrap();
+    let folder = back.iter().find(|e| Some(e.id) == dc.parent).unwrap();
+    assert!(folder.folder && folder.domain == "CORP", "folder settings survive");
+    // edited in KeePass: AdminCraft reloads it; an entry made there becomes a connection
+    {
+        let mut f = std::fs::File::open(&path).unwrap();
+        let mut db = keepass::Database::open(&mut f, keepass::DatabaseKey::new().with_password("kp-test")).unwrap();
+        let id = db.root().groups().find(|g| g.name == kdbx::GROUP).unwrap().id();
+        let eid = {
+            let g = db.group(id).unwrap();
+            let x = g.groups().flat_map(|sg| sg.entries().map(|e| (e.id(), e.get_title().unwrap_or("").to_string())).collect::<Vec<_>>()).find(|(_, t)| t.starts_with("web01 – L")).unwrap();
+            x.0
+        };
+        db.entry_mut(eid).unwrap().set_unprotected(fields::TITLE, "web01 – renamed in KeePass");
+        let mut g = db.group_mut(id).unwrap();
+        let mut ne = g.add_entry();
+        ne.set_unprotected(fields::TITLE, "made in KeePass");
+        ne.set_unprotected(fields::URL, "rdp://10.1.1.1");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut f = std::fs::File::create(&path).unwrap();
+        db.save(&mut f, keepass::DatabaseKey::new().with_password("kp-test")).unwrap();
+    }
+    assert!(s.reload_if_changed());
+    assert!(s.data.entries.iter().any(|e| e.name == "web01 – renamed in KeePass"));
+    let made = s.data.entries.iter().find(|e| e.name == "made in KeePass").unwrap();
+    assert_eq!((made.protocol, made.host.as_str(), made.port), (Protocol::Rdp, "10.1.1.1", 3389));
+    // deleted in AdminCraft: gone from KeePass too
+    let id = made.id;
+    s.remove(id);
+    s.save();
+    assert_eq!(kdbx::load(&ps, &key).unwrap().len(), count);
+    // locked until the KeePass password is entered
+    let mut fresh = temp_store("kdbxlist2");
+    fresh.data.settings = s.data.settings.clone();
+    assert!(fresh.unlock_keepass("wrong") == false && fresh.unlock_keepass("kp-test"));
+    assert_eq!(fresh.data.entries.len(), count);
+    // a single password into KeePass
+    let p = kdbx::store_password(&ps, &key, "printer", "admin", "pw1", "http://10.0.1.50/").unwrap();
+    assert_eq!(p, "AdminCraft/printer");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn keepass_urls() {
+    use crate::kdbx::{parse_url, url_of};
+    assert_eq!(parse_url("ssh://root@10.0.0.30:2222"), Some((Protocol::Ssh, "10.0.0.30".into(), 2222)));
+    assert_eq!(parse_url("https://fw.corp.local/login"), Some((Protocol::Https, "fw.corp.local".into(), 443)));
+    assert_eq!(parse_url("rdp://[fe80::1]:3390"), Some((Protocol::Rdp, "fe80::1".into(), 3390)));
+    assert_eq!(parse_url("10.0.0.5"), Some((Protocol::Ssh, "10.0.0.5".into(), 22)));
+    assert_eq!(parse_url(""), None);
+    let e = crate::model::Entry { protocol: Protocol::Rdp, host: "dc01".into(), port: 3389, ..Default::default() };
+    assert_eq!(url_of(&e), "rdp://dc01:3389");
+}
+
+#[test]
+fn session_recording_and_playback() {
+    use crate::playback::{compress_pauses, parse_cast, Ev};
+    let path = std::env::temp_dir().join(format!("admincraft-rec-{}.cast", std::process::id()));
+    {
+        let mut r = crate::terminal::Recorder::create(&path, 100, 30, "web01").unwrap();
+        r.output("héllo ".as_bytes());
+        // a character cut between two chunks stays whole
+        let bytes = "wörld\r\n".as_bytes();
+        r.output(&bytes[..2]);
+        r.output(&bytes[2..]);
+        r.resize(120, 40);
+    }
+    let cast = parse_cast(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!((cast.cols, cast.rows, cast.title.as_str()), (100, 30, "web01"));
+    let text: String = cast.events.iter().filter_map(|(_, e)| if let Ev::Out(s) = e { Some(s.as_str()) } else { None }).collect();
+    assert_eq!(text, "héllo wörld\r\n");
+    assert!(cast.events.iter().any(|(_, e)| *e == Ev::Resize(120, 40)));
+    let ev = vec![(0.5, Ev::Out("a".into())), (60.5, Ev::Out("b".into())), (61.0, Ev::Out("c".into()))];
+    let c: Vec<f64> = compress_pauses(&ev, 2.0).iter().map(|x| x.0).collect();
+    assert_eq!(c, vec![0.5, 2.5, 3.0]);
+    assert!(parse_cast("{\"version\":1}").is_err());
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn guide_table_columns_fit() {
+    let rows = vec![
+        vec!["Protocol".to_string(), "Opens as".to_string(), "Needs".to_string()],
+        vec!["SSH".into(), "terminal tab (or PuTTY, or its own window)".into(), "OpenSSH (built into Windows 10/11, macOS, Linux) or PuTTY".into()],
+    ];
+    let w = crate::help::column_widths(&rows, 800.0);
+    assert_eq!(w.len(), 3);
+    assert!((w.iter().sum::<f32>() - 800.0).abs() < 1.0);
+    assert!(w[0] < w[1] && w[1] < w[2], "the short column stays narrow: {w:?}");
+    assert!(w.iter().all(|x| *x >= 100.0), "no column too narrow to read: {w:?}");
+}
+
+#[test]
+fn snmp_ber_encoding() {
+    use crate::nettools::{decode_oid, decode_response, encode_get, encode_oid, oid_name, SnmpValue, PDU_GET};
+    let req = encode_get("public", 1, PDU_GET, &["1.3.6.1.2.1.1.1.0"]).unwrap();
+    let want = [
+        0x30, 0x26, 0x02, 0x01, 0x01, 0x04, 0x06, b'p', b'u', b'b', b'l', b'i', b'c', 0xa0, 0x19, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b,
+        0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00,
+    ];
+    assert_eq!(req, want);
+    let big = "1.3.6.1.4.1.311.21.20";
+    assert_eq!(decode_oid(&encode_oid(big).unwrap()).unwrap(), big);
+    assert!(encode_oid("1.x.3").is_err());
+    // a hand-made GetResponse
+    fn tlv(tag: u8, c: &[u8]) -> Vec<u8> {
+        let mut v = vec![tag];
+        if c.len() < 128 {
+            v.push(c.len() as u8);
+        } else {
+            v.extend([0x82, (c.len() >> 8) as u8, c.len() as u8]);
+        }
+        v.extend_from_slice(c);
+        v
+    }
+    let vb = |oid: &str, tag: u8, val: &[u8]| {
+        let mut x = tlv(0x06, &encode_oid(oid).unwrap());
+        x.extend(tlv(tag, val));
+        tlv(0x30, &x)
+    };
+    let mut binds = Vec::new();
+    binds.extend(vb("1.3.6.1.2.1.1.5.0", 0x04, b"router1"));
+    binds.extend(vb("1.3.6.1.2.1.1.3.0", 0x43, &[0x05, 0x7e, 0x40])); // 360000 ticks = 1 h
+    binds.extend(vb("1.3.6.1.2.1.2.2.1.8.3", 0x02, &[0xfb])); // -5
+    binds.extend(vb("1.3.6.1.2.1.31.1.1.1.6.3", 0x46, &[0x01, 0x00, 0x00, 0x00, 0x00, 0x00]));
+    binds.extend(vb("1.3.6.1.2.1.1.2.0", 0x06, &encode_oid("1.3.6.1.4.1.9.1.1").unwrap()));
+    binds.extend(vb("1.3.6.1.2.1.1.9.0", 0x80, &[]));
+    let mut pdu = tlv(0x02, &[0x2a]);
+    pdu.extend(tlv(0x02, &[0]));
+    pdu.extend(tlv(0x02, &[0]));
+    pdu.extend(tlv(0x30, &binds));
+    let mut msg = tlv(0x02, &[1]);
+    msg.extend(tlv(0x04, b"public"));
+    msg.extend(tlv(0xa2, &pdu));
+    let (id, err, rows) = decode_response(&tlv(0x30, &msg)).unwrap();
+    assert_eq!((id, err, rows.len()), (42, 0, 6));
+    assert_eq!(rows[0].1.to_string(), "router1");
+    assert_eq!(rows[1].1.to_string(), "0d 01:00:00");
+    assert_eq!(rows[2].1, SnmpValue::Int(-5));
+    assert_eq!(rows[3].1, SnmpValue::Counter64(1 << 40));
+    assert_eq!(rows[4].1, SnmpValue::Oid("1.3.6.1.4.1.9.1.1".into()));
+    assert_eq!(rows[5].1, SnmpValue::NoSuchObject);
+    assert!(decode_response(&[0x30, 0x05, 0x02]).is_err(), "cut answers are refused, not a panic");
+    assert_eq!(oid_name("1.3.6.1.2.1.2.2.1.2.7").as_deref(), Some("ifDescr.7"));
+    assert_eq!(SnmpValue::Bytes(vec![0, 0x1a, 0x2b]).to_string(), "00:1a:2b");
+}
+
+#[test]
+fn whois_and_http_reading() {
+    use crate::nettools::{evaluate_security, parse_cookies, parse_referral};
+    assert_eq!(parse_referral("% IANA\nrefer:        whois.verisign-grs.com\n\ndomain: COM").as_deref(), Some("whois.verisign-grs.com"));
+    assert_eq!(parse_referral("domain: EXAMPLE.COM\nsource: IANA"), None);
+    let h = |k: &str, v: &str| (k.to_string(), v.to_string());
+    let headers = vec![h("strict-transport-security", "max-age=63072000; includeSubDomains"), h("x-content-type-options", "nosniff"), h("set-cookie", "sid=abc; Secure; HttpOnly; SameSite=Lax"), h("set-cookie", "theme=dark")];
+    let sec = evaluate_security(&headers, true);
+    let hsts = sec.iter().find(|s| s.name == "Strict-Transport-Security").unwrap();
+    assert!(hsts.present);
+    assert!(!sec.iter().find(|s| s.name == "Content-Security-Policy").unwrap().present);
+    let c = parse_cookies(&headers);
+    assert_eq!(c.len(), 2);
+    assert!(c[0].secure && c[0].http_only && c[0].same_site == "Lax");
+    assert!(!c[1].secure && c[1].name == "theme");
+}

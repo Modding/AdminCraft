@@ -17,6 +17,9 @@ use std::path::PathBuf;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
 
+#[path = "app_control.rs"]
+mod app_control;
+
 const ACCENT: Color32 = Color32::from_rgb(33, 132, 230);
 const OK_GREEN: Color32 = Color32::from_rgb(76, 175, 80);
 const BAD_RED: Color32 = Color32::from_rgb(229, 72, 77);
@@ -157,6 +160,8 @@ enum TabKind {
     Cert(extra::CertTab),
     Tunnels,
     Help(Box<crate::help::HelpTab>),
+    Playback(Box<crate::playback::PlaybackTab>),
+    Tool(Box<crate::tooltabs::ToolTab>),
 }
 
 #[allow(dead_code)]
@@ -195,6 +200,8 @@ enum Act {
     Power(u64, bool),
     StartTunnels(u64),
     CheckCert(u64),
+    /// Whois / HTTP header check / SNMP for a connection's host.
+    NetTool(u64, crate::tooltabs::ToolKind),
     /// Export a folder (or everything with None).
     Export(Option<u64>),
 }
@@ -245,6 +252,11 @@ pub struct AdminApp {
     show_keys: bool,
     /// A "?" asked for this chapter of the user guide (opened after the frame's drawing).
     help_request: Option<crate::help::Topic>,
+    /// The channel agents use to control this window (None when switched off).
+    control: Option<crate::control::Server>,
+    /// Result of "Check for updates" (None inside while it runs).
+    update_result: Option<std::sync::Arc<std::sync::Mutex<Option<Result<crate::update::Outcome, String>>>>>,
+    releases_url: String,
     focus_search: bool,
     close_request: Option<usize>,
     show_props: bool,
@@ -257,6 +269,8 @@ pub struct AdminApp {
     shot: Option<Shot>,
     keepass: KeePassVault,
     kp_dialog: bool,
+    /// "Save password in KeePass": connection id, the password typed, an error.
+    kp_save: Option<(u64, String, Option<String>)>,
     kp_pw: String,
     kp_msg: Option<(bool, String)>,
     kp_pending: Vec<Pending>,
@@ -343,6 +357,9 @@ impl AdminApp {
             show_about: false,
             show_keys: false,
             help_request: None,
+            control: None,
+            update_result: None,
+            releases_url: crate::update::releases_page(),
             focus_search: false,
             close_request: None,
             show_props: true,
@@ -355,6 +372,7 @@ impl AdminApp {
             shot: screenshot.map(|path| Shot { path, frames: 0, requested: false, image: Default::default() }),
             keepass: KeePassVault::default(),
             kp_dialog: false,
+            kp_save: None,
             kp_pw: String::new(),
             kp_msg: None,
             kp_pending: Vec::new(),
@@ -449,6 +467,10 @@ impl AdminApp {
                     }
                 }
                 "tunnels" => app.open_tunnels(),
+                "recordings" => app.open_recordings((!host.is_empty()).then(|| PathBuf::from(&host))),
+                "whois" => app.open_net_tool(crate::tooltabs::ToolKind::Whois, host.clone(), &ctx),
+                "http" => app.open_net_tool(crate::tooltabs::ToolKind::Http, host.clone(), &ctx),
+                "snmp" => app.open_net_tool(crate::tooltabs::ToolKind::Snmp, host.clone(), &ctx),
                 "help" => {
                     app.open_help(None);
                     if let (Ok(n), Some(Tab { kind: TabKind::Help(h), .. })) = (host.parse::<usize>(), app.tabs.get_mut(app.active)) {
@@ -543,6 +565,28 @@ impl AdminApp {
         }
         if let (Some(topic), Some(Tab { kind: TabKind::Help(h), .. })) = (topic, self.tabs.get_mut(self.active)) {
             h.open_section(topic as usize);
+        }
+    }
+
+    /// Opens Whois, the HTTP header check or SNMP; runs it right away when there is a target.
+    pub(crate) fn open_net_tool(&mut self, kind: crate::tooltabs::ToolKind, target: String, ctx: &egui::Context) {
+        let mut t = crate::tooltabs::ToolTab::new(kind, target.clone());
+        if !target.trim().is_empty() {
+            t.start(ctx, false);
+        }
+        let title = if target.trim().is_empty() { kind.title().to_string() } else { format!("{} {}", kind.title(), target.trim()) };
+        self.add_tab(title, kind.color(), TabKind::Tool(Box::new(t)));
+    }
+
+    /// The tab with the recorded sessions (one at a time), optionally playing `path`.
+    pub(crate) fn open_recordings(&mut self, path: Option<PathBuf>) {
+        if let Some(i) = self.tabs.iter().position(|t| matches!(t.kind, TabKind::Playback(_))) {
+            self.active = i;
+            if let (Some(path), TabKind::Playback(_)) = (path, &self.tabs[i].kind) {
+                self.tabs[i].kind = TabKind::Playback(Box::new(crate::playback::PlaybackTab::new(Some(path))));
+            }
+        } else {
+            self.add_tab(tr("Recordings").into(), Color32::from_rgb(229, 57, 53), TabKind::Playback(Box::new(crate::playback::PlaybackTab::new(path))));
         }
     }
 
@@ -906,6 +950,11 @@ impl AdminApp {
                     Ok(mut t) => {
                         if self.store.data.settings.session_log && !self.store.read_only {
                             let _ = t.start_log(&extra::session_log_path(&entry.name));
+                        }
+                        if self.store.data.settings.record_sessions && !self.store.read_only {
+                            if let Err(e) = t.start_recording(&crate::playback::new_recording_path(&entry.name), &entry.name) {
+                                self.log.push(tf("Recording could not start: {0}", &[&e]));
+                            }
                         }
                         (Some(t), None)
                     }
@@ -1382,6 +1431,13 @@ impl AdminApp {
                 let host = self.store.get(id).map(|e| e.host.clone()).unwrap_or_default();
                 self.open_cert(host);
             }
+            Act::NetTool(id, kind) => {
+                let target = self.store.get(id).map(|e| match (kind, e.protocol) {
+                    (crate::tooltabs::ToolKind::Http, Protocol::Http | Protocol::Https) => crate::kdbx::url_of(e),
+                    _ => e.host.clone(),
+                });
+                self.open_net_tool(kind, target.unwrap_or_default(), ctx);
+            }
             Act::Export(root) => self.open_export(root),
             Act::Putty(id) => self.start(id, How::Putty, ctx, now),
         }
@@ -1564,6 +1620,14 @@ impl AdminApp {
                 }
                 if ui.button(tr("SSH tunnels")).clicked() {
                     self.open_tunnels();
+                }
+                for k in [crate::tooltabs::ToolKind::Whois, crate::tooltabs::ToolKind::Http, crate::tooltabs::ToolKind::Snmp] {
+                    if ui.button(k.title()).clicked() {
+                        self.open_net_tool(k, host.clone(), &ctx);
+                    }
+                }
+                if ui.button(tr("Recordings (play back sessions)")).clicked() {
+                    self.open_recordings(None);
                 }
                 if ui.button(tr("Password generator")).clicked() {
                     self.pwgen.open = true;
@@ -1965,6 +2029,16 @@ impl AdminApp {
                         acts.push(Act::CheckCert(id));
                         ui.close();
                     }
+                    if !e.host.trim().is_empty() && e.protocol.needs_host() {
+                        ui.menu_button(tr("More tools"), |ui| {
+                            for k in [crate::tooltabs::ToolKind::Whois, crate::tooltabs::ToolKind::Http, crate::tooltabs::ToolKind::Snmp] {
+                                if ui.button(k.title()).clicked() {
+                                    acts.push(Act::NetTool(id, k));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                     if cfg!(windows) && matches!(e.protocol, Protocol::Rdp | Protocol::PowerShell | Protocol::Vnc) {
                         ui.menu_button(tr("Windows management"), |ui| {
                             for (tool, label) in [
@@ -2128,6 +2202,7 @@ impl AdminApp {
             ctx.request_repaint_after(std::time::Duration::from_secs(1));
         }
         let mut open_kp = false;
+        let mut kp_save = false;
         let mut open_settings = false;
         let default_client = self.store.data.settings.default_ssh_client;
 
@@ -2281,6 +2356,9 @@ impl AdminApp {
                                             }
                                         }
                                     });
+                                    if ui.button(tr("Save password in KeePass …")).on_hover_text(tr("Writes a password for this connection into the KeePass database (group \"AdminCraft\") and uses that entry.")).clicked() {
+                                        kp_save = true;
+                                    }
                                 } else if ui.button(tr("Unlock KeePass")).clicked() {
                                     open_kp = true;
                                 }
@@ -2512,6 +2590,11 @@ impl AdminApp {
             self.kp_dialog = true;
             self.kp_msg = None;
         }
+        if kp_save {
+            if let Some(e) = self.store.data.entries.get(idx) {
+                self.kp_save = Some((e.id, String::new(), None));
+            }
+        }
         if open_settings {
             self.open_settings();
         }
@@ -2723,12 +2806,18 @@ impl AdminApp {
                 }
                 TabKind::Transfer(t) => transfer_ui(ui, t, show_hidden),
                 TabKind::Help(h) => crate::help::help_ui(ui, h),
+                TabKind::Playback(p) => crate::playback::playback_ui(ui, p, settings_font, dark),
+                TabKind::Tool(x) => crate::tooltabs::tool_ui(ui, x),
                 TabKind::Term(t) => {
                     let mut snippet_cmd: Option<String> = None;
                     ui.horizontal(|ui| {
                         badge(ui, t.entry.protocol);
                         ui.label(RichText::new(&t.preview).monospace().weak());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if t.term.as_ref().is_some_and(|x| x.recording()) {
+                                ui.colored_label(Color32::from_rgb(229, 57, 53), tr("• recording"))
+                                    .on_hover_text(tr("This session is recorded and can be played back (Tools » Recordings)."));
+                            }
                             if ui.button(tr("Reconnect")).clicked() {
                                 if let Some(term) = &mut t.term {
                                     term.kill();
@@ -3149,6 +3238,52 @@ impl AdminApp {
             self.open_settings();
         }
 
+        if let Some((id, mut pw, msg)) = self.kp_save.take() {
+            let mut keep = true;
+            let mut save = false;
+            let name = self.store.get(id).map(|e| e.name.clone()).unwrap_or_default();
+            egui::Modal::new(egui::Id::new("kp_save")).show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.heading(tr("Save password in KeePass"));
+                ui.label(tf("Entry \"{0}\" in the group \"AdminCraft\" (made or updated):", &[&name]));
+                let r = ui.add(egui::TextEdit::singleline(&mut pw).password(true).hint_text(tr("Password")).desired_width(f32::INFINITY));
+                r.request_focus();
+                if let Some(m) = &msg {
+                    ui.colored_label(BAD_RED, m);
+                }
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(RichText::new(tr("Save")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
+                        save = true;
+                    }
+                    if ui.button(tr("Cancel")).clicked() {
+                        keep = false;
+                    }
+                });
+            });
+            let mut msg = msg;
+            if save {
+                let (user, _, _) = self.store.credentials(id);
+                let url = self.store.get(id).map(crate::kdbx::url_of).unwrap_or_default();
+                let s = self.store.data.settings.clone();
+                match self.keepass.key.clone().ok_or_else(|| tr("Unlock KeePass first").to_string()).and_then(|k| crate::kdbx::store_password(&s.keepass_path, &k, &name, &user, &pw, &url).map(|p| (k, p))) {
+                    Ok((k, path)) => {
+                        if let Some(i) = self.store.index_of(id) {
+                            self.store.data.entries[i].keepass_entry = path.clone();
+                            self.store.data.entries[i].cred_source = CredSource::KeePass;
+                        }
+                        let _ = self.keepass.open(&s.keepass_path, &k.password, &k.keyfile);
+                        self.mark_dirty(now);
+                        self.note(tf("Password saved in KeePass: {0}", &[&path]), false, now);
+                        keep = false;
+                    }
+                    Err(e) => msg = Some(e),
+                }
+            }
+            if keep {
+                self.kp_save = Some((id, pw, msg));
+            }
+        }
         if self.kp_dialog {
             let mut close = false;
             let mut unlock = false;
@@ -3161,7 +3296,7 @@ impl AdminApp {
                 } else {
                     ui.label(tr("Database:"));
                 }
-                ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Tresor\Passwoerter.kdbx").desired_width(f32::INFINITY));
+                ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Vault\Passwords.kdbx").desired_width(f32::INFINITY));
                 ui.label(tr("Key file (optional):"));
                 ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_keyfile).desired_width(f32::INFINITY));
                 ui.label(tr("Master password of the KeePass database:"));
@@ -3173,7 +3308,7 @@ impl AdminApp {
                 if let Some((ok, m)) = &self.kp_msg {
                     ui.label(RichText::new(m).color(if *ok { OK_GREEN } else { BAD_RED }));
                 }
-                ui.weak(tr("AdminCraft only reads the database. The master password is not stored."));
+                ui.weak(tr("The master password is only kept while AdminCraft runs (to save passwords into KeePass when you ask), never on disk."));
                 ui.horizontal(|ui| {
                     if ui.add(egui::Button::new(RichText::new(tr("Unlock")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
                         unlock = true;
@@ -3372,12 +3507,20 @@ impl AdminApp {
                     ui.heading(tr("Unlock AdminCraft"));
                 });
                 ui.add_space(6.0);
-                ui.label(tr("The connections are protected by a master password."));
-                let r = ui.add(egui::TextEdit::singleline(&mut self.unlock_pw).password(true).hint_text(tr("Master password")).desired_width(f32::INFINITY));
+                let kp = self.store.waiting_for_keepass();
+                if kp {
+                    ui.label(tr("The connections are kept in a KeePass database. Its master password:"));
+                    ui.weak(self.store.data.settings.keepass_path.clone());
+                } else {
+                    ui.label(tr("The connections are protected by a master password."));
+                }
+                let hint = if kp { tr("KeePass master password") } else { tr("Master password") };
+                let r = ui.add(egui::TextEdit::singleline(&mut self.unlock_pw).password(true).hint_text(hint).desired_width(f32::INFINITY));
                 r.request_focus();
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if self.unlock_failed {
-                    ui.label(RichText::new(tr("Wrong password.")).color(BAD_RED));
+                    let why = if kp { self.store.last_error.clone().unwrap_or_else(|| tr("Wrong password.").into()) } else { tr("Wrong password.").into() };
+                    ui.label(RichText::new(why).color(BAD_RED));
                 }
                 ui.horizontal(|ui| {
                     if ui.button(tr("Unlock")).clicked() || enter {
@@ -3391,6 +3534,14 @@ impl AdminApp {
                     }
                     if ui.button(tr("Quit")).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if kp
+                        && ui
+                            .button(tr("Without KeePass"))
+                            .on_hover_text(tr("Uses AdminCraft's own list again (it starts empty). The KeePass database stays as it is."))
+                            .clicked()
+                    {
+                        self.store.stop_using_keepass();
                     }
                 });
             });
@@ -3429,6 +3580,75 @@ impl AdminApp {
             }
         });
         ui.weak(tr("More languages: copy de.lang.example in the language folder to xx.lang and translate the right side."));
+
+        section(ui, tr("Updates"));
+        ui.horizontal(|ui| {
+            ui.label(tf("This is AdminCraft {0}.", &[&env!("CARGO_PKG_VERSION")]));
+            let busy = self.update_result.as_ref().is_some_and(|r| r.lock().map(|g| g.is_none()).unwrap_or(false));
+            if ui.add_enabled(!busy, egui::Button::new(tr("Check for updates"))).on_hover_text(tr("Asks GitHub for the newest release. Nothing is downloaded by itself.")).clicked() {
+                let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let s2 = slot.clone();
+                let pre = self.store.data.settings.update_include_pre;
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let r = crate::update::check(pre);
+                    if let Ok(mut g) = s2.lock() {
+                        *g = Some(r);
+                    }
+                    ctx.request_repaint();
+                });
+                self.update_result = Some(slot);
+            }
+            if busy {
+                ui.spinner();
+            }
+        });
+        changed |= ui.checkbox(&mut self.store.data.settings.update_include_pre, tr("Also offer test versions (alpha, beta)")).changed();
+        let outcome = self.update_result.as_ref().and_then(|r| r.lock().ok().and_then(|g| g.clone()));
+        match outcome {
+            Some(Ok(o)) => {
+                ui.horizontal(|ui| {
+                    let newer = matches!(o, crate::update::Outcome::Newer(_));
+                    let text = RichText::new(crate::update::describe(&o));
+                    ui.label(if newer { text.color(OK_GREEN).strong() } else { text });
+                    if let crate::update::Outcome::Newer(r) = &o {
+                        if ui.button(tr("Open download page")).clicked() {
+                            let _ = launch::open_url(if r.url.is_empty() { &self.releases_url } else { &r.url });
+                        }
+                    }
+                });
+            }
+            Some(Err(e)) => {
+                ui.colored_label(Color32::from_rgb(229, 115, 115), e);
+            }
+            None => {}
+        }
+
+        section_help(ui, tr("AI agents"), crate::help::Topic::Agents, &mut self.help_request);
+        changed |= ui
+            .checkbox(&mut self.store.data.settings.agent_control, tr("AI agents and scripts on this computer may control this window"))
+            .on_hover_text(tr("Only programs on this computer that can read the data folder. Passwords are never given out."))
+            .changed();
+        ui.add_enabled_ui(self.store.data.settings.agent_control, |ui| {
+            changed |= ui.checkbox(&mut self.store.data.settings.agent_typing, tr("… and may type into terminal tabs")).changed();
+            if self.store.data.settings.agent_typing {
+                ui.colored_label(Color32::from_rgb(255, 183, 77), tr("Careful: an agent can then run commands on your servers. Every typing is shown in the window."));
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.weak(tr("Connect an agent:"));
+            ui.monospace("admincraft mcp");
+            ui.weak(tr("or"));
+            ui.monospace("admincraft cli window tabs");
+        });
+        ui.collapsing(tr("What agents can do"), |ui| {
+            for (cmd, what) in crate::control::COMMANDS {
+                ui.horizontal(|ui| {
+                    ui.monospace(*cmd);
+                    ui.weak(*what);
+                });
+            }
+        });
 
         section(ui, tr("Appearance"));
         ui.horizontal(|ui| {
@@ -3526,7 +3746,7 @@ impl AdminApp {
         egui::Grid::new(tr("kp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Database (.kdbx)"));
             changed |= ui
-                .add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Tresor\Passwoerter.kdbx").desired_width(380.0))
+                .add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Vault\Passwords.kdbx").desired_width(380.0))
                 .changed();
             ui.end_row();
             ui.label(tr("Key file"));
@@ -3549,11 +3769,50 @@ impl AdminApp {
                 }
             }
         });
+        ui.add_space(4.0);
+        if self.store.kdbx_mode() {
+            ui.label(RichText::new(tr("The connection list is kept in this KeePass database (group \"AdminCraft\").")).color(OK_GREEN));
+            ui.weak(tr("Every connection is a KeePass entry: title, user, password, URL and notes can also be changed in KeePass or KeePassXC; AdminCraft reloads them."));
+            if ui.button(tr("Back to AdminCraft's own list")).on_hover_text(tr("The connections are copied into AdminCraft's file; the KeePass database stays as it is.")).clicked() {
+                self.store.stop_using_keepass();
+                self.note(tr("Connections are kept in AdminCraft's own list again."), false, now);
+            }
+        } else {
+            ui.horizontal(|ui| {
+                let can = self.keepass.unlocked && self.keepass.key.is_some() && !self.store.data.settings.keepass_path.trim().is_empty();
+                if ui
+                    .add_enabled(can, egui::Button::new(tr("Keep the connection list in KeePass")))
+                    .on_hover_text(tr("Connections become KeePass entries in the group \"AdminCraft\": one place for all passwords, editable in KeePass too."))
+                    .on_disabled_hover_text(tr("Set the database and unlock it first."))
+                    .clicked()
+                {
+                    if let Some(key) = self.keepass.key.clone() {
+                        match self.store.use_keepass(key) {
+                            Ok(msg) => {
+                                self.note(msg, false, now);
+                                self.selected = None;
+                            }
+                            Err(e) => self.note(e, true, now),
+                        }
+                    }
+                }
+                ui.weak(tr("(the database must be unlocked)"));
+            });
+        }
 
         section(ui, tr("Sessions and monitoring"));
+        ui.horizontal(|ui| {
+            changed |= ui
+                .checkbox(&mut self.store.data.settings.record_sessions, tr("Record terminal sessions for playback"))
+                .on_hover_text(tr("SSH, Telnet, PowerShell and shell tabs are recorded with their timing and can be played back like a video."))
+                .changed();
+            if ui.small_button(tr("Recordings")).clicked() {
+                self.open_recordings(None);
+            }
+        });
         changed |= ui.checkbox(&mut self.store.data.settings.restore_session, tr("Reopen the last open connections at start")).changed();
         ui.horizontal(|ui| {
-            changed |= ui.checkbox(&mut self.store.data.settings.session_log, tr("Record terminal sessions (text files)")).changed();
+            changed |= ui.checkbox(&mut self.store.data.settings.session_log, tr("Write terminal sessions to text files")).changed();
             if ui.small_button(tr("Open folder")).clicked() {
                 let d = crate::model::data_dir(true).join("logs");
                 let _ = std::fs::create_dir_all(&d);
@@ -3853,6 +4112,8 @@ impl eframe::App for AdminApp {
         let now = ctx.input(|i| i.time);
         self.apply_theme(&ctx);
         self.shortcuts(&ctx, now);
+        self.sync_control(&ctx);
+        self.control_requests(&ctx, now);
         if self.parent_hwnd.is_none() {
             self.parent_hwnd = embed::parent_handle(frame);
             if let Some(h) = self.parent_hwnd {
@@ -3872,7 +4133,7 @@ impl eframe::App for AdminApp {
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui, now));
         egui::Panel::left("tree").resizable(true).default_size(300.0).size_range(200.0..=520.0).show(ui, |ui| self.tree_panel(ui, now));
         // remote desktops and file transfers get the whole width
-        let wide_tab = matches!(self.tabs.get(self.active).map(|t| &t.kind), Some(TabKind::Proc(_)) | Some(TabKind::Transfer(_)) | Some(TabKind::NetScan(_)) | Some(TabKind::Tunnels) | Some(TabKind::Help(_)));
+        let wide_tab = matches!(self.tabs.get(self.active).map(|t| &t.kind), Some(TabKind::Proc(_)) | Some(TabKind::Transfer(_)) | Some(TabKind::NetScan(_)) | Some(TabKind::Tunnels) | Some(TabKind::Help(_)) | Some(TabKind::Playback(_)) | Some(TabKind::Tool(_)));
         if self.show_props && !wide_tab {
             egui::Panel::right("props").resizable(true).default_size(340.0).size_range(260.0..=560.0).show(ui, |ui| self.props_panel(ui, now));
         }

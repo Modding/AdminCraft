@@ -25,7 +25,7 @@ fn hidden(cmd: &mut Command) {
     let _ = cmd;
 }
 
-fn fmt_time(secs: u64) -> String {
+pub fn fmt_time(secs: u64) -> String {
     let days = (secs / 86400) as i64;
     let rem = secs % 86400;
     let z = days + 719_468;
@@ -37,7 +37,7 @@ fn fmt_time(secs: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    format!("{d:02}.{m:02}.{y} {:02}:{:02} UTC", rem / 3600, (rem % 3600) / 60)
+    format!("{y}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, (rem % 3600) / 60)
 }
 
 // ------------------------------------------------------------------ network scanner

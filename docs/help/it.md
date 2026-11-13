@@ -110,6 +110,22 @@ AdminCraft chiede poi la password principale all'avvio.
 **Codici 2FA:** le voci KeePass con un segreto TOTP mostrano il codice attuale accanto alla password.
 **Generatore di password:** Strumenti » Generatore di password, oppure il pulsante *Genera* accanto a un campo password.
 
+### KeePass come elenco delle connessioni
+
+Usi già KeePass o KeePassXC? Allora tieni lì l'intero elenco delle connessioni:
+
+1. Impostazioni » Cassaforte password: indica il database (`.kdbx`) e fai clic su **Sblocca …**.
+2. Fai clic su **Tieni l'elenco delle connessioni in KeePass**.
+
+Ogni connessione diventa una normale voce KeePass nel gruppo **AdminCraft** — titolo, utente, password,
+URL (ad es. `ssh://10.0.0.30:22`) e note; le cartelle diventano gruppi KeePass. Puoi modificarle anche in
+KeePass; AdminCraft se ne accorge e ricarica. Una voce creata in KeePass in quel gruppo (con un URL come
+`rdp://10.0.0.10`) compare come connessione. All'avvio AdminCraft chiede la password principale di KeePass.
+**Torna all'elenco proprio di AdminCraft** nello stesso punto ricopia l'elenco.
+
+**Salva password in KeePass …** (su una connessione con *Password da » KeePass*): digita la password una
+volta; AdminCraft la mette nel gruppo *AdminCraft* del database e da allora usa quella voce.
+
 ## Jump host
 
 Alcuni server si raggiungono solo attraverso un altro server (un "jump host" o "bastion").
@@ -161,6 +177,25 @@ Tutti gli strumenti sono nel menu **Strumenti**, nei pulsanti in alto e nel menu
 - **Input multiplo** — scrivi la stessa cosa in più schede SSH contemporaneamente (Strumenti » Input multiplo).
 - **Comandi salvati** — nella scheda terminale sotto *Comandi*; segnaposto `{host}` `{user}` `{name}`.
 
+- **Whois** — a chi appartiene un dominio o un indirizzo IP, con registrar e date.
+- **Controllo header HTTP** — segue ogni reindirizzamento di un indirizzo web, mostra codici di stato,
+  header e tempi, controlla gli header di sicurezza (HSTS, CSP …) e gli attributi dei cookie.
+- **Interrogazione SNMP** — chiede a uno switch, una stampante o un server (SNMP v2c, community ad es.
+  `public`) nome, descrizione, tempo di attività, posizione e le interfacce con stato, velocità e traffico.
+  Si può percorrere qualsiasi OID.
+- **Registrazioni** — riproduce le sessioni terminale registrate (vedi sotto).
+
+### Registrare le sessioni
+
+Impostazioni » Sessioni e monitoraggio » **Registra le sessioni terminale per riprodurle**: da quel momento
+ogni scheda SSH, Telnet, PowerShell e shell viene registrata con i suoi tempi; la scheda mostra
+**• registrazione**. Strumenti » **Registrazioni** le elenca, dalla più recente. **Riproduci**, **Pausa**,
+la velocità (fino a 16×) e il cursore funzionano come in un video; **Accorcia le pause** salta le lunghe
+attese. I file (`.cast`) si possono riprodurre anche con asciinema.
+
+> Le registrazioni contengono tutto ciò che lo schermo ha mostrato. I server non mostrano le password
+> digitate, quindi non ci sono — ma tieni comunque privata la cartella.
+
 ## Scansione di rete
 
 ![Calcolatore subnet](../images/subnet.png)
@@ -209,13 +244,21 @@ Si aprono con il pulsante **Impostazioni**, con **Ctrl+,** o con Strumenti » Im
 - **Posizione di archiviazione** — dove si trova l'elenco, password principale, archiviazione centrale.
 - **Cassaforte password** — il database KeePass da usare.
 
+- **Aggiornamenti** — **Cerca aggiornamenti** chiede a GitHub la versione più recente e offre la pagina di
+  download. AdminCraft non controlla mai da solo.
+- **Agenti IA** — se assistenti IA e script su questo computer possono controllare la finestra aperta, e se
+  possono anche scrivere nelle schede terminale (disattivato finché non lo attivi).
+- **Sessioni e monitoraggio** — riaprire le ultime connessioni all'avvio, log di testo, registrazioni da
+  riprodurre, controllo regolare della raggiungibilità.
+- **Cassaforte password** — anche KeePass come intero elenco delle connessioni.
+
 ## Portatile: tutto accanto al programma
 
 AdminCraft è un unico file. Tutto ciò che salva si trova in cartelle accanto ad esso:
 
 ```
 AdminCraft.exe
-AdminCraftData\     connessioni, riferimenti delle scansioni, log delle sessioni
+AdminCraftData\     connessioni, riferimenti delle scansioni, log delle sessioni, registrazioni
 AdminCraftTools\    programmi di supporto che hai aggiunto (putty.exe, vncviewer.exe …)
 AdminCraftLang\     i tuoi file di lingua
 ```
@@ -224,6 +267,8 @@ Copia la cartella su una chiavetta USB e avrai con te tutta la tua cassetta degl
 (per esempio dentro un'app macOS), AdminCraft usa invece `.admincraft` nella tua cartella home.
 
 AdminCraft non contatta nulla su internet di sua iniziativa — solo gli host a cui ti connetti.
+
+Unica eccezione: GitHub, quando fai clic su *Cerca aggiornamenti*.
 
 ## Lingue
 
@@ -272,6 +317,21 @@ admincraft cli open <name>            apre una connessione nella finestra
 admincraft mcp                        server MCP per assistenti IA (stdin/stdout)
 ```
 
+**Controllare la finestra aperta.** Quando AdminCraft è aperto, gli agenti possono anche lavorarci — come
+un collega che guarda da sopra la spalla (Impostazioni » Agenti IA lo attiva o disattiva):
+
+```
+admincraft cli window tabs              le schede aperte
+admincraft cli window read 2            cosa mostra la scheda 2
+admincraft cli window tool ping web01   apre una scheda strumento
+admincraft cli window switch 2          porta una scheda in primo piano
+admincraft cli window type 2 uptime     scrive in un terminale + Invio
+```
+
+Il server MCP offre lo stesso come strumenti `window_…`. Scrivere nei terminali è possibile solo dopo averlo
+consentito nelle impostazioni, e ogni digitazione viene mostrata nella finestra. Possono collegarsi solo i
+programmi su questo computer che leggono la cartella dati; le password non vengono mai fornite.
+
 ## Domande e problemi
 
 **"Programma non trovato"** — la scheda Home, *Controllo di sistema*, mostra quali programmi di supporto mancano. Installali,
@@ -288,3 +348,7 @@ nella scheda* disattiva l'incorporamento.
 (sposta altrove il file in `AdminCraftData`) e importa un'esportazione.
 
 **Dove sono i miei dati?** — File » Apri cartella dati.
+
+**AdminCraft chiede una password KeePass all'avvio** — l'elenco delle connessioni è in KeePass. Inserisci
+la password principale di KeePass, oppure fai clic su *Senza KeePass* per partire con l'elenco proprio
+(vuoto) di AdminCraft.

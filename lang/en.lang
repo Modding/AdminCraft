@@ -1,4 +1,0 @@
-# Not used any more: English is the program's own text. German lives in de.lang.
-# This file can be deleted.
-@name = English
-@code = en

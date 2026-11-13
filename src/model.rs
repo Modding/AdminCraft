@@ -231,7 +231,7 @@ pub enum TransferTool {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum KeePassRef {
-    /// Title or "Gruppe/Titel" path.
+    /// Title or "Group/Title" path.
     Entry(String),
     /// No entry given: the first entry whose URL or title names this host.
     Host(String),
@@ -339,7 +339,7 @@ pub struct Entry {
     pub jump_host: Option<u64>,
     pub jump_mode: JumpMode,
     pub cred_source: CredSource,
-    /// KeePass entry: title or "Gruppe/Untergruppe/Titel". Empty = matched by host.
+    /// KeePass entry: title or "Group/Subgroup/Title". Empty = matched by host.
     pub keepass_entry: String,
     /// FTP over TLS (explicit FTPS).
     pub ftp_tls: bool,
@@ -353,6 +353,9 @@ pub struct Entry {
     pub web_in_tab: bool,
     /// SSH port forwardings of this connection.
     pub tunnels: Vec<Tunnel>,
+    /// The KeePass entry or group this connection is kept in (KeePass as connection list).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub kp_id: String,
 }
 
 impl Default for Entry {
@@ -387,6 +390,7 @@ impl Default for Entry {
             baud: 9600,
             web_in_tab: false,
             tunnels: Vec::new(),
+            kp_id: String::new(),
         }
     }
 }
@@ -421,6 +425,16 @@ pub struct Settings {
     pub language: String,
     /// Encrypt the whole list (names, hosts, notes) with the master password.
     pub encrypt_file: bool,
+    /// The update check also offers test versions (alpha, beta, rc).
+    pub update_include_pre: bool,
+    /// AI agents and scripts on this computer may control the open window (`admincraft cli window`).
+    pub agent_control: bool,
+    /// ... and may also type into terminal tabs.
+    pub agent_typing: bool,
+    /// Record terminal sessions so they can be played back (AdminCraftData/recordings).
+    pub record_sessions: bool,
+    /// The connections live in the KeePass database `keepass_path` (group "AdminCraft").
+    pub keepass_db: bool,
 }
 
 impl Default for Settings {
@@ -439,6 +453,11 @@ impl Default for Settings {
             show_hidden: false,
             language: String::new(),
             encrypt_file: false,
+            update_include_pre: true,
+            agent_control: true,
+            agent_typing: false,
+            record_sessions: false,
+            keepass_db: false,
             snippets: default_snippets(),
             restore_session: false,
             session_log: false,
@@ -539,6 +558,12 @@ pub struct Store {
     pub remote_state: std::sync::Arc<std::sync::Mutex<RemoteState>>,
     /// Hash of the text last read or written (to see whether the server has something new).
     text_hash: u64,
+    /// KeePass as connection list: the key once it was entered.
+    pub kdbx_key: Option<crate::kdbx::Key>,
+    /// KeePass as connection list, but its password wasn't entered yet.
+    kdbx_waiting: bool,
+    /// When the KeePass file was last read or written by us.
+    kdbx_mtime: Option<std::time::SystemTime>,
 }
 
 #[derive(Default)]
@@ -657,6 +682,9 @@ impl Store {
             remote: remote.clone(),
             remote_state: Default::default(),
             text_hash: 0,
+            kdbx_key: None,
+            kdbx_waiting: false,
+            kdbx_mtime: None,
         };
         // WebDAV: the server's list wins; without the server the local copy is used
         let mut text = None;
@@ -691,12 +719,77 @@ impl Store {
             }
         }
         // command line / MCP server: the master password may come from the environment
-        if store.locked() {
+        if store.vault.is_none() {
             if let Ok(pw) = std::env::var("AC_MASTER") {
                 store.unlock(&pw);
             }
         }
+        if store.kdbx_mode() {
+            store.data.entries.clear();
+            store.kdbx_waiting = true;
+            if let Ok(pw) = std::env::var("AC_KEEPASS") {
+                store.unlock_keepass(&pw);
+            }
+        }
         store
+    }
+
+    /// The connections live in a KeePass database (Settings » Password vault).
+    pub fn kdbx_mode(&self) -> bool {
+        self.data.settings.keepass_db && !self.data.settings.keepass_path.trim().is_empty()
+    }
+
+    /// The list is open, only the KeePass password is still missing.
+    pub fn waiting_for_keepass(&self) -> bool {
+        self.vault.is_some() && self.kdbx_waiting
+    }
+
+    /// Opens the connection list in the KeePass database.
+    pub fn unlock_keepass(&mut self, password: &str) -> bool {
+        let key = crate::kdbx::Key { password: password.to_string(), keyfile: self.data.settings.keepass_keyfile.clone() };
+        match crate::kdbx::load(&self.data.settings.keepass_path, &key) {
+            Ok(list) => {
+                self.data.entries = list;
+                self.kdbx_key = Some(key);
+                self.kdbx_waiting = false;
+                self.kdbx_mtime = std::fs::metadata(self.data.settings.keepass_path.trim().trim_matches('"')).and_then(|m| m.modified()).ok();
+                self.last_error = None;
+                true
+            }
+            Err(e) => {
+                self.last_error = Some(e);
+                false
+            }
+        }
+    }
+
+    /// Switches to KeePass as connection list. When the database already holds AdminCraft
+    /// connections they are used; otherwise the current list is written into it.
+    pub fn use_keepass(&mut self, key: crate::kdbx::Key) -> Result<String, String> {
+        let path = self.data.settings.keepass_path.clone();
+        let there = crate::kdbx::load(&path, &key)?;
+        let msg = if there.is_empty() {
+            let mut list = self.data.entries.clone();
+            crate::kdbx::save(&path, &key, &mut list)?;
+            self.data.entries = list;
+            tf("{0} entries moved into the KeePass database (group \"AdminCraft\").", &[&self.data.entries.len()])
+        } else {
+            self.data.entries = there;
+            tf("{0} entries loaded from the KeePass database.", &[&self.data.entries.len()])
+        };
+        self.data.settings.keepass_db = true;
+        self.kdbx_key = Some(key);
+        self.kdbx_waiting = false;
+        self.save();
+        Ok(msg)
+    }
+
+    /// Back to AdminCraft's own file: the connections now open are kept there.
+    pub fn stop_using_keepass(&mut self) {
+        self.data.settings.keepass_db = false;
+        self.kdbx_key = None;
+        self.kdbx_waiting = false;
+        self.save();
     }
 
     /// Reads a list (plain, or sealed with the master password). A vault that still fits is
@@ -744,6 +837,23 @@ impl Store {
     /// Someone else (a colleague on the shared list) saved the file: read it again.
     /// Returns true when the data was replaced.
     pub fn reload_if_changed(&mut self) -> bool {
+        if self.kdbx_mode() {
+            // the list is in KeePass: reload when KeePass (or a colleague) saved the file
+            let Some(key) = self.kdbx_key.clone() else { return false };
+            let path = self.data.settings.keepass_path.trim().trim_matches('"').to_string();
+            let Ok(m) = std::fs::metadata(&path).and_then(|m| m.modified()) else { return false };
+            if self.kdbx_mtime == Some(m) {
+                return false;
+            }
+            self.kdbx_mtime = Some(m);
+            return match crate::kdbx::load(&path, &key) {
+                Ok(list) if list != self.data.entries => {
+                    self.data.entries = list;
+                    true
+                }
+                _ => false,
+            };
+        }
         if self.remote.is_some() {
             return self.apply_fetched();
         }
@@ -835,10 +945,13 @@ impl Store {
     }
 
     pub fn locked(&self) -> bool {
-        self.vault.is_none()
+        self.vault.is_none() || self.kdbx_waiting
     }
 
     pub fn unlock(&mut self, password: &str) -> bool {
+        if self.waiting_for_keepass() {
+            return self.unlock_keepass(password);
+        }
         let vault = Vault::derive(password, &self.salt());
         if vault.decrypt(&self.data.verifier).as_deref() != Some(VERIFY_TEXT) {
             return false;
@@ -892,6 +1005,19 @@ impl Store {
             let _ = std::fs::copy(&self.path, self.path.with_extension("json.bak"));
             self.backed_up = true;
         }
+        // KeePass as connection list: the connections go there, this file keeps the settings
+        let kdbx = self.kdbx_mode();
+        let mut kdbx_error = None;
+        if kdbx && !self.kdbx_waiting {
+            if let Some(key) = self.kdbx_key.clone() {
+                let path = self.data.settings.keepass_path.clone();
+                match crate::kdbx::save(&path, &key, &mut self.data.entries) {
+                    Ok(()) => self.kdbx_mtime = std::fs::metadata(path.trim().trim_matches('"')).and_then(|m| m.modified()).ok(),
+                    Err(e) => kdbx_error = Some(e),
+                }
+            }
+        }
+        let kept = if kdbx { std::mem::take(&mut self.data.entries) } else { Vec::new() };
         let tmp = self.path.with_extension("json.tmp");
         let text = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string()).and_then(|json| {
             // whole list encrypted with the master password (names and hosts too)
@@ -912,7 +1038,10 @@ impl Store {
             std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
         });
-        self.last_error = result.err().map(|e| tf("Saving failed: {0}", &[&e]));
+        if kdbx {
+            self.data.entries = kept;
+        }
+        self.last_error = result.err().map(|e| tf("Saving failed: {0}", &[&e])).or(kdbx_error);
         self.mtime = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok();
         if let Ok(t) = text {
             self.text_hash = hash_text(&t);

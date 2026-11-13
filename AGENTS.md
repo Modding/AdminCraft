@@ -18,7 +18,7 @@ target/debug/admincraft --screenshot shots/now.png --lang en --data shots/demo
 ```
 
 `--screenshot` draws about 120 frames (longer while an embedded window or a scan is pending), saves
-the window as PNG and exits; the window opens without focus. `--open help[:CHAPTER]|settings|netscan:RANGE|cert:HOST|
+the window as PNG and exits; the window opens without focus. `--open help[:CHAPTER]|settings|recordings[:FILE]|whois:Q|http:URL|snmp:HOST|netscan:RANGE|cert:HOST|
 subnet:CIDR|tunnels|export|transfer|shell` opens a tab at start (for checks and screenshots).
 `--data <dir>` uses another data folder — use a fresh one for screenshots, so no personal
 connections, hosts or paths end up in pictures or commits.
@@ -43,7 +43,12 @@ Windows without Visual Studio: `cargo.cmd` runs a local Rust + LLVM-MinGW toolch
 | `src/sharing.rs` | export / import for colleagues |
 | `src/remote.rs` | WebDAV storage |
 | `src/agent.rs` | `admincraft cli …` (JSON) and `admincraft mcp` (MCP server over stdio); never returns passwords |
-| `src/keepass_vault.rs` | reading KeePass databases |
+| `src/keepass_vault.rs` | reading KeePass databases (passwords per connection) |
+| `src/kdbx.rs` | KeePass as the connection list (group "AdminCraft"), writing single passwords |
+| `src/control.rs`, `src/app_control.rs` | control channel into the open window for agents (127.0.0.1 + token in the data folder) |
+| `src/update.rs` | "Check for updates" against GitHub releases (only when pressed) |
+| `src/playback.rs` | session recordings (asciicast v2) and the playback tab |
+| `src/nettools.rs`, `src/tooltabs.rs` | Whois, HTTP header check, SNMP v2c (hand-written BER) and their tabs |
 | `src/i18n.rs`, `lang/*.lang` | translations (English is the source text; de, fr, it, uk built in) |
 | `src/help.rs`, `docs/help/*.md` | the user guide: shown in a tab (F1) and the documentation on GitHub |
 | `src/programs.rs` | finding helper programs (settings path, `AdminCraftTools`, PATH) |

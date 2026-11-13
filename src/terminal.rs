@@ -81,9 +81,57 @@ pub struct Terminal {
     /// Session log file (text without terminal control codes).
     log: Option<std::fs::File>,
     log_state: u8,
+    /// Recording for playback (asciicast v2: one JSON line per output chunk with its time).
+    rec: Option<Recorder>,
 }
 
-fn nz(v: u16) -> NonZeroU16 {
+/// Writes a session as an asciicast v2 file (`.cast`, the format asciinema plays too).
+pub struct Recorder {
+    file: std::fs::File,
+    start: std::time::Instant,
+    /// Bytes of a UTF-8 character cut at the end of the last chunk.
+    carry: Vec<u8>,
+}
+
+impl Recorder {
+    pub fn create(path: &std::path::Path, cols: u16, rows: u16, title: &str) -> Result<Recorder, String> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let header = serde_json::json!({ "version": 2, "width": cols, "height": rows, "timestamp": ts, "title": title });
+        writeln!(file, "{header}").map_err(|e| e.to_string())?;
+        Ok(Recorder { file, start: std::time::Instant::now(), carry: Vec::new() })
+    }
+
+    fn event(&mut self, kind: &str, data: &str) {
+        let t = self.start.elapsed().as_secs_f64();
+        let line = serde_json::json!([(t * 1000.0).round() / 1000.0, kind, data]);
+        let _ = writeln!(self.file, "{line}");
+    }
+
+    pub fn output(&mut self, chunk: &[u8]) {
+        let mut bytes = std::mem::take(&mut self.carry);
+        bytes.extend_from_slice(chunk);
+        let valid = match std::str::from_utf8(&bytes) {
+            Ok(_) => bytes.len(),
+            Err(e) if e.error_len().is_none() => e.valid_up_to(), // cut character: keep for next time
+            Err(_) => bytes.len(),
+        };
+        self.carry = bytes[valid..].to_vec();
+        let text = String::from_utf8_lossy(&bytes[..valid]).into_owned();
+        if !text.is_empty() {
+            self.event("o", &text);
+        }
+    }
+
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.event("r", &format!("{cols}x{rows}"));
+    }
+}
+
+pub(crate) fn nz(v: u16) -> NonZeroU16 {
     NonZeroU16::new(v.max(1)).unwrap_or(NonZeroU16::MIN)
 }
 
@@ -136,6 +184,7 @@ impl Terminal {
             scroll_acc: 0.0,
             log: None,
             log_state: 0,
+            rec: None,
         })
     }
 
@@ -147,6 +196,16 @@ impl Terminal {
         let f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
         self.log = Some(f);
         Ok(())
+    }
+
+    /// Starts recording the session for playback.
+    pub fn start_recording(&mut self, path: &std::path::Path, title: &str) -> Result<(), String> {
+        self.rec = Some(Recorder::create(path, self.cols, self.rows, title)?);
+        Ok(())
+    }
+
+    pub fn recording(&self) -> bool {
+        self.rec.is_some()
     }
 
     /// Plain text of the output: escape sequences left out, CR LF kept as line ends.
@@ -236,6 +295,9 @@ impl Terminal {
         while let Ok(chunk) = self.rx.try_recv() {
             self.parser.process(&chunk);
             self.write_log(&chunk);
+            if let Some(r) = self.rec.as_mut() {
+                r.output(&chunk);
+            }
             got = true;
         }
         if got {
@@ -303,6 +365,9 @@ impl Terminal {
             self.rows = rows;
             self.parser.set_size(nz(rows), nz(cols));
             let _ = self.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+            if let Some(r) = self.rec.as_mut() {
+                r.resize(cols, rows);
+            }
         }
 
         let (rect, resp) = ui.allocate_exact_size(avail, Sense::click());
@@ -338,11 +403,36 @@ impl Terminal {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
         }
 
+        let screen = self.parser.screen();
+        let cursor = (self.exited.is_none()).then_some(focused);
+        let painter = paint_screen(ui, rect, screen, rows, cols, &font, (cw, ch), dark, cursor);
+        if screen.scrollback() > 0 {
+            let t = tf("History: {0} lines back – press a key for current", &[&(screen.scrollback())]);
+            painter.text(
+                rect.right_top() + Vec2::new(-8.0, 6.0),
+                egui::Align2::RIGHT_TOP,
+                t,
+                FontId::proportional(12.0),
+                Color32::from_rgb(255, 200, 0),
+            );
+        }
+        if focused {
+            painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(33, 150, 243)), egui::StrokeKind::Inside);
+        }
+        typed
+    }
+}
+
+/// Draws a terminal screen into `rect` (also used to play back recordings). `cursor`: None =
+/// hidden, Some(true) = solid (focused), Some(false) = outline.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_screen(ui: &egui::Ui, rect: Rect, screen: &vt100::Screen, rows: u16, cols: u16, font: &FontId, (cw, ch): (f32, f32), dark: bool, cursor: Option<bool>) -> egui::Painter {
+    {
+        let font = font.clone();
         let palette = Palette::new(dark);
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 4.0, palette.bg);
         let origin = rect.min + Vec2::new(4.0, 4.0);
-        let screen = self.parser.screen();
         for r in 0..rows {
             let mut c = 0u16;
             while c < cols {
@@ -380,7 +470,7 @@ impl Terminal {
                 }
             }
         }
-        if !screen.hide_cursor() && screen.scrollback() == 0 && self.exited.is_none() {
+        if let (Some(focused), false, 0) = (cursor, screen.hide_cursor(), screen.scrollback()) {
             let (cr, cc) = screen.cursor_position();
             let crect = Rect::from_min_size(
                 Pos2::new(origin.x + cc as f32 * cw, origin.y + cr as f32 * ch),
@@ -392,22 +482,11 @@ impl Terminal {
                 painter.rect_stroke(crect, 1.0, Stroke::new(1.0, palette.cursor), egui::StrokeKind::Inside);
             }
         }
-        if screen.scrollback() > 0 {
-            let t = tf("History: {0} lines back – press a key for current", &[&(screen.scrollback())]);
-            painter.text(
-                rect.right_top() + Vec2::new(-8.0, 6.0),
-                egui::Align2::RIGHT_TOP,
-                t,
-                FontId::proportional(12.0),
-                Color32::from_rgb(255, 200, 0),
-            );
-        }
-        if focused {
-            painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(33, 150, 243)), egui::StrokeKind::Inside);
-        }
-        typed
+        painter
     }
+}
 
+impl Terminal {
     fn handle_input(&mut self, ui: &mut egui::Ui) -> Vec<u8> {
         let events = ui.input(|i| i.events.clone());
         let app_cursor = self.parser.screen().application_cursor();
