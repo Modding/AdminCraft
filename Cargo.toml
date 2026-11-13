@@ -34,7 +34,7 @@ vt100 = "0.18.1"
 raw-window-handle = "0.6"
 sys-locale = "0.3.2"
 x509-parser = "0.18.1"
-getrandom = "0.3"
+getrandom = "0.4"
 ureq = "3.5.2"
 # Keys and passwords are wiped from memory when they are dropped.
 zeroize = "1.8"
