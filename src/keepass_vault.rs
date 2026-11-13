@@ -1,5 +1,5 @@
-//! Reads passwords from a KeePass / KeePassXC database (.kdbx). AdminCraft only reads it:
-//! the passwords stay in KeePass, connections just name the entry to use.
+//! Reads passwords from a KeePass / KeePassXC database (.kdbx): the passwords stay in KeePass,
+//! connections just name the entry to use. Writing a password into it: see `kdbx.rs`.
 
 #[allow(unused_imports)]
 use crate::i18n::{t as tr, tf};
@@ -7,7 +7,7 @@ use crate::model::KeePassRef;
 
 #[derive(Clone, Debug)]
 pub struct KpEntry {
-    /// "Gruppe/Untergruppe/Titel" (without the root group).
+    /// "Group/Subgroup/Title" (without the root group).
     pub path: String,
     pub title: String,
     pub user: String,
@@ -22,6 +22,8 @@ pub struct KeePassVault {
     pub entries: Vec<KpEntry>,
     pub opened_path: String,
     pub unlocked: bool,
+    /// Kept while unlocked, to write passwords into the database.
+    pub key: Option<crate::kdbx::Key>,
 }
 
 fn walk(group: keepass::db::GroupRef<'_>, prefix: &str, out: &mut Vec<KpEntry>, depth: usize) {
@@ -82,11 +84,13 @@ impl KeePassVault {
         self.entries = out;
         self.opened_path = path.to_string();
         self.unlocked = true;
+        self.key = Some(crate::kdbx::Key { password: password.to_string(), keyfile: keyfile.to_string() });
         Ok(self.entries.len())
     }
 
     pub fn lock(&mut self) {
         self.entries.clear();
+        self.key = None;
         self.unlocked = false;
     }
 

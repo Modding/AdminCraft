@@ -18,7 +18,7 @@ fn tool_list() -> Vec<(&'static str, &'static str, Value)> {
         ),
         (
             "open_connection",
-            "Open a saved connection in the AdminCraft window (a new window is started).",
+            "Open a saved connection in the AdminCraft window: in the open window when there is one, else a new window is started.",
             json!({"type": "object", "properties": {"name": {"type": "string", "description": "Name (or part of it) of the connection"}}, "required": ["name"]}),
         ),
         (
@@ -53,6 +53,46 @@ fn tool_list() -> Vec<(&'static str, &'static str, Value)> {
             "check_certificate",
             "Read a server's TLS certificate: subject, issuer, names, validity, days left, trusted or not.",
             json!({"type": "object", "properties": {"host": {"type": "string"}, "port": {"type": "integer", "description": "default 443"}}, "required": ["host"]}),
+        ),
+        (
+            "window_status",
+            "The open AdminCraft window: version, number of tabs and connections, the active tab, whether agents may type. Fails when no window is open.",
+            json!({"type": "object", "properties": {}}),
+        ),
+        (
+            "window_list_tabs",
+            "The tabs open in the AdminCraft window: index, title, kind (terminal, window, files, ping, netscan …), host, active.",
+            json!({"type": "object", "properties": {}}),
+        ),
+        (
+            "window_read_tab",
+            "What a tab of the open window shows as text: a terminal's screen, ping/DNS output, port or network scan results, a certificate check. Default: the active tab.",
+            json!({"type": "object", "properties": {"index": {"type": "integer"}}}),
+        ),
+        (
+            "window_type",
+            "Type text into a terminal tab of the open window (SSH, Telnet, PowerShell, shell). Only works when the person allowed it in Settings » AI agents. Set enter=true to press Enter after the text.",
+            json!({"type": "object", "properties": {"index": {"type": "integer"}, "text": {"type": "string"}, "enter": {"type": "boolean"}}, "required": ["text"]}),
+        ),
+        (
+            "window_switch_tab",
+            "Bring a tab of the open window to the front.",
+            json!({"type": "object", "properties": {"index": {"type": "integer"}}, "required": ["index"]}),
+        ),
+        (
+            "window_close_tab",
+            "Close a tab of the open window (the home tab stays).",
+            json!({"type": "object", "properties": {"index": {"type": "integer"}}, "required": ["index"]}),
+        ),
+        (
+            "window_open_tool",
+            "Open a tool tab in the open window: ping, traceroute, portscan, dns, netscan, subnet, cert, whois, http, snmp, help or settings, with an optional target (host, range, CIDR, URL).",
+            json!({"type": "object", "properties": {"tool": {"type": "string"}, "target": {"type": "string"}}, "required": ["tool"]}),
+        ),
+        (
+            "window_notify",
+            "Show a short message to the person in the open window.",
+            json!({"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}),
         ),
     ]
 }
@@ -117,6 +157,9 @@ pub fn call(name: &str, args: &Value) -> Result<Value, String> {
         }
         "open_connection" => {
             let n = s(args, "name").ok_or("name missing")?;
+            if crate::control::window_running() {
+                return crate::control::send("open_connection", json!({"name": n}));
+            }
             let store = Store::open(true);
             let e = store
                 .data
@@ -183,6 +226,13 @@ pub fn call(name: &str, args: &Value) -> Result<Value, String> {
                 "serial": c.serial, "chain_length": c.chain_len
             }))
         }
+        w if w.starts_with("window_") => {
+            let cmd = match w {
+                "window_type" => "type_text",
+                other => other.trim_start_matches("window_"),
+            };
+            crate::control::send(cmd, args.clone())
+        }
         _ => Err(format!("unknown tool '{name}'")),
     }
 }
@@ -198,6 +248,12 @@ const HELP: &str = "AdminCraft command line (JSON output)
   admincraft cli dns <name>                    resolve a host name
   admincraft cli subnet <cidr>                 subnet calculator
   admincraft cli cert <host> [port]            TLS certificate check
+  admincraft cli window tabs                   tabs of the open window
+  admincraft cli window read [index]           text a tab shows (terminal screen, results)
+  admincraft cli window type <index> <text>    type into a terminal tab (+ Enter), if allowed
+  admincraft cli window switch|close <index>   bring a tab to the front / close it
+  admincraft cli window tool <tool> [target]   open a tool: ping, portscan, dns, netscan, cert, whois, http, snmp …
+  admincraft cli window <command> [json]       any command, e.g. status, notify {\"text\":\"hi\"}
   admincraft mcp                               MCP server on stdin/stdout for AI agents
   admincraft --version
 
@@ -213,12 +269,29 @@ pub fn cli(args: &[String]) -> i32 {
         "dns" => ("dns_lookup", json!({"name": a(1)})),
         "subnet" => ("subnet", json!({"cidr": args[1..].join(" ")})),
         "cert" => ("check_certificate", json!({"host": a(1), "port": a(2).parse::<u16>().unwrap_or(443)})),
+        "window" => {
+            let idx = |s: String| s.parse::<u64>().ok();
+            let (cmd, params) = match a(1).as_str() {
+                "tabs" | "" => ("list_tabs".to_string(), json!({})),
+                "read" => ("read_tab".to_string(), json!({"index": idx(a(2))})),
+                "type" => ("type_text".to_string(), json!({"index": idx(a(2)), "text": args.get(3..).map(|x| x.join(" ")).unwrap_or_default(), "enter": true})),
+                "switch" => ("switch_tab".to_string(), json!({"index": idx(a(2))})),
+                "close" => ("close_tab".to_string(), json!({"index": idx(a(2))})),
+                "tool" => ("open_tool".to_string(), json!({"tool": a(2), "target": a(3)})),
+                other => (other.to_string(), serde_json::from_str(&a(2)).unwrap_or(json!({}))),
+            };
+            return print_result(crate::control::send(&cmd, params));
+        }
         _ => {
             println!("{HELP}");
             return if a(0).is_empty() || a(0) == "help" { 0 } else { 2 };
         }
     };
-    match call(tool, &params) {
+    print_result(call(tool, &params))
+}
+
+fn print_result(r: Result<Value, String>) -> i32 {
+    match r {
         Ok(v) => {
             println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
             0

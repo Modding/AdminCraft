@@ -110,6 +110,22 @@ AdminCraft then asks for the master password at start.
 **2FA codes:** KeePass entries with a TOTP secret show the current code next to the password.
 **Password generator:** Tools » Password generator, or the *Generate* button next to a password field.
 
+### KeePass as the connection list
+
+Already using KeePass or KeePassXC? Then keep the whole connection list in it:
+
+1. Settings » Password vault: enter the database (`.kdbx`) and press **Unlock …**.
+2. Press **Keep the connection list in KeePass**.
+
+Every connection becomes a normal KeePass entry in the group **AdminCraft** — title, user, password,
+URL (e.g. `ssh://10.0.0.30:22`) and notes; folders become KeePass groups. You can edit them in KeePass
+too; AdminCraft notices and reloads. An entry you make in that group in KeePass (with a URL such as
+`rdp://10.0.0.10`) shows up as a connection. At start AdminCraft asks for the KeePass master password.
+**Back to AdminCraft's own list** in the same place copies the list back.
+
+**Save password in KeePass …** (on a connection with *Password from » KeePass*): type a password once;
+AdminCraft puts it into the group *AdminCraft* of your database and uses that entry from then on.
+
 ## Jump hosts
 
 Some servers can only be reached through another server (a "jump host" or "bastion").
@@ -160,6 +176,23 @@ All tools are in the **Tools** menu, the buttons at the top, and the right-click
   the `C$` share, **Restart** and **Shut down** (with confirmation). Linux servers can be restarted over SSH.
 - **Multi-input** — type the same thing into several SSH tabs at once (Tools » Multi-input).
 - **Saved commands** — in the terminal tab under *Commands*; placeholders `{host}` `{user}` `{name}`.
+- **Whois** — who owns a domain or an IP address, with the registrar and the dates.
+- **HTTP header check** — follows every redirect of a web address, shows status codes, headers and
+  timings, checks the security headers (HSTS, CSP …) and the cookie flags.
+- **SNMP query** — asks a switch, printer or server (SNMP v2c, community e.g. `public`) for its name,
+  description, uptime, location and its interfaces with status, speed and traffic. Any OID can be walked.
+- **Recordings** — plays back recorded terminal sessions (see below).
+
+### Recording sessions
+
+Settings » Sessions and monitoring » **Record terminal sessions for playback**: from then on every SSH,
+Telnet, PowerShell and shell tab is recorded with its timing; the tab shows **• recording**.
+Tools » **Recordings** lists them, newest first. **Play**, **Pause**, the speed (up to 16×) and the slider
+work like a video; **Shorten pauses** skips long waits. The files (`.cast`) can also be played with
+asciinema.
+
+> Recordings contain everything the screen showed. Passwords you type are not shown by servers, so
+> they are not in it — but keep the folder private anyway.
 
 ## Network scan
 
@@ -207,7 +240,13 @@ Open with the **Settings** button, **Ctrl+,** or Tools » Settings.
 - **Programs** — where AdminCraft found each helper program. Give your own path, or simply drop
   portable programs into the **programs folder** (`AdminCraftTools` next to AdminCraft).
 - **Storage location** — where the list lives, master password, central storage.
-- **Password vault** — the KeePass database to use.
+- **Password vault** — the KeePass database to use, or KeePass as the whole connection list.
+- **Updates** — **Check for updates** asks GitHub for the newest version and offers the download page.
+  AdminCraft never checks by itself.
+- **AI agents** — whether AI assistants and scripts on this computer may control the open window, and
+  whether they may also type into terminal tabs (off until you switch it on).
+- **Sessions and monitoring** — reopen the last connections at start, text logs, recordings for
+  playback, regular reachability checks.
 
 ## Portable: everything next to the program
 
@@ -215,7 +254,7 @@ AdminCraft is one file. Everything it keeps lives in folders next to it:
 
 ```
 AdminCraft.exe
-AdminCraftData\     connections, scan baselines, session logs
+AdminCraftData\     connections, scan baselines, session logs, recordings
 AdminCraftTools\    helper programs you dropped in (putty.exe, vncviewer.exe …)
 AdminCraftLang\     your own language files
 ```
@@ -223,7 +262,8 @@ AdminCraftLang\     your own language files
 Copy the folder to a USB stick and you have your whole toolbox along. If the folder can't be written
 (for example inside a macOS app), AdminCraft uses `.admincraft` in your home folder instead.
 
-AdminCraft contacts nothing on the internet by itself — only the hosts you connect to.
+AdminCraft contacts nothing on the internet by itself — only the hosts you connect to, and GitHub
+when you press *Check for updates*.
 
 ## Languages
 
@@ -272,6 +312,21 @@ admincraft cli open <name>            open a connection in the window
 admincraft mcp                        MCP server for AI assistants (stdin/stdout)
 ```
 
+**Control the open window.** When AdminCraft is open, agents can also work with it — like a
+colleague looking over your shoulder (Settings » AI agents switches it on or off):
+
+```
+admincraft cli window tabs              the open tabs
+admincraft cli window read 2            what tab 2 shows (terminal screen, results)
+admincraft cli window tool ping web01   open a tool tab
+admincraft cli window switch 2          bring a tab to the front
+admincraft cli window type 2 uptime     type into a terminal tab and press Enter
+```
+
+The MCP server offers the same as `window_…` tools. Typing into terminals is only possible after you
+allowed it in the settings, and every typing is shown in the window. Only programs on this computer
+that can read the data folder can connect; passwords are never given out.
+
 ## Questions and problems
 
 **"Program not found"** — Home tab, *System check*, shows which helper programs are missing. Install
@@ -283,6 +338,9 @@ target probably lives on the jump host. Choose *Continue on the jump host* as ju
 **The Remote Desktop window does not appear in the tab** — wait a few seconds (certificate questions
 come first as their own window), then press *Reconnect*. Settings » *Embed RDP, PuTTY and VNC windows
 in the tab* switches embedding off.
+
+**AdminCraft asks for a KeePass password at start** — the connection list is kept in KeePass. Enter the
+KeePass master password, or press *Without KeePass* to start with AdminCraft's own (empty) list.
 
 **Forgot the master password** — the encrypted passwords can't be recovered. Start with an empty list
 (move the file in `AdminCraftData` away) and import an export.

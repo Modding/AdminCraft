@@ -110,6 +110,22 @@ AdminCraft fragt dann beim Start nach dem Masterpasswort.
 **2FA-Codes:** KeePass-Einträge mit TOTP-Geheimnis zeigen den aktuellen Code neben dem Passwort.
 **Passwort-Generator:** Werkzeuge » Passwort-Generator oder die Schaltfläche *Erzeugen* neben einem Passwortfeld.
 
+### KeePass als Verbindungsliste
+
+Sie nutzen schon KeePass oder KeePassXC? Dann kann die ganze Verbindungsliste dort liegen:
+
+1. Einstellungen » Passwort-Tresor: die Datenbank (`.kdbx`) eintragen und auf **Entsperren …** klicken.
+2. Auf **Verbindungsliste in KeePass führen** klicken.
+
+Jede Verbindung wird ein normaler KeePass-Eintrag in der Gruppe **AdminCraft** – Titel, Benutzer, Passwort,
+URL (z. B. `ssh://10.0.0.30:22`) und Notizen; Ordner werden KeePass-Gruppen. Sie lassen sich auch in KeePass
+bearbeiten; AdminCraft merkt das und lädt neu. Ein Eintrag, der in KeePass in dieser Gruppe angelegt wird
+(mit einer URL wie `rdp://10.0.0.10`), erscheint als Verbindung. Beim Start fragt AdminCraft nach dem
+KeePass-Masterpasswort. **Zurück zur eigenen Liste von AdminCraft** an derselben Stelle kopiert die Liste zurück.
+
+**Passwort in KeePass speichern …** (bei einer Verbindung mit *Passwort aus » KeePass*): Passwort einmal
+eintippen; AdminCraft legt es in der Gruppe *AdminCraft* der Datenbank ab und nutzt diesen Eintrag ab dann.
+
 ## Jump-Hosts
 
 Manche Server sind nur über einen anderen Server erreichbar (einen „Jump-Host“ oder „Bastion-Host“).
@@ -161,6 +177,24 @@ Alle Werkzeuge stehen im Menü **Werkzeuge**, in den Schaltflächen oben und im 
 - **Mehrfach-Eingabe** – dasselbe gleichzeitig in mehrere SSH-Tabs tippen (Werkzeuge » Mehrfach-Eingabe).
 - **Gespeicherte Befehle** – im Terminal-Tab unter *Befehle*; Platzhalter `{host}` `{user}` `{name}`.
 
+- **Whois** – wem eine Domain oder IP-Adresse gehört, mit Registrar und Daten.
+- **HTTP-Header-Prüfung** – folgt jeder Weiterleitung einer Webadresse, zeigt Statuscodes, Header und
+  Zeiten, prüft die Sicherheits-Header (HSTS, CSP …) und die Merkmale der Cookies.
+- **SNMP-Abfrage** – fragt einen Switch, Drucker oder Server (SNMP v2c, Community z. B. `public`) nach Name,
+  Beschreibung, Laufzeit, Standort und seinen Schnittstellen mit Status, Tempo und Verkehr. Jede OID lässt sich durchlaufen.
+- **Aufzeichnungen** – spielt aufgezeichnete Terminal-Sitzungen ab (siehe unten).
+
+### Sitzungen aufzeichnen
+
+Einstellungen » Sitzungen und Überwachung » **Terminal-Sitzungen zum Abspielen aufzeichnen**: ab dann wird jeder
+SSH-, Telnet-, PowerShell- und Shell-Tab mit seinem Zeitablauf aufgezeichnet; der Tab zeigt **• Aufnahme**.
+Werkzeuge » **Aufzeichnungen** listet sie, die neueste zuerst. **Abspielen**, **Pause**, das Tempo (bis 16×)
+und der Schieber funktionieren wie bei einem Video; **Pausen kürzen** überspringt lange Wartezeiten. Die
+Dateien (`.cast`) lassen sich auch mit asciinema abspielen.
+
+> Aufzeichnungen enthalten alles, was der Bildschirm zeigte. Getippte Passwörter zeigen Server nicht an,
+> also stehen sie nicht darin – den Ordner trotzdem privat halten.
+
 ## Netzwerk-Scan
 
 ![Subnetz-Rechner](../images/subnet.png)
@@ -209,13 +243,21 @@ Datei » OpenSSH-Konfiguration importieren (`~/.ssh/config`, einschließlich Pro
 - **Speicherort** – wo die Liste liegt, Masterpasswort, zentrale Speicherung.
 - **Passwort-Tresor** – die zu verwendende KeePass-Datenbank.
 
+- **Updates** – **Nach Updates suchen** fragt GitHub nach der neuesten Version und bietet die Download-Seite an.
+  AdminCraft sucht nie von selbst.
+- **KI-Agenten** – ob KI-Assistenten und Skripte auf diesem Computer das offene Fenster steuern dürfen und
+  ob sie auch in Terminal-Tabs tippen dürfen (aus, bis Sie es einschalten).
+- **Sitzungen und Überwachung** – letzte Verbindungen beim Start wieder öffnen, Textprotokolle,
+  Aufzeichnungen zum Abspielen, regelmäßige Erreichbarkeitsprüfung.
+- **Passwort-Tresor** – auch KeePass als ganze Verbindungsliste.
+
 ## Portabel: alles neben dem Programm
 
 AdminCraft ist eine einzige Datei. Alles, was es speichert, liegt in Ordnern daneben:
 
 ```
 AdminCraft.exe
-AdminCraftData\     Verbindungen, Scan-Vergleichsstände, Sitzungsprotokolle
+AdminCraftData\     Verbindungen, Scan-Vergleichsstände, Sitzungsprotokolle, Aufzeichnungen
 AdminCraftTools\    selbst hineingelegte Hilfsprogramme (putty.exe, vncviewer.exe …)
 AdminCraftLang\     eigene Sprachdateien
 ```
@@ -224,6 +266,8 @@ Den Ordner auf einen USB-Stick kopieren, und der ganze Werkzeugkasten ist immer 
 (zum Beispiel innerhalb einer macOS-App), nutzt AdminCraft stattdessen `.admincraft` im eigenen Benutzerordner.
 
 AdminCraft kontaktiert von sich aus nichts im Internet – nur die Hosts, mit denen man sich verbindet.
+
+Einzige Ausnahme: GitHub, wenn Sie auf *Nach Updates suchen* klicken.
 
 ## Sprachen
 
@@ -272,6 +316,21 @@ admincraft cli open <name>            eine Verbindung im Fenster öffnen
 admincraft mcp                        MCP-Server für KI-Assistenten (stdin/stdout)
 ```
 
+**Das offene Fenster steuern.** Ist AdminCraft geöffnet, können Agenten auch damit arbeiten – wie ein
+Kollege, der über die Schulter schaut (Einstellungen » KI-Agenten schaltet das ein oder aus):
+
+```
+admincraft cli window tabs              die offenen Tabs
+admincraft cli window read 2            was Tab 2 zeigt (Terminal, Ergebnisse)
+admincraft cli window tool ping web01   einen Werkzeug-Tab öffnen
+admincraft cli window switch 2          einen Tab nach vorn holen
+admincraft cli window type 2 uptime     in einen Terminal-Tab tippen + Enter
+```
+
+Der MCP-Server bietet dasselbe als `window_…`-Werkzeuge. In Terminals tippen geht erst, wenn Sie es in den
+Einstellungen erlaubt haben, und jedes Tippen wird im Fenster angezeigt. Nur Programme auf diesem Computer,
+die den Datenordner lesen können, kommen hinein; Passwörter werden nie herausgegeben.
+
 ## Fragen und Probleme
 
 **„Programm nicht gefunden“** – Der Tab Start zeigt unter *Systemcheck*, welche Hilfsprogramme fehlen. Diese installieren,
@@ -288,3 +347,6 @@ schaltet das Einbetten ab.
 (die Datei in `AdminCraftData` wegschieben) und einen Export importieren.
 
 **Wo sind meine Daten?** – Datei » Datenordner öffnen.
+
+**AdminCraft fragt beim Start nach einem KeePass-Passwort** – die Verbindungsliste liegt in KeePass. Das
+KeePass-Masterpasswort eingeben oder auf *Ohne KeePass* klicken, um mit der eigenen (leeren) Liste zu starten.

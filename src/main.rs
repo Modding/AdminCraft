@@ -3,12 +3,16 @@
 mod admintools;
 mod agent;
 mod app;
+mod control;
 mod embed;
 mod extra;
 mod help;
 mod netscan;
+mod nettools;
+mod playback;
 mod i18n;
 mod import;
+mod kdbx;
 mod keepass_vault;
 mod launch;
 mod model;
@@ -17,7 +21,9 @@ mod remote;
 mod sharing;
 mod terminal;
 mod tools;
+mod tooltabs;
 mod transfer;
+mod update;
 #[cfg(test)]
 mod tests;
 

@@ -15,7 +15,7 @@ argon2 = "0.6.0"
 base64 = "0.23.1"
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "links", "glow", "wayland", "x11"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
-keepass = "0.17.0"
+keepass = { version = "0.17.0", features = ["save_kdbx4"] }
 pbkdf2 = { version = "0.13.0", features = ["hmac"] }
 portable-pty = "0.9.0"
 quick-xml = "0.42.0"

@@ -110,6 +110,23 @@ AdminCraft demande alors le mot de passe maître au démarrage.
 **Codes 2FA :** les entrées KeePass avec un secret TOTP affichent le code actuel à côté du mot de passe.
 **Générateur de mots de passe :** Outils » Générateur de mots de passe, ou le bouton *Générer* à côté d'un champ de mot de passe.
 
+### KeePass comme liste des connexions
+
+Vous utilisez déjà KeePass ou KeePassXC ? Alors gardez-y toute la liste des connexions :
+
+1. Paramètres » Coffre à mots de passe : indiquez la base (`.kdbx`) et cliquez sur **Déverrouiller …**.
+2. Cliquez sur **Conserver la liste des connexions dans KeePass**.
+
+Chaque connexion devient une entrée KeePass normale dans le groupe **AdminCraft** — titre, utilisateur,
+mot de passe, URL (p. ex. `ssh://10.0.0.30:22`) et notes ; les dossiers deviennent des groupes KeePass. Vous
+pouvez aussi les modifier dans KeePass ; AdminCraft le remarque et recharge. Une entrée créée dans ce groupe
+dans KeePass (avec une URL comme `rdp://10.0.0.10`) apparaît comme connexion. Au démarrage, AdminCraft
+demande le mot de passe maître KeePass. **Revenir à la liste propre d'AdminCraft** au même endroit recopie la liste.
+
+**Enregistrer le mot de passe dans KeePass …** (sur une connexion avec *Mot de passe depuis » KeePass*) :
+saisissez le mot de passe une fois ; AdminCraft le range dans le groupe *AdminCraft* de votre base et
+utilise ensuite cette entrée.
+
 ## Hôtes de rebond
 
 Certains serveurs ne sont accessibles qu'en passant par un autre serveur (un « hôte de rebond » ou « bastion »).
@@ -161,6 +178,25 @@ Tous les outils se trouvent dans le menu **Outils**, dans les boutons du haut et
 - **Saisie multiple** — tapez la même chose dans plusieurs onglets SSH à la fois (Outils » Saisie multiple).
 - **Commandes enregistrées** — dans l'onglet terminal sous *Commandes* ; variables `{host}` `{user}` `{name}`.
 
+- **Whois** — à qui appartient un domaine ou une adresse IP, avec le registraire et les dates.
+- **Vérification des en-têtes HTTP** — suit chaque redirection d'une adresse web, montre codes d'état,
+  en-têtes et durées, vérifie les en-têtes de sécurité (HSTS, CSP …) et les attributs des cookies.
+- **Requête SNMP** — interroge un switch, une imprimante ou un serveur (SNMP v2c, communauté p. ex. `public`)
+  sur son nom, sa description, sa durée de fonctionnement, son emplacement et ses interfaces avec état,
+  débit et trafic. Tout OID peut être parcouru.
+- **Enregistrements** — rejoue les sessions terminal enregistrées (voir ci-dessous).
+
+### Enregistrer les sessions
+
+Paramètres » Sessions et surveillance » **Enregistrer les sessions terminal pour les rejouer** : dès lors,
+chaque onglet SSH, Telnet, PowerShell et shell est enregistré avec son minutage ; l'onglet affiche
+**• enregistrement**. Outils » **Enregistrements** les liste, du plus récent au plus ancien. **Lire**,
+**Pause**, la vitesse (jusqu'à 16×) et le curseur fonctionnent comme pour une vidéo ; **Raccourcir les pauses**
+saute les longues attentes. Les fichiers (`.cast`) se lisent aussi avec asciinema.
+
+> Les enregistrements contiennent tout ce que l'écran a montré. Les serveurs n'affichent pas les mots de
+> passe tapés, ils n'y sont donc pas — gardez quand même le dossier privé.
+
 ## Analyse réseau
 
 ![Calculateur de sous-réseau](../images/subnet.png)
@@ -209,13 +245,21 @@ Ouvrez-les avec le bouton **Paramètres**, **Ctrl+,** ou Outils » Paramètres.
 - **Emplacement de stockage** — où se trouve la liste, mot de passe maître, stockage centralisé.
 - **Coffre à mots de passe** — la base KeePass à utiliser.
 
+- **Mises à jour** — **Rechercher des mises à jour** demande à GitHub la dernière version et propose la page
+  de téléchargement. AdminCraft ne vérifie jamais de lui-même.
+- **Agents IA** — si les assistants IA et scripts de cet ordinateur peuvent piloter la fenêtre ouverte, et
+  s'ils peuvent aussi taper dans les onglets terminal (désactivé tant que vous ne l'activez pas).
+- **Sessions et surveillance** — rouvrir les dernières connexions au démarrage, journaux texte,
+  enregistrements à rejouer, vérification régulière de l'accessibilité.
+- **Coffre à mots de passe** — aussi KeePass comme liste complète des connexions.
+
 ## Portable : tout à côté du programme
 
 AdminCraft tient en un seul fichier. Tout ce qu'il conserve se trouve dans des dossiers à côté de lui :
 
 ```
 AdminCraft.exe
-AdminCraftData\     connexions, références de scan, journaux de session
+AdminCraftData\     connexions, références de scan, journaux de session, enregistrements
 AdminCraftTools\    programmes d'aide que vous y avez déposés (putty.exe, vncviewer.exe …)
 AdminCraftLang\     vos propres fichiers de langue
 ```
@@ -224,6 +268,8 @@ Copiez le dossier sur une clé USB et vous emportez toute votre boîte à outils
 (par exemple dans une app macOS), AdminCraft utilise à la place `.admincraft` dans votre dossier personnel.
 
 AdminCraft ne contacte rien sur Internet de lui-même — seulement les hôtes auxquels vous vous connectez.
+
+Seule exception : GitHub, quand vous cliquez sur *Rechercher des mises à jour*.
 
 ## Langues
 
@@ -272,6 +318,22 @@ admincraft cli open <name>            ouvrir une connexion dans la fenêtre
 admincraft mcp                        serveur MCP pour assistants IA (stdin/stdout)
 ```
 
+**Piloter la fenêtre ouverte.** Quand AdminCraft est ouvert, les agents peuvent aussi travailler avec —
+comme un collègue qui regarde par-dessus votre épaule (Paramètres » Agents IA l'active ou le désactive) :
+
+```
+admincraft cli window tabs              les onglets ouverts
+admincraft cli window read 2            ce que montre l'onglet 2
+admincraft cli window tool ping web01   ouvrir un onglet d'outil
+admincraft cli window switch 2          mettre un onglet au premier plan
+admincraft cli window type 2 uptime     taper dans un terminal + Entrée
+```
+
+Le serveur MCP offre la même chose sous forme d'outils `window_…`. Taper dans les terminaux n'est possible
+qu'après l'avoir autorisé dans les paramètres, et chaque saisie est affichée dans la fenêtre. Seuls les
+programmes de cet ordinateur pouvant lire le dossier de données peuvent se connecter ; les mots de passe ne
+sont jamais transmis.
+
 ## Questions et problèmes
 
 **« Programme introuvable »** — l'onglet Accueil, *Vérification du système*, montre quels programmes d'aide manquent. Installez-les,
@@ -288,3 +350,7 @@ dans l'onglet* désactive l'intégration.
 (déplacez le fichier dans `AdminCraftData` ailleurs) et importez un export.
 
 **Où sont mes données ?** — Fichier » Ouvrir le dossier de données.
+
+**AdminCraft demande un mot de passe KeePass au démarrage** — la liste des connexions est dans KeePass.
+Saisissez le mot de passe maître KeePass, ou cliquez sur *Sans KeePass* pour démarrer avec la liste propre
+(vide) d'AdminCraft.

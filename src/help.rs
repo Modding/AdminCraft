@@ -348,19 +348,31 @@ fn block_ui(ui: &mut egui::Ui, b: &Block, accent: Color32, w: f32) -> egui::Resp
             r
         }
         Block::Table(rows) => {
-            let r = egui::Grid::new(block_text(b).len())
-                .striped(true)
-                .spacing([18.0, 6.0])
-                .show(ui, |ui| {
+            let widths = column_widths(rows, w);
+            let stripe = ui.visuals().faint_bg_color;
+            let r = ui
+                .vertical(|ui| {
                     for (n, row) in rows.iter().enumerate() {
-                        for cell in row {
-                            if n == 0 {
-                                ui.label(RichText::new(plain(cell)).strong().color(accent));
-                            } else {
-                                ui.add(egui::Label::new(inline(ui, cell, 14.0, w * 0.6)).wrap());
-                            }
-                        }
-                        ui.end_row();
+                        let fill = if n % 2 == 0 && n > 0 { stripe } else { Color32::TRANSPARENT };
+                        egui::Frame::new().fill(fill).inner_margin(egui::Margin::symmetric(0, 3)).show(ui, |ui| {
+                            ui.horizontal_top(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                for (c, cell) in row.iter().enumerate() {
+                                    let cw = widths.get(c).copied().unwrap_or(80.0);
+                                    ui.allocate_ui_with_layout(egui::vec2(cw - 14.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                                        // a gap of 14 px to the next column
+                                        let text = cw - 14.0;
+                                        ui.set_width(text);
+                                        if n == 0 {
+                                            ui.add(egui::Label::new(RichText::new(plain(cell)).strong().color(accent)).wrap());
+                                        } else {
+                                            ui.add(egui::Label::new(inline(ui, cell, 14.0, text)).wrap());
+                                        }
+                                    });
+                                    ui.add_space(14.0);
+                                }
+                            });
+                        });
                     }
                 })
                 .response;
@@ -368,6 +380,30 @@ fn block_ui(ui: &mut egui::Ui, b: &Block, accent: Color32, w: f32) -> egui::Resp
             r
         }
     }
+}
+
+/// Column widths for a table that fills `total`: by the longest text in each column, so short
+/// columns (a protocol name) stay narrow and long ones (what it needs) get the room, but no
+/// column gets less than a readable minimum.
+pub fn column_widths(rows: &[Vec<String>], total: f32) -> Vec<f32> {
+    let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if cols == 0 {
+        return Vec::new();
+    }
+    let weight: Vec<f32> = (0..cols)
+        .map(|c| rows.iter().filter_map(|r| r.get(c)).map(|s| plain(s).chars().count()).max().unwrap_or(1).clamp(8, 70) as f32)
+        .collect();
+    let sum: f32 = weight.iter().sum();
+    let min = (total / cols as f32 * 0.5).min(110.0);
+    let mut w: Vec<f32> = weight.iter().map(|x| (total * x / sum).max(min)).collect();
+    let over: f32 = w.iter().sum::<f32>() - total;
+    if over > 0.0 {
+        // take what the minimums added back from the widest column
+        if let Some(i) = (0..cols).max_by(|a, b| w[*a].total_cmp(&w[*b])) {
+            w[i] = (w[i] - over).max(min);
+        }
+    }
+    w
 }
 
 /// `**bold**`, `*italic*` and `` `code` `` inside a line.
