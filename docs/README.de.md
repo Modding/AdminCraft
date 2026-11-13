@@ -52,12 +52,31 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
   eigener DNS-Server), Wake-on-LAN, Erreichbarkeit aller Hosts
 * Import: mRemoteNG (`confCons.xml`) und OpenSSH (`~/.ssh/config`, inkl. ProxyJump)
 * Eigene Startbefehle pro Protokoll, Platzhalter `{host} {port} {user} {domain} {password} {name}`
+* **KeePass als Verbindungsliste:** jede Verbindung ist ein KeePass-Eintrag (Gruppe *AdminCraft*), auch in
+  KeePass/KeePassXC bearbeitbar; Änderungen werden neu geladen. Einzelne Passwörter direkt in KeePass speichern.
+* **Whois**, **HTTP-Header-Prüfung** (Weiterleitungen, Sicherheits-Header, Cookie-Merkmale) und
+  **SNMP-Abfrage** (Systeminfos und Schnittstellen von Switches, Druckern, Servern)
+* **Sitzungen aufzeichnen:** Terminal-Sitzungen mit Zeitablauf aufzeichnen und wie ein Video abspielen
+* **Nach Updates suchen** – Knopf in den Einstellungen (fragt GitHub nur auf Knopfdruck)
+* **Handbuch** im Programm (F1) – auch hier: [Deutsch](help/de.md) · [English](help/en.md) ·
+  [Français](help/fr.md) · [Italiano](help/it.md) · [Українська](help/uk.md)
+
+## Für Skripte und KI-Agenten
+
+    admincraft cli list | scan <bereich> | ports <host> | dns <name> | subnet <cidr> | cert <host>
+    admincraft cli window tabs | read [n] | type <n> <text> | switch <n> | tool <werkzeug> [ziel]
+    admincraft mcp            MCP-Server für KI-Assistenten (stdin/stdout)
+
+`cli window …` steuert das **offene Fenster** (Einstellungen » KI-Agenten): Tabs lesen, Verbindungen und
+Werkzeuge öffnen, in Terminals tippen nur wenn erlaubt. Nur Programme auf diesem Computer kommen hinein
+(127.0.0.1 und ein Schlüssel im Datenordner); Passwörter werden nie herausgegeben.
 
 ## Portabel
 
-`AdminCraftData` (Verbindungen) und `AdminCraftTools` (Hilfsprogramme) liegen direkt neben dem Programm.
-Alles zusammen auf einen USB-Stick kopieren – fertig. Ist der Programmordner schreibgeschützt
-(z. B. in einer macOS-App), wird `~/.admincraft` benutzt. `--data <ordner>` wählt einen eigenen Datenordner.
+`AdminCraftData` (Verbindungen, Scans, Protokolle, Aufzeichnungen), `AdminCraftTools` (Hilfsprogramme) und
+`AdminCraftLang` (eigene Sprachen) liegen direkt neben dem Programm. Alles zusammen auf einen USB-Stick
+kopieren – fertig. Ist der Programmordner schreibgeschützt (z. B. in einer macOS-App), wird `~/.admincraft`
+benutzt. `--data <ordner>` wählt einen eigenen Datenordner.
 
 ## Datenschutz / was nicht ins Repository gehört
 
@@ -66,18 +85,12 @@ Alles zusammen auf einen USB-Stick kopieren – fertig. Ist der Programmordner s
 `.rdp`-Dateien, mRemoteNG-Exporte sowie Bauordner (`target/`, `dist/`) und die lokale Werkzeugkette
 (`.toolchain/`, mehrere GB). Die Beispielverbindungen im Code sind erfunden (10.0.0.x, 203.0.113.x).
 
-Veröffentlichen:
+## Versionen und Releases
 
-    git init
-    git add .
-    git status          # prüfen: nichts aus target, .toolchain, AdminCraftData ...
-    git commit -m "AdminCraft"
-    git branch -M main
-    git remote add origin https://github.com/<name>/AdminCraft.git
-    git push -u origin main
-
-Die fertige `AdminCraft.exe` am besten als Datei unter „Releases“ anhängen, nicht einchecken.
-
+Versionen nach Semantic Versioning (`0.x.y`) wie bei den anderen Craft-Apps. Fertige Programme für Windows
+(portabel), Linux und macOS gibt es unter [Releases](https://github.com/Modding/AdminCraft/releases) mit `SHA256SUMS.txt`. Wie ein Release
+entsteht: [AGENTS.md](../AGENTS.md#versions-and-releases). Was getestet ist und was noch kommt:
+[ROADMAP.md](../ROADMAP.md).
 ## Bauen
 
 Windows mit lokaler Werkzeugkette in `.toolchain` (nicht im Repository; nur auf dem PC, auf dem
