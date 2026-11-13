@@ -324,9 +324,8 @@ mod imp {
 mod imp {
     use super::PxRect;
 
-    pub struct Embedded {
-        pub pid: u32,
-    }
+    /// Nothing is embedded outside Windows; the program keeps its own window.
+    pub struct Embedded;
 
     pub fn set_active(_h: isize) {}
     pub fn install_focus_hook(_parent: isize) {}
@@ -335,8 +334,8 @@ mod imp {
     }
 
     impl Embedded {
-        pub fn new(pid: u32, _class_hint: &'static [&'static str]) -> Self {
-            Embedded { pid }
+        pub fn new(_pid: u32, _class_hint: &'static [&'static str]) -> Self {
+            Embedded
         }
         pub fn attached(&self) -> bool {
             false
