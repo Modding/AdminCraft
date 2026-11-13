@@ -24,6 +24,7 @@ mod tools;
 mod tooltabs;
 mod transfer;
 mod update;
+mod wincred;
 #[cfg(test)]
 mod tests;
 

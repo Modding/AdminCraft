@@ -132,11 +132,11 @@ pub fn ping_args(host: &str, count: Option<u32>) -> Vec<String> {
     let mut a = Vec::new();
     if cfg!(windows) {
         match count {
-            Some(n) => a.extend([tr("-n").to_string(), n.to_string()]),
-            None => a.push(tr("-t").into()),
+            Some(n) => a.extend(["-n".to_string(), n.to_string()]),
+            None => a.push("-t".into()),
         }
     } else if let Some(n) = count {
-        a.extend([tr("-c").to_string(), n.to_string()]);
+        a.extend(["-c".to_string(), n.to_string()]);
     }
     a.push(host.to_string());
     a
@@ -144,9 +144,9 @@ pub fn ping_args(host: &str, count: Option<u32>) -> Vec<String> {
 
 pub fn traceroute_cmd(host: &str) -> (String, Vec<String>) {
     if cfg!(windows) {
-        (tr("tracert").into(), vec![tr("-d").into(), host.into()])
+        ("tracert".into(), vec!["-d".into(), host.into()])
     } else {
-        (tr("traceroute").into(), vec![tr("-n").into(), host.into()])
+        ("traceroute".into(), vec!["-n".into(), host.into()])
     }
 }
 

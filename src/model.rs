@@ -1335,7 +1335,7 @@ pub fn sample_data() -> DataFile {
     let vnc = conn(13, Some(12), tr("Reception PC"), Protocol::Vnc, "10.0.1.21", "");
     let mut bh = conn(14, Some(12), tr("Accounting PC"), Protocol::Rdp, "10.0.1.22", "");
     bh.mac = "00:11:22:33:44:55".into();
-    let local = conn(15, None, tr("Local terminal"), Protocol::LocalShell, tr(""), "");
+    let local = conn(15, None, tr("Local terminal"), Protocol::LocalShell, "", "");
     let mut bastion = conn(16, Some(1), tr("bastion – jump host"), Protocol::Ssh, "203.0.113.10", "jump");
     bastion.inherit_credentials = false;
     bastion.description = tr("Jump server: other connections go through this host.").into();

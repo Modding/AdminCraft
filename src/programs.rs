@@ -237,16 +237,16 @@ pub fn spawn_in_terminal(
     {
         let mut line = String::new();
         for (k, v) in env {
-            line.push_str(&tf("export {0}={1}; ", &[&k, &(sh_quote(v))]));
+            line.push_str(&format!("export {0}={1}; ", k, sh_quote(v)));
         }
         line.push_str(&sh_quote(&program.display().to_string()));
         for a in args {
             line.push(' ');
             line.push_str(&sh_quote(a));
         }
-        let script = tf("tell application \"Terminal\" to do script \"{0}\"", &[&(line.replace('\\', "\\\\").replace('"', "\\\""))]);
+        let script = format!("tell application \"Terminal\" to do script \"{0}\"", line.replace('\\', "\\\\").replace('"', "\\\""));
         let _ = title;
-        Command::new(tr("osascript"))
+        Command::new("osascript")
             .args(["-e", &script, "-e", "tell application \"Terminal\" to activate"])
             .spawn()
             .map(|_| tr("Terminal").to_string())

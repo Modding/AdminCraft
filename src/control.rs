@@ -37,23 +37,46 @@ fn control_file() -> PathBuf {
     crate::model::data_dir(false).join("control.json")
 }
 
-fn new_token() -> String {
+/// A random token; without random numbers there is no control channel (never a guessable token).
+fn new_token() -> Result<String, String> {
     let mut b = [0u8; 24];
-    let _ = getrandom::fill(&mut b);
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    getrandom::fill(&mut b).map_err(|e| e.to_string())?;
+    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// Writes the port and token so that only this user can read them (other local users must not
+/// be able to steer the window).
+fn write_private(file: &std::path::Path, text: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(file)?;
+        // an older file may have been created with wider rights
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        f.write_all(text.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(file, text)
+    }
+}
+
+/// Compares without stopping at the first difference, so timing tells nothing about the token.
+fn same_token(given: &str, token: &str) -> bool {
+    given.len() == token.len() && given.bytes().zip(token.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }
 
 /// Starts listening. `wake` is called after each request so the window draws (and answers) soon.
 pub fn start(wake: impl Fn() + Send + Sync + 'static) -> Result<Server, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let token = new_token();
+    let token = new_token()?;
     let file = control_file();
     if let Some(d) = file.parent() {
         let _ = std::fs::create_dir_all(d);
     }
     let info = json!({"port": port, "token": token, "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION")});
-    std::fs::write(&file, info.to_string()).map_err(|e| e.to_string())?;
+    write_private(&file, &info.to_string()).map_err(|e| e.to_string())?;
     let (tx, rx) = channel::<Request>();
     let wake = std::sync::Arc::new(wake);
     std::thread::spawn(move || {
@@ -74,7 +97,7 @@ fn serve(stream: TcpStream, token: &str, tx: &Sender<Request>, wake: &(dyn Fn() 
     }
     let answer = match serde_json::from_str::<Value>(line.trim_start_matches('\u{feff}')) {
         Err(_) => json!({"error": "not JSON"}),
-        Ok(req) if req["token"].as_str() != Some(token) => json!({"error": "wrong token"}),
+        Ok(req) if !req["token"].as_str().is_some_and(|t| same_token(t, token)) => json!({"error": "wrong token"}),
         Ok(req) => {
             let (reply, wait) = channel();
             let cmd = req["cmd"].as_str().unwrap_or("").to_string();
