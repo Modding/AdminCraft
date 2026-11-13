@@ -1,5 +1,5 @@
 //! Languages. The program is written in English; that text is the key a language file maps to
-//! another language. German is built in (`lang/de.lang`); more languages are plain text files in
+//! another language. German, French, Italian and Ukrainian are built in (`lang/xx.lang`); more languages are plain text files in
 //! the folder "AdminCraftLang" next to the program (`xx.lang`, see README.txt there).
 //!
 //! File format (UTF-8):
@@ -16,6 +16,14 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, RwLock};
 
 const BUILTIN_DE: &str = include_str!("../lang/de.lang");
+
+/// The languages built into the program besides English: (code, name, file).
+const BUILTIN: &[(&str, &str, &str)] = &[
+    ("de", "Deutsch", BUILTIN_DE),
+    ("fr", "Français", include_str!("../lang/fr.lang")),
+    ("it", "Italiano", include_str!("../lang/it.lang")),
+    ("uk", "Українська", include_str!("../lang/uk.lang")),
+];
 
 static TABLE: LazyLock<RwLock<HashMap<String, &'static str>>> = LazyLock::new(|| RwLock::new(HashMap::new()));
 static CURRENT: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("en".to_string()));
@@ -150,12 +158,12 @@ fn file_langs() -> Vec<(PathBuf, Parsed)> {
     v
 }
 
-/// All languages: English (the original), German (built in) and the files in AdminCraftLang.
+/// All languages: English (the original), the built-in ones and the files in AdminCraftLang.
 pub fn available() -> Vec<LangInfo> {
     let mut v = vec![
         LangInfo { code: "en".into(), name: "English".into(), source: "built in".into() },
-        LangInfo { code: "de".into(), name: "Deutsch".into(), source: "built in".into() },
     ];
+    v.extend(BUILTIN.iter().map(|(code, name, _)| LangInfo { code: (*code).into(), name: (*name).into(), source: "built in".into() }));
     for (path, p) in file_langs() {
         if p.code == "en" {
             continue; // English is the program's own text
@@ -186,7 +194,7 @@ pub fn set_language(choice: &str) {
     }
     let mut map: HashMap<String, &'static str> = HashMap::new();
     if code != "en" {
-        let mut entries = if code == "de" { parse(BUILTIN_DE).map } else { HashMap::new() };
+        let mut entries = BUILTIN.iter().find(|(c, _, _)| *c == code).map(|(_, _, text)| parse(text).map).unwrap_or_default();
         if let Some((_, p)) = file_langs().into_iter().find(|(_, p)| p.code == code) {
             entries.extend(p.map);
         }
@@ -207,4 +215,16 @@ pub fn set_language(choice: &str) {
 #[cfg(test)]
 pub fn german_table() -> HashMap<String, String> {
     parse(BUILTIN_DE).map
+}
+
+/// Tests: the table of a language file.
+#[cfg(test)]
+pub fn table_of(text: &str) -> HashMap<String, String> {
+    parse(text).map
+}
+
+/// Tests: every built-in language file with its code.
+#[cfg(test)]
+pub fn builtin_files() -> Vec<(&'static str, &'static str)> {
+    BUILTIN.iter().map(|(c, _, t)| (*c, *t)).collect()
 }

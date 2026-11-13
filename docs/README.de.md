@@ -2,6 +2,8 @@
 
 Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemoteNG.
 
+**Handbuch:** [docs/help/de.md](help/de.md) – alles Schritt für Schritt erklärt (auch im Programm: F1).
+
 ## Was es kann
 
 * Verbindungsbaum mit Ordnern, Suche, Duplizieren, Verschieben, Rechtsklick-Menü
@@ -28,8 +30,10 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
 * **Tabs:** umbenennen (Doppelklick oder Rechtsklick), verschieben (ziehen oder Rechtsklick » Nach links/rechts);
   eingebettete Fenster (PuTTY, RDP) bekommen die Tastatur einfach per Klick hinein
 * **Bildschirmfoto:** Knopf oben rechts legt ein Bild des aktiven Tabs (auch RDP/PuTTY) in die Zwischenablage
-* **Sprachen:** Deutsch und Englisch eingebaut, Standard = Systemsprache, umstellbar in den Einstellungen.
-  Weitere Sprachen als Textdatei `xx.lang` im Ordner `AdminCraftLang` (Vorlage `de.lang.example` liegt dort: links steht der englische Originaltext, rechts die Übersetzung)
+* **Sprachen:** Englisch, Deutsch, Französisch, Italienisch und Ukrainisch eingebaut, Standard = Systemsprache,
+  umstellbar in den Einstellungen. Weitere Sprachen als Textdatei `xx.lang` im Ordner `AdminCraftLang`
+  (Vorlage `de.lang.example` liegt dort: links steht der englische Originaltext, rechts die Übersetzung)
+* **Handbuch eingebaut:** F1 oder *Hilfe » Handbuch* – mit Inhaltsverzeichnis, Suche und `?`-Knöpfen in den Einstellungen
 * **Netzwerk-Scanner** (wie Angry IP Scanner): IP-Bereich (`/24`, `10.0.0.1-50` …) per Ping und Port-Abfrage,
   mit Name, MAC, Antwortzeit, offenen Ports; Stand speichern und beim nächsten Scan **neu / weg / geändert** sehen;
   gefundene Geräte direkt öffnen oder als Verbindung anlegen

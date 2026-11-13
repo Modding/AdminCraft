@@ -156,6 +156,7 @@ enum TabKind {
     Subnet(extra::SubnetTab),
     Cert(extra::CertTab),
     Tunnels,
+    Help(Box<crate::help::HelpTab>),
 }
 
 #[allow(dead_code)]
@@ -242,6 +243,8 @@ pub struct AdminApp {
     import_msg: Option<(bool, String)>,
     show_about: bool,
     show_keys: bool,
+    /// A "?" asked for this chapter of the user guide (opened after the frame's drawing).
+    help_request: Option<crate::help::Topic>,
     focus_search: bool,
     close_request: Option<usize>,
     show_props: bool,
@@ -339,6 +342,7 @@ impl AdminApp {
             import_msg: None,
             show_about: false,
             show_keys: false,
+            help_request: None,
             focus_search: false,
             close_request: None,
             show_props: true,
@@ -445,6 +449,12 @@ impl AdminApp {
                     }
                 }
                 "tunnels" => app.open_tunnels(),
+                "help" => {
+                    app.open_help(None);
+                    if let (Ok(n), Some(Tab { kind: TabKind::Help(h), .. })) = (host.parse::<usize>(), app.tabs.get_mut(app.active)) {
+                        h.open_section(n);
+                    }
+                }
                 "export" => {
                     app.open_export(None);
                     app.export_mode = crate::sharing::PwMode::Plain;
@@ -521,6 +531,19 @@ impl AdminApp {
         self.tabs.push(Tab { id: self.next_tab, title, color, kind });
         self.next_tab += 1;
         self.active = self.tabs.len() - 1;
+    }
+
+    /// Opens the user guide (or brings it to the front), optionally at a section (counted from 0;
+    /// every language has the same sections, see `help::Topic`).
+    pub(crate) fn open_help(&mut self, topic: Option<crate::help::Topic>) {
+        if let Some(i) = self.tabs.iter().position(|t| matches!(t.kind, TabKind::Help(_))) {
+            self.active = i;
+        } else {
+            self.add_tab(tr("User guide").into(), Color32::from_rgb(255, 179, 0), TabKind::Help(Box::new(crate::help::HelpTab::new())));
+        }
+        if let (Some(topic), Some(Tab { kind: TabKind::Help(h), .. })) = (topic, self.tabs.get_mut(self.active)) {
+            h.open_section(topic as usize);
+        }
     }
 
     fn open_export(&mut self, root: Option<u64>) {
@@ -691,7 +714,10 @@ impl AdminApp {
             self.open_settings();
         }
         if hit(KeyboardShortcut::new(Modifiers::NONE, Key::F1)) {
-            self.show_keys = true;
+            self.open_help(None);
+        }
+        if let Some(topic) = self.help_request.take() {
+            self.open_help(Some(topic));
         }
         if self.show_keys {
             let mut open = true;
@@ -707,7 +733,7 @@ impl AdminApp {
                         ("Ctrl+Shift+E", tr("Export connections")),
                         ("Ctrl+Shift+L", tr("Network scan")),
                         ("Ctrl+,", tr("Settings")),
-                        ("F1", tr("This overview")),
+                        ("F1", tr("User guide")),
                         (tr("Double-click"), tr("Open connection / rename tab")),
                         (tr("Middle mouse button"), tr("Close tab")),
                     ] {
@@ -1576,9 +1602,16 @@ impl AdminApp {
                 }
             });
             ui.menu_button(tr("Help"), |ui| {
-                if ui.add(egui::Button::new(tr("Keyboard shortcuts")).shortcut_text("F1")).clicked() {
+                if ui.add(egui::Button::new(tr("User guide")).shortcut_text("F1")).clicked() {
+                    self.open_help(None);
+                }
+                if ui.button(tr("First steps")).clicked() {
+                    self.open_help(Some(crate::help::Topic::FirstConnection));
+                }
+                if ui.button(tr("Keyboard shortcuts")).clicked() {
                     self.show_keys = true;
                 }
+                ui.separator();
                 if ui.button(tr("About AdminCraft")).clicked() {
                     self.show_about = true;
                 }
@@ -1586,9 +1619,34 @@ impl AdminApp {
         });
     }
 
+    /// The bar under the menu. Settings and Screenshot are placed first from the right, the rest
+    /// gets the space that is left and scrolls sideways when a language's labels are too long.
     fn toolbar(&mut self, ui: &mut egui::Ui, now: f64) {
-        let ctx = ui.ctx().clone();
         ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(tr("Settings")).clicked() {
+                    self.show_settings = true;
+                }
+                if ui
+                    .button(tr("Screenshot"))
+                    .on_hover_text(tr("Picture of the active tab (RDP/PuTTY too) to the clipboard"))
+                    .clicked()
+                {
+                    self.shot_tab = Some(self.last_content);
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("toolbar")
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| ui.horizontal(|ui| self.toolbar_left(ui, now)));
+                });
+            });
+        });
+    }
+
+    fn toolbar_left(&mut self, ui: &mut egui::Ui, now: f64) {
+        let ctx = ui.ctx().clone();
+        {
             ui.label(RichText::new(tr("Quick connect")).strong());
             egui::ComboBox::from_id_salt("quick_proto")
                 .width(150.0)
@@ -1636,19 +1694,7 @@ impl AdminApp {
                 let e = Entry { name: tr("Local shell").into(), protocol: Protocol::LocalShell, ..Default::default() };
                 self.open_session(e, Creds::default(), Vec::new(), &ctx, now);
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(tr("Settings")).clicked() {
-                    self.show_settings = true;
-                }
-                if ui
-                    .button(tr("Screenshot"))
-                    .on_hover_text(tr("Picture of the active tab (RDP/PuTTY too) to the clipboard"))
-                    .clicked()
-                {
-                    self.shot_tab = Some(self.last_content);
-                }
-            });
-        });
+        }
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui, now: f64) {
@@ -2170,7 +2216,7 @@ impl AdminApp {
             });
 
             if e.protocol != Protocol::LocalShell || e.folder {
-                section(ui, tr("Login"));
+                section_help(ui, tr("Login"), crate::help::Topic::Passwords, &mut self.help_request);
                 egui::Grid::new(tr("props_login")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                     ui.label(tr("User"));
                     ui.add(egui::TextEdit::singleline(&mut e.username).desired_width(f32::INFINITY));
@@ -2364,7 +2410,7 @@ impl AdminApp {
                             ui.weak(tr("File transfer through a jump host always uses the tunnel (ssh -J)."));
                         }
                         if e.protocol == Protocol::Ssh {
-                            section(ui, tr("Tunnels (port forwarding)"));
+                            section_help(ui, tr("Tunnels (port forwarding)"), crate::help::Topic::Tools, &mut self.help_request);
                             let mut remove = None;
                             for (i, tun) in e.tunnels.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
@@ -2676,6 +2722,7 @@ impl AdminApp {
                     embed_rect = Some(area);
                 }
                 TabKind::Transfer(t) => transfer_ui(ui, t, show_hidden),
+                TabKind::Help(h) => crate::help::help_ui(ui, h),
                 TabKind::Term(t) => {
                     let mut snippet_cmd: Option<String> = None;
                     ui.horizontal(|ui| {
@@ -2910,6 +2957,7 @@ impl AdminApp {
                 StartAct::Subnet => self.add_tab(tr("Subnet calculator").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab::default())),
                 StartAct::Cert => self.open_cert(String::new()),
                 StartAct::Tunnels => self.open_tunnels(),
+                StartAct::Help(topic) => self.open_help(topic),
                 StartAct::Files => {
                     let target = self
                         .selected
@@ -2936,6 +2984,15 @@ impl AdminApp {
                 ui.vertical(|ui| {
                     ui.label(RichText::new(tr("AdminCraft")).size(28.0).strong());
                     ui.label(tr("All servers, switches and PCs in one place – RDP, SSH, VNC, Telnet, PowerShell and web."));
+                    ui.horizontal(|ui| {
+                        ui.weak(tr("New here?"));
+                        if ui.small_button(tr("First steps")).clicked() {
+                            acts.push(StartAct::Help(Some(crate::help::Topic::FirstConnection)));
+                        }
+                        if ui.small_button(tr("User guide")).on_hover_text("F1").clicked() {
+                            acts.push(StartAct::Help(None));
+                        }
+                    });
                 });
             });
             ui.add_space(14.0);
@@ -3342,7 +3399,7 @@ impl AdminApp {
 
     fn settings_ui(&mut self, ui: &mut egui::Ui, now: f64) {
         let mut changed = false;
-        section(ui, tr("Language"));
+        section_help(ui, tr("Language"), crate::help::Topic::Languages, &mut self.help_request);
         let langs = crate::i18n::available();
         let sys = crate::i18n::system_code();
         let shown = if self.store.data.settings.language.is_empty() {
@@ -3385,7 +3442,7 @@ impl AdminApp {
             .checkbox(&mut self.store.data.settings.auto_password, tr("Type the stored password in the terminal automatically (SSH/Telnet)"))
             .changed();
 
-        section(ui, tr("SSH, remote desktop and files"));
+        section_help(ui, tr("SSH, remote desktop and files"), crate::help::Topic::Protocols, &mut self.help_request);
         egui::Grid::new(tr("ssh_defaults")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Open SSH with"));
             let cur = self.store.data.settings.default_ssh_client;
@@ -3418,7 +3475,7 @@ impl AdminApp {
             .changed();
         changed |= ui.checkbox(&mut self.store.data.settings.show_hidden, tr("Show hidden files (.name) in the file transfer")).changed();
 
-        section(ui, tr("Programs"));
+        section_help(ui, tr("Programs"), crate::help::Topic::Settings, &mut self.help_request);
         ui.label(tr("AdminCraft looks for each program here: 1. own path below, 2. programs folder next to AdminCraft, 3. system."));
         ui.horizontal(|ui| {
             if ui.button(tr("Open programs folder")).clicked() {
@@ -3464,7 +3521,7 @@ impl AdminApp {
             self.refresh_programs();
         }
 
-        section(ui, tr("Password vault: KeePass"));
+        section_help(ui, tr("Password vault: KeePass"), crate::help::Topic::Passwords, &mut self.help_request);
         ui.label(tr("Connections can take their password from a KeePass/KeePassXC database (.kdbx): choose \"Password from » KeePass\" on a connection."));
         egui::Grid::new(tr("kp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Database (.kdbx)"));
@@ -3531,7 +3588,7 @@ impl AdminApp {
             changed = true;
         }
 
-        section(ui, tr("Where the connection list is stored"));
+        section_help(ui, tr("Where the connection list is stored"), crate::help::Topic::Sharing, &mut self.help_request);
         ui.label(tr("Store it centrally so the team (or you on several PCs) uses the same list. Changes by others are reloaded automatically."));
         ui.horizontal(|ui| {
             ui.radio_value(&mut self.storage_kind, 0, tr("On this PC"));
@@ -3602,7 +3659,7 @@ impl AdminApp {
             .changed();
         ui.weak(tr("Recommended for central storage. Everyone in the team needs the same master password; alternatively passwords via KeePass."));
 
-        section(ui, tr("Master password"));
+        section_help(ui, tr("Master password"), crate::help::Topic::Passwords, &mut self.help_request);
         ui.label(tr(if self.store.data.master {
             "A master password is set. Without it the passwords can't be read."
         } else {
@@ -3787,6 +3844,7 @@ enum StartAct {
     Subnet,
     Cert,
     Tunnels,
+    Help(Option<crate::help::Topic>),
 }
 
 impl eframe::App for AdminApp {
@@ -3814,7 +3872,7 @@ impl eframe::App for AdminApp {
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui, now));
         egui::Panel::left("tree").resizable(true).default_size(300.0).size_range(200.0..=520.0).show(ui, |ui| self.tree_panel(ui, now));
         // remote desktops and file transfers get the whole width
-        let wide_tab = matches!(self.tabs.get(self.active).map(|t| &t.kind), Some(TabKind::Proc(_)) | Some(TabKind::Transfer(_)) | Some(TabKind::NetScan(_)) | Some(TabKind::Tunnels));
+        let wide_tab = matches!(self.tabs.get(self.active).map(|t| &t.kind), Some(TabKind::Proc(_)) | Some(TabKind::Transfer(_)) | Some(TabKind::NetScan(_)) | Some(TabKind::Tunnels) | Some(TabKind::Help(_)));
         if self.show_props && !wide_tab {
             egui::Panel::right("props").resizable(true).default_size(340.0).size_range(260.0..=560.0).show(ui, |ui| self.props_panel(ui, now));
         }
@@ -4757,6 +4815,18 @@ fn badge(ui: &mut egui::Ui, p: Protocol) {
 fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(10.0);
     ui.label(RichText::new(title).strong().color(ACCENT));
+    ui.add_space(2.0);
+}
+
+/// A section title with a small "?" that opens the matching chapter of the user guide.
+fn section_help(ui: &mut egui::Ui, title: &str, topic: crate::help::Topic, help: &mut Option<crate::help::Topic>) {
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).strong().color(ACCENT));
+        if ui.small_button("?").on_hover_text(tr("Explain this in the user guide")).clicked() {
+            *help = Some(topic);
+        }
+    });
     ui.add_space(2.0);
 }
 

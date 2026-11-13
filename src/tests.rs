@@ -104,13 +104,48 @@ fn translation_placeholders() {
     let table = crate::i18n::german_table();
     assert!(table.len() > 600);
     assert_eq!(table.get("{0} connections · {1} folders").map(String::as_str), Some("{0} Verbindungen · {1} Ordner"));
-    // a translation keeps every placeholder of the English text
-    for (en, tr) in &table {
-        for i in 0..4 {
-            let ph = format!("{{{i}}}");
-            assert_eq!(en.contains(&ph), tr.contains(&ph), "placeholder {ph}: {en}");
+    // every built-in language: right code, unambiguous lines, the same texts as German,
+    // and every placeholder of the English text kept
+    for (code, text) in crate::i18n::builtin_files() {
+        assert!(text.contains(&format!("@code = {code}")), "{code}: @code");
+        for l in text.lines().filter(|l| !l.starts_with('#')) {
+            assert!(l.matches(" = ").count() <= 1 || l.contains(" => "), "{code}: ambiguous line: {l}");
+        }
+        let t = crate::i18n::table_of(text);
+        for key in table.keys() {
+            assert!(t.contains_key(key), "{code}: missing translation of: {key}");
+        }
+        for (en, tr) in &t {
+            for ph in ["{0}", "{1}", "{2}", "{3}", "{host}", "{user}", "{name}", "\n"] {
+                assert_eq!(en.matches(ph).count(), tr.matches(ph).count(), "{code}: placeholder {ph:?} in: {en}");
+            }
         }
     }
+}
+
+#[test]
+fn user_guide_in_every_language() {
+    use crate::help::{parse, sections, Block, TOPIC_COUNT};
+    for (code, text) in crate::help::builtin() {
+        let blocks = parse(text);
+        assert!(matches!(blocks.first(), Some(Block::Title(_))), "{code}: title first");
+        assert_eq!(sections(&blocks).len(), TOPIC_COUNT, "{code}: same chapters as the English guide");
+        assert!(blocks.iter().any(|b| matches!(b, Block::Table(r) if r.len() > 5)), "{code}: tables");
+        assert!(blocks.iter().any(|b| matches!(b, Block::Code(_))), "{code}: code blocks");
+    }
+    let b = parse("# T\n\nOne\nline.\n\n- a\n  b\n1. x\n> tip\n| A | B |\n|---|---|\n| 1 | 2 |\n```\ncode\n```\n![x](y.png)\n");
+    assert_eq!(
+        b,
+        vec![
+            Block::Title("T".into()),
+            Block::Para("One line.".into()),
+            Block::Bullet("a b".into()),
+            Block::Numbered("1".into(), "x".into()),
+            Block::Tip("tip".into()),
+            Block::Table(vec![vec!["A".into(), "B".into()], vec!["1".into(), "2".into()]]),
+            Block::Code("code".into()),
+        ]
+    );
 }
 
 #[test]

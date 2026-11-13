@@ -5,6 +5,7 @@ mod agent;
 mod app;
 mod embed;
 mod extra;
+mod help;
 mod netscan;
 mod i18n;
 mod import;
