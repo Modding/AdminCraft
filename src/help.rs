@@ -165,7 +165,7 @@ pub fn sections(blocks: &[Block]) -> Vec<(String, usize)> {
 
 /// Text without the Markdown marks (for the contents and the search).
 pub fn plain(s: &str) -> String {
-    s.replace("**", "").replace('`', "").replace('*', "")
+    s.replace("**", "").replace(['`', '*'], "")
 }
 
 fn block_text(b: &Block) -> String {
@@ -257,24 +257,26 @@ pub fn help_ui(ui: &mut egui::Ui, h: &mut HelpTab) {
         // panel), at most a readable 860 px
         let window_left = ui.clip_rect().right().min(ui.ctx().content_rect().right()) - ui.cursor().left() - 20.0;
         let text_w = ui.available_width().min(window_left).clamp(240.0, 860.0);
-        egui::ScrollArea::vertical().id_salt("help_text").auto_shrink([false, false]).show(ui, |ui| ui.vertical(|ui| {
-            ui.set_width(text_w);
-            let top = ui.clip_rect().top();
-            let mut section = 0;
-            for (i, b) in h.blocks.iter().enumerate() {
-                if matches!(b, Block::Section(_)) {
-                    section = i;
+        egui::ScrollArea::vertical().id_salt("help_text").auto_shrink([false, false]).show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(text_w);
+                let top = ui.clip_rect().top();
+                let mut section = 0;
+                for (i, b) in h.blocks.iter().enumerate() {
+                    if matches!(b, Block::Section(_)) {
+                        section = i;
+                    }
+                    let r = block_ui(ui, b, accent, text_w);
+                    if jump == Some(i) {
+                        r.scroll_to_me(Some(egui::Align::TOP));
+                    }
+                    if first_visible.is_none() && r.rect.bottom() > top + 40.0 {
+                        first_visible = Some(section);
+                    }
                 }
-                let r = block_ui(ui, b, accent, text_w);
-                if jump == Some(i) {
-                    r.scroll_to_me(Some(egui::Align::TOP));
-                }
-                if first_visible.is_none() && r.rect.bottom() > top + 40.0 {
-                    first_visible = Some(section);
-                }
-            }
-            ui.add_space(height * 0.5);
-        }));
+                ui.add_space(height * 0.5);
+            })
+        });
         if let Some(i) = jump.or(first_visible) {
             h.current = i;
         }
@@ -303,20 +305,22 @@ fn block_ui(ui: &mut egui::Ui, b: &Block, accent: Color32, w: f32) -> egui::Resp
             ui.add_space(6.0);
             r
         }
-        Block::Bullet(s) => ui
-            .horizontal_top(|ui| {
+        Block::Bullet(s) => {
+            ui.horizontal_top(|ui| {
                 ui.add_space(8.0);
                 ui.label(RichText::new("•").size(14.5).color(accent));
                 ui.add(egui::Label::new(inline(ui, s, 14.5, w - 24.0)).wrap());
             })
-            .response,
-        Block::Numbered(n, s) => ui
-            .horizontal_top(|ui| {
+            .response
+        }
+        Block::Numbered(n, s) => {
+            ui.horizontal_top(|ui| {
                 ui.add_space(4.0);
                 ui.label(RichText::new(format!("{n}.")).size(14.5).color(accent).strong());
                 ui.add(egui::Label::new(inline(ui, s, 14.5, w - 30.0)).wrap());
             })
-            .response,
+            .response
+        }
         Block::Tip(s) => {
             ui.add_space(4.0);
             let r = egui::Frame::new()
@@ -390,9 +394,8 @@ pub fn column_widths(rows: &[Vec<String>], total: f32) -> Vec<f32> {
     if cols == 0 {
         return Vec::new();
     }
-    let weight: Vec<f32> = (0..cols)
-        .map(|c| rows.iter().filter_map(|r| r.get(c)).map(|s| plain(s).chars().count()).max().unwrap_or(1).clamp(8, 70) as f32)
-        .collect();
+    let weight: Vec<f32> =
+        (0..cols).map(|c| rows.iter().filter_map(|r| r.get(c)).map(|s| plain(s).chars().count()).max().unwrap_or(1).clamp(8, 70) as f32).collect();
     let sum: f32 = weight.iter().sum();
     let min = (total / cols as f32 * 0.5).min(110.0);
     let mut w: Vec<f32> = weight.iter().map(|x| (total * x / sum).max(min)).collect();
@@ -423,12 +426,7 @@ fn inline(ui: &egui::Ui, s: &str, size: f32, max_w: f32) -> LayoutJob {
         job.append(
             text,
             0.0,
-            TextFormat {
-                font_id: FontId::proportional(size),
-                color: if bold { strong } else { normal },
-                italics: italic,
-                ..Default::default()
-            },
+            TextFormat { font_id: FontId::proportional(size), color: if bold { strong } else { normal }, italics: italic, ..Default::default() },
         );
     };
     while let Some(c) = rest.chars().next() {

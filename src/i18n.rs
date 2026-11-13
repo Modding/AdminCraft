@@ -140,17 +140,17 @@ fn file_langs() -> Vec<(PathBuf, Parsed)> {
     if let Ok(rd) = std::fs::read_dir(lang_dir()) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.extension().map(|x| x.eq_ignore_ascii_case("lang")).unwrap_or(false) {
-                if let Ok(text) = std::fs::read_to_string(&p) {
-                    let mut parsed = parse(&text);
-                    if parsed.code.is_empty() {
-                        parsed.code = p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-                    }
-                    if parsed.name.is_empty() {
-                        parsed.name = parsed.code.clone();
-                    }
-                    v.push((p, parsed));
+            if p.extension().map(|x| x.eq_ignore_ascii_case("lang")).unwrap_or(false)
+                && let Ok(text) = std::fs::read_to_string(&p)
+            {
+                let mut parsed = parse(&text);
+                if parsed.code.is_empty() {
+                    parsed.code = p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
                 }
+                if parsed.name.is_empty() {
+                    parsed.name = parsed.code.clone();
+                }
+                v.push((p, parsed));
             }
         }
     }
@@ -160,9 +160,7 @@ fn file_langs() -> Vec<(PathBuf, Parsed)> {
 
 /// All languages: English (the original), the built-in ones and the files in AdminCraftLang.
 pub fn available() -> Vec<LangInfo> {
-    let mut v = vec![
-        LangInfo { code: "en".into(), name: "English".into(), source: "built in".into() },
-    ];
+    let mut v = vec![LangInfo { code: "en".into(), name: "English".into(), source: "built in".into() }];
     v.extend(BUILTIN.iter().map(|(code, name, _)| LangInfo { code: (*code).into(), name: (*name).into(), source: "built in".into() }));
     for (path, p) in file_langs() {
         if p.code == "en" {
@@ -179,9 +177,7 @@ pub fn available() -> Vec<LangInfo> {
 
 /// The system's language as a two-letter code ("de", "en", "fr" ...).
 pub fn system_code() -> String {
-    sys_locale::get_locale()
-        .map(|l| l.split(['-', '_']).next().unwrap_or("en").to_lowercase())
-        .unwrap_or_else(|| "en".into())
+    sys_locale::get_locale().map(|l| l.split(['-', '_']).next().unwrap_or("en").to_lowercase()).unwrap_or_else(|| "en".into())
 }
 
 /// Switches the language. Empty or "auto" = the system's language (English when there is no

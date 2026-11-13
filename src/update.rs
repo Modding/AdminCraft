@@ -106,11 +106,8 @@ pub enum Outcome {
 /// Asks GitHub (blocking; run it in a thread).
 pub fn check(include_pre: bool) -> Result<Outcome, String> {
     let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=30");
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(15)))
-        .http_status_as_error(false)
-        .build()
-        .into();
+    let agent: ureq::Agent =
+        ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(15))).http_status_as_error(false).build().into();
     let mut resp = agent
         .get(&url)
         .header("User-Agent", concat!("AdminCraft/", env!("CARGO_PKG_VERSION")))

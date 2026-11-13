@@ -4,7 +4,7 @@
 use crate::i18n::{t as tr, tf};
 use crate::launch::PwRule;
 use eframe::egui::{self, Color32, FontId, Key, Pos2, Rect, Sense, Stroke, Vec2};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 
@@ -21,7 +21,7 @@ pub fn is_shell_prompt(line: &str) -> bool {
     matches!(t.chars().last(), Some('$') | Some('#') | Some('>') | Some('%'))
 }
 use std::num::NonZeroU16;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 
 #[derive(Default)]
 pub struct TermCallbacks {
@@ -39,14 +39,7 @@ impl vt100::Callbacks for TermCallbacks {
         self.title = Some(String::from_utf8_lossy(title).into_owned());
     }
 
-    fn unhandled_csi(
-        &mut self,
-        screen: &mut vt100::Screen,
-        i1: Option<u8>,
-        _i2: Option<u8>,
-        params: &[&[u16]],
-        c: char,
-    ) {
+    fn unhandled_csi(&mut self, screen: &mut vt100::Screen, i1: Option<u8>, _i2: Option<u8>, params: &[&[u16]], c: char) {
         let first = params.first().and_then(|p| p.first()).copied().unwrap_or(0);
         match (c, i1) {
             ('n', None) if first == 6 => {
@@ -142,10 +135,7 @@ impl Terminal {
         let pair = native_pty_system()
             .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| tf("Terminal could not be opened: {0}", &[&e]))?;
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| tf("Program could not be started: {0}", &[&e]))?;
+        let child = pair.slave.spawn_command(cmd).map_err(|e| tf("Program could not be started: {0}", &[&e]))?;
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -219,7 +209,15 @@ impl Terminal {
                     b'\r' | 0x07 | 0x08 => {}
                     _ => out.push(b),
                 },
-                1 => self.log_state = if b == b'[' { 2 } else if b == b']' { 3 } else { 0 },
+                1 => {
+                    self.log_state = if b == b'[' {
+                        2
+                    } else if b == b']' {
+                        3
+                    } else {
+                        0
+                    }
+                }
                 2 => {
                     if (0x40..=0x7e).contains(&b) {
                         self.log_state = 0;
@@ -339,14 +337,11 @@ impl Terminal {
                 self.last_chain_prompt = Some(key);
             }
         }
-        if self.exited.is_none() {
-            if let Ok(Some(status)) = self.child.try_wait() {
-                self.exited = Some(if status.success() {
-                    tr("Session ended.").to_string()
-                } else {
-                    tf("Session ended (code {0}).", &[&(status.exit_code())])
-                });
-            }
+        if self.exited.is_none()
+            && let Ok(Some(status)) = self.child.try_wait()
+        {
+            self.exited =
+                Some(if status.success() { tr("Session ended.").to_string() } else { tf("Session ended (code {0}).", &[&(status.exit_code())]) });
         }
     }
 
@@ -379,10 +374,7 @@ impl Terminal {
         let focused = resp.has_focus();
         if focused {
             ui.memory_mut(|m| {
-                m.set_focus_lock_filter(
-                    id,
-                    egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true },
-                )
+                m.set_focus_lock_filter(id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
             });
             typed = self.handle_input(ui);
         }
@@ -426,7 +418,17 @@ impl Terminal {
 /// Draws a terminal screen into `rect` (also used to play back recordings). `cursor`: None =
 /// hidden, Some(true) = solid (focused), Some(false) = outline.
 #[allow(clippy::too_many_arguments)]
-pub fn paint_screen(ui: &egui::Ui, rect: Rect, screen: &vt100::Screen, rows: u16, cols: u16, font: &FontId, (cw, ch): (f32, f32), dark: bool, cursor: Option<bool>) -> egui::Painter {
+pub fn paint_screen(
+    ui: &egui::Ui,
+    rect: Rect,
+    screen: &vt100::Screen,
+    rows: u16,
+    cols: u16,
+    font: &FontId,
+    (cw, ch): (f32, f32),
+    dark: bool,
+    cursor: Option<bool>,
+) -> egui::Painter {
     {
         let font = font.clone();
         let palette = Palette::new(dark);
@@ -458,11 +460,7 @@ pub fn paint_screen(ui: &egui::Ui, rect: Rect, screen: &vt100::Screen, rows: u16
                 let x = origin.x + start as f32 * cw;
                 let y = origin.y + r as f32 * ch;
                 if bg != palette.bg {
-                    painter.rect_filled(
-                        Rect::from_min_size(Pos2::new(x, y), Vec2::new((c - start) as f32 * cw, ch)),
-                        0.0,
-                        bg,
-                    );
+                    painter.rect_filled(Rect::from_min_size(Pos2::new(x, y), Vec2::new((c - start) as f32 * cw, ch)), 0.0, bg);
                 }
                 if !text.trim().is_empty() {
                     let fgc = if bold { palette.brighten(fg) } else { fg };
@@ -472,10 +470,7 @@ pub fn paint_screen(ui: &egui::Ui, rect: Rect, screen: &vt100::Screen, rows: u16
         }
         if let (Some(focused), false, 0) = (cursor, screen.hide_cursor(), screen.scrollback()) {
             let (cr, cc) = screen.cursor_position();
-            let crect = Rect::from_min_size(
-                Pos2::new(origin.x + cc as f32 * cw, origin.y + cr as f32 * ch),
-                Vec2::new(cw, ch),
-            );
+            let crect = Rect::from_min_size(Pos2::new(origin.x + cc as f32 * cw, origin.y + cr as f32 * ch), Vec2::new(cw, ch));
             if focused {
                 painter.rect_filled(crect, 1.0, palette.cursor.gamma_multiply(0.7));
             } else {
@@ -654,11 +649,7 @@ impl Palette {
     fn cell_colors(&self, cell: &vt100::Cell) -> (Color32, Color32) {
         let fg = self.color(cell.fgcolor(), self.fg);
         let bg = self.color(cell.bgcolor(), self.bg);
-        if cell.inverse() {
-            (bg, fg)
-        } else {
-            (fg, bg)
-        }
+        if cell.inverse() { (bg, fg) } else { (fg, bg) }
     }
 
     fn brighten(&self, c: Color32) -> Color32 {

@@ -3,9 +3,9 @@
 fn main() {
     println!("cargo:rerun-if-changed=assets/admincraft.rc");
     println!("cargo:rerun-if-changed=assets/admincraft.ico");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        if let Err(e) = embed_resource::compile("assets/admincraft.rc", embed_resource::NONE).manifest_optional() {
-            println!("cargo:warning=program icon not embedded: {e}");
-        }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && let Err(e) = embed_resource::compile("assets/admincraft.rc", embed_resource::NONE).manifest_optional()
+    {
+        println!("cargo:warning=program icon not embedded: {e}");
     }
 }

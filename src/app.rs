@@ -1,9 +1,9 @@
 //! The AdminCraft window: connection tree, tabs, properties, tools and dialogs.
 #![allow(deprecated)]
 
-use crate::i18n::{t as tr, tf};
 use crate::embed::{self, Embedded, PxRect};
 use crate::extra::{self, NetScanAct, TunnelAct};
+use crate::i18n::{t as tr, tf};
 use crate::keepass_vault::KeePassVault;
 use crate::launch::{self, Creds, JumpHop, Launch};
 use crate::model::{CredSource, Entry, JumpMode, Protocol, SshClient, Store, TransferTool};
@@ -226,6 +226,9 @@ struct Shot {
     image: Arc<Mutex<Option<Arc<egui::ColorImage>>>>,
 }
 
+/// Where the update check (running in its own thread) puts what it found.
+type UpdateSlot = std::sync::Arc<std::sync::Mutex<Option<Result<crate::update::Outcome, String>>>>;
+
 pub struct AdminApp {
     store: Store,
     selected: Option<u64>,
@@ -255,7 +258,7 @@ pub struct AdminApp {
     /// The channel agents use to control this window (None when switched off).
     control: Option<crate::control::Server>,
     /// Result of "Check for updates" (None inside while it runs).
-    update_result: Option<std::sync::Arc<std::sync::Mutex<Option<Result<crate::update::Outcome, String>>>>>,
+    update_result: Option<UpdateSlot>,
     releases_url: String,
     focus_search: bool,
     close_request: Option<usize>,
@@ -449,10 +452,10 @@ impl AdminApp {
                 "settings" => app.open_settings(),
                 "netscan" => {
                     app.open_netscan(host.clone());
-                    if let Some(Tab { kind: TabKind::NetScan(n), .. }) = app.tabs.last_mut() {
-                        if let (Ok(t), Ok(p)) = (crate::netscan::parse_targets(&n.range), crate::tools::parse_ports(&n.ports)) {
-                            n.scan = Some(crate::netscan::NetScan::start(t, p, n.timeout, n.names, ctx.clone()));
-                        }
+                    if let Some(Tab { kind: TabKind::NetScan(n), .. }) = app.tabs.last_mut()
+                        && let (Ok(t), Ok(p)) = (crate::netscan::parse_targets(&n.range), crate::tools::parse_ports(&n.ports))
+                    {
+                        n.scan = Some(crate::netscan::NetScan::start(t, p, n.timeout, n.names, ctx.clone()));
                     }
                 }
                 "subnet" => app.add_tab(tr("Subnet calculator").into(), ACCENT, TabKind::Subnet(extra::SubnetTab { input: host.clone() })),
@@ -461,7 +464,7 @@ impl AdminApp {
                     if let Some(Tab { kind: TabKind::Cert(c), .. }) = app.tabs.last_mut() {
                         let (h, slot, c2) = (c.host.clone(), c.result.clone(), ctx.clone());
                         std::thread::spawn(move || {
-                            *slot.lock().unwrap() = Some(crate::admintools::check_cert(&h, 443));
+                            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(crate::admintools::check_cert(&h, 443));
                             c2.request_repaint();
                         });
                     }
@@ -586,7 +589,11 @@ impl AdminApp {
                 self.tabs[i].kind = TabKind::Playback(Box::new(crate::playback::PlaybackTab::new(Some(path))));
             }
         } else {
-            self.add_tab(tr("Recordings").into(), Color32::from_rgb(229, 57, 53), TabKind::Playback(Box::new(crate::playback::PlaybackTab::new(path))));
+            self.add_tab(
+                tr("Recordings").into(),
+                Color32::from_rgb(229, 57, 53),
+                TabKind::Playback(Box::new(crate::playback::PlaybackTab::new(path))),
+            );
         }
     }
 
@@ -685,7 +692,11 @@ impl AdminApp {
         let mut run = false;
         egui::Window::new(tr("Import AdminCraft export")).open(&mut open).default_width(480.0).show(ctx, |ui| {
             ui.label(tr("A colleague's export file (.json). The connections go into a new folder."));
-            ui.add(egui::TextEdit::singleline(&mut self.ximport_path).desired_width(f32::INFINITY).hint_text(r"C:\Users\...\AdminCraft-Connections.json"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.ximport_path)
+                    .desired_width(f32::INFINITY)
+                    .hint_text(r"C:\Users\...\AdminCraft-Connections.json"),
+            );
             if self.ximport_need_pw {
                 ui.label(tr("The file is encrypted. Export password:"));
                 ui.add(egui::TextEdit::singleline(&mut self.ximport_pw).password(true));
@@ -812,17 +823,14 @@ impl AdminApp {
     fn set_broadcast_all(&mut self, on: bool) {
         for t in &mut self.tabs {
             if let TabKind::Term(x) = &mut t.kind {
-                x.broadcast = on && matches!(x.entry.protocol, Protocol::Ssh | Protocol::Telnet | Protocol::Serial | Protocol::Raw | Protocol::Rlogin);
+                x.broadcast =
+                    on && matches!(x.entry.protocol, Protocol::Ssh | Protocol::Telnet | Protocol::Serial | Protocol::Raw | Protocol::Rlogin);
             }
         }
     }
 
     fn tunnel_running(&mut self, id: u64, idx: usize) -> bool {
-        self.tunnels
-            .get_mut(&(id, idx))
-            .and_then(|r| r.child.as_mut())
-            .map(|c| matches!(c.try_wait(), Ok(None)))
-            .unwrap_or(false)
+        self.tunnels.get_mut(&(id, idx)).and_then(|r| r.child.as_mut()).map(|c| matches!(c.try_wait(), Ok(None))).unwrap_or(false)
     }
 
     fn start_tunnel(&mut self, id: u64, idx: usize, now: f64) {
@@ -856,14 +864,14 @@ impl AdminApp {
             self.check_status(ctx);
         }
         ctx.request_repaint_after(std::time::Duration::from_secs(5));
-        let cur = self.status.lock().unwrap().clone();
+        let cur = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let mut changes = Vec::new();
         for (id, st) in &cur {
-            if let (Some(new), Some(Some(old))) = (st, self.monitor_prev.get(id)) {
-                if new != old {
-                    let name = self.store.get(*id).map(|e| e.name.clone()).unwrap_or_default();
-                    changes.push((name, *new));
-                }
+            if let (Some(new), Some(Some(old))) = (st, self.monitor_prev.get(id))
+                && new != old
+            {
+                let name = self.store.get(*id).map(|e| e.name.clone()).unwrap_or_default();
+                changes.push((name, *new));
             }
         }
         for (k, v) in cur {
@@ -915,10 +923,10 @@ impl AdminApp {
                             let mut se = e.clone();
                             se.ssh_client = crate::model::SshClient::Builtin;
                             self.open_session(se, c, jumps, ctx, now);
-                            if let Some(Tab { kind: TabKind::Term(t), .. }) = self.tabs.last_mut() {
-                                if let Some(term) = &mut t.term {
-                                    term.queue_command(if reboot { "sudo reboot".into() } else { "sudo poweroff".into() });
-                                }
+                            if let Some(Tab { kind: TabKind::Term(t), .. }) = self.tabs.last_mut()
+                                && let Some(term) = &mut t.term
+                            {
+                                term.queue_command(if reboot { "sudo reboot".into() } else { "sudo poweroff".into() });
                             }
                         }
                         Err(_) => self.note(tr("Connect once first (unlock KeePass / enter password)."), true, now),
@@ -951,10 +959,11 @@ impl AdminApp {
                         if self.store.data.settings.session_log && !self.store.read_only {
                             let _ = t.start_log(&extra::session_log_path(&entry.name));
                         }
-                        if self.store.data.settings.record_sessions && !self.store.read_only {
-                            if let Err(e) = t.start_recording(&crate::playback::new_recording_path(&entry.name), &entry.name) {
-                                self.log.push(tf("Recording could not start: {0}", &[&e]));
-                            }
+                        if self.store.data.settings.record_sessions
+                            && !self.store.read_only
+                            && let Err(e) = t.start_recording(&crate::playback::new_recording_path(&entry.name), &entry.name)
+                        {
+                            self.log.push(tf("Recording could not start: {0}", &[&e]));
                         }
                         (Some(t), None)
                     }
@@ -1087,10 +1096,7 @@ impl AdminApp {
 
     fn refresh_programs(&mut self) {
         self.system_check = launch::system_check(&self.store.data.settings);
-        self.prog_cache = programs::PROGRAMS
-            .iter()
-            .map(|p| (p.key, programs::find_with_source(p.key, &self.store.data.settings)))
-            .collect();
+        self.prog_cache = programs::PROGRAMS.iter().map(|p| (p.key, programs::find_with_source(p.key, &self.store.data.settings))).collect();
     }
 
     fn open_settings(&mut self) {
@@ -1222,7 +1228,11 @@ impl AdminApp {
                     url.push_str(&format!("/{}", e.start_path.trim().trim_start_matches('/')));
                 }
                 match std::process::Command::new(&prog).arg(&url).spawn() {
-                    Ok(_) => self.note(tf("{0} opened: {1}", &[&(prog.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()), &(e.host.trim())]), false, now),
+                    Ok(_) => self.note(
+                        tf("{0} opened: {1}", &[&(prog.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()), &(e.host.trim())]),
+                        false,
+                        now,
+                    ),
                     Err(err) => self.note(tf("{0}: {1}", &[&(prog.display()), &err]), true, now),
                 }
             }
@@ -1254,13 +1264,13 @@ impl AdminApp {
         };
         let mut host = rest.clone();
         let mut port = self.quick_protocol.default_port();
-        if rest.matches(':').count() == 1 && !rest.contains("://") {
-            if let Some((h, p)) = rest.split_once(':') {
-                if let Ok(p) = p.parse() {
-                    host = h.to_string();
-                    port = p;
-                }
-            }
+        if rest.matches(':').count() == 1
+            && !rest.contains("://")
+            && let Some((h, p)) = rest.split_once(':')
+            && let Ok(p) = p.parse()
+        {
+            host = h.to_string();
+            port = p;
         }
         let e = Entry {
             id: 0,
@@ -1284,11 +1294,7 @@ impl AdminApp {
     fn new_parent_for_selection(&self) -> Option<u64> {
         let id = self.selected?;
         let e = self.store.get(id)?;
-        if e.folder {
-            Some(id)
-        } else {
-            e.parent
-        }
+        if e.folder { Some(id) } else { e.parent }
     }
 
     fn apply(&mut self, act: Act, ctx: &egui::Context, now: f64) {
@@ -1304,12 +1310,7 @@ impl AdminApp {
             }
             Act::NewConn(parent) => {
                 let id = self.store.next_id();
-                self.store.data.entries.push(Entry {
-                    id,
-                    parent,
-                    name: tr("New connection").into(),
-                    ..Default::default()
-                });
+                self.store.data.entries.push(Entry { id, parent, name: tr("New connection").into(), ..Default::default() });
                 self.expand(parent);
                 self.selected = Some(id);
                 self.show_props = true;
@@ -1371,14 +1372,7 @@ impl AdminApp {
                 }
             }
             Act::ConnectAll(folder) => {
-                let ids: Vec<u64> = self
-                    .store
-                    .data
-                    .entries
-                    .iter()
-                    .filter(|e| !e.folder && (e.parent == Some(folder)))
-                    .map(|e| e.id)
-                    .collect();
+                let ids: Vec<u64> = self.store.data.entries.iter().filter(|e| !e.folder && (e.parent == Some(folder))).map(|e| e.id).collect();
                 self.pending_connect.extend(ids);
             }
             Act::Ping(id) => {
@@ -1564,11 +1558,11 @@ impl AdminApp {
                     self.ximport_msg = None;
                     self.ximport_need_pw = false;
                 }
-                if ui.button(tr("Open data folder")).clicked() {
-                    if let Some(dir) = self.store.path.parent() {
-                        let _ = std::fs::create_dir_all(dir);
-                        launch::open_folder(dir);
-                    }
+                if ui.button(tr("Open data folder")).clicked()
+                    && let Some(dir) = self.store.path.parent()
+                {
+                    let _ = std::fs::create_dir_all(dir);
+                    launch::open_folder(dir);
                 }
                 if ui.button(tr("Save now")).clicked() {
                     self.store.save();
@@ -1581,9 +1575,7 @@ impl AdminApp {
             });
             ui.menu_button(tr("View"), |ui| {
                 let mut dark = self.store.data.settings.dark;
-                if ui.radio_value(&mut dark, true, tr("Dark theme")).clicked()
-                    | ui.radio_value(&mut dark, false, tr("Light theme")).clicked()
-                {
+                if ui.radio_value(&mut dark, true, tr("Dark theme")).clicked() | ui.radio_value(&mut dark, false, tr("Light theme")).clicked() {
                     self.store.data.settings.dark = dark;
                     self.mark_dirty(now);
                 }
@@ -1691,11 +1683,7 @@ impl AdminApp {
                 if ui.button(tr("Settings")).clicked() {
                     self.show_settings = true;
                 }
-                if ui
-                    .button(tr("Screenshot"))
-                    .on_hover_text(tr("Picture of the active tab (RDP/PuTTY too) to the clipboard"))
-                    .clicked()
-                {
+                if ui.button(tr("Screenshot")).on_hover_text(tr("Picture of the active tab (RDP/PuTTY too) to the clipboard")).clicked() {
                     self.shot_tab = Some(self.last_content);
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -1712,19 +1700,13 @@ impl AdminApp {
         let ctx = ui.ctx().clone();
         {
             ui.label(RichText::new(tr("Quick connect")).strong());
-            egui::ComboBox::from_id_salt("quick_proto")
-                .width(150.0)
-                .selected_text(self.quick_protocol.label())
-                .show_ui(ui, |ui| {
-                    for p in Protocol::ALL {
-                        ui.selectable_value(&mut self.quick_protocol, p, p.label());
-                    }
-                });
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.quick_host)
-                    .hint_text(tr("Host or IP   (e.g. admin@10.0.0.5:22)"))
-                    .desired_width(280.0),
-            );
+            egui::ComboBox::from_id_salt("quick_proto").width(150.0).selected_text(self.quick_protocol.label()).show_ui(ui, |ui| {
+                for p in Protocol::ALL {
+                    ui.selectable_value(&mut self.quick_protocol, p, p.label());
+                }
+            });
+            let resp =
+                ui.add(egui::TextEdit::singleline(&mut self.quick_host).hint_text(tr("Host or IP   (e.g. admin@10.0.0.5:22)")).desired_width(280.0));
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if ui.add(egui::Button::new(RichText::new(tr("Connect")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
                 self.quick_connect(&ctx, now);
@@ -1778,10 +1760,11 @@ impl AdminApp {
             // short path (folder + file); the full one on hover
             let short: Vec<String> = self.store.path.components().rev().take(2).map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
             let short = short.into_iter().rev().collect::<Vec<_>>().join(std::path::MAIN_SEPARATOR_STR);
-            ui.label(tf("{0}: {1}", &[&place, &format!("…{}{short}", std::path::MAIN_SEPARATOR)])).on_hover_text(self.store.path.display().to_string());
+            ui.label(tf("{0}: {1}", &[&place, &format!("…{}{short}", std::path::MAIN_SEPARATOR)]))
+                .on_hover_text(self.store.path.display().to_string());
             if self.store.remote.is_some() {
                 ui.separator();
-                match self.store.remote_state.lock().unwrap().last_error.clone() {
+                match self.store.remote_state.lock().unwrap_or_else(|e| e.into_inner()).last_error.clone() {
                     Some(e) => ui.label(RichText::new(tf("WebDAV: {0}", &[&e])).color(BAD_RED)),
                     None => ui.label(RichText::new(tr("WebDAV connected")).color(OK_GREEN)),
                 };
@@ -1790,13 +1773,13 @@ impl AdminApp {
                 ui.separator();
                 ui.label(RichText::new(err).color(BAD_RED));
             }
-            if let Some(t) = &self.toast {
-                if t.until > now {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let color = if t.error { BAD_RED } else { OK_GREEN };
-                        ui.label(RichText::new(&t.text).color(color).strong());
-                    });
-                }
+            if let Some(t) = &self.toast
+                && t.until > now
+            {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let color = if t.error { BAD_RED } else { OK_GREEN };
+                    ui.label(RichText::new(&t.text).color(color).strong());
+                });
             }
         });
     }
@@ -1852,13 +1835,13 @@ impl AdminApp {
             }
             // empty space: right-click to add
             let rest = ui.allocate_response(ui.available_size().max(Vec2::new(10.0, 40.0)), Sense::click());
-            if let Some(dragged) = egui::DragAndDrop::payload::<u64>(&ctx).map(|p| *p) {
-                if ctx.pointer_hover_pos().map(|p| rest.rect.contains(p)).unwrap_or(false) {
-                    ui.painter().hline(rest.rect.x_range(), rest.rect.top() + 2.0, Stroke::new(2.0, ACCENT));
-                    if ctx.input(|i| i.pointer.any_released()) {
-                        egui::DragAndDrop::clear_payload(&ctx);
-                        acts.push(Act::DropEnd(dragged));
-                    }
+            if let Some(dragged) = egui::DragAndDrop::payload::<u64>(&ctx).map(|p| *p)
+                && ctx.pointer_hover_pos().map(|p| rest.rect.contains(p)).unwrap_or(false)
+            {
+                ui.painter().hline(rest.rect.x_range(), rest.rect.top() + 2.0, Stroke::new(2.0, ACCENT));
+                if ctx.input(|i| i.pointer.any_released()) {
+                    egui::DragAndDrop::clear_payload(&ctx);
+                    acts.push(Act::DropEnd(dragged));
                 }
             }
             rest.context_menu(|ui| {
@@ -1880,10 +1863,12 @@ impl AdminApp {
     fn tree_level(&self, ui: &mut egui::Ui, parent: Option<u64>, depth: usize, acts: &mut Vec<Act>) {
         for id in self.store.children(parent) {
             self.tree_row(ui, id, depth, acts, false);
-            if let Some(e) = self.store.get(id) {
-                if e.folder && e.expanded && depth < 32 {
-                    self.tree_level(ui, Some(id), depth + 1, acts);
-                }
+            if let Some(e) = self.store.get(id)
+                && e.folder
+                && e.expanded
+                && depth < 32
+            {
+                self.tree_level(ui, Some(id), depth + 1, acts);
             }
         }
     }
@@ -1891,7 +1876,7 @@ impl AdminApp {
     fn tree_row(&self, ui: &mut egui::Ui, id: u64, depth: usize, acts: &mut Vec<Act>, flat: bool) {
         let Some(e) = self.store.get(id) else { return };
         let selected = self.selected == Some(id);
-        let status = self.status.lock().unwrap().get(&id).copied();
+        let status = self.status.lock().unwrap_or_else(|e| e.into_inner()).get(&id).copied();
         let row = ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.add_space(depth as f32 * 16.0);
@@ -1929,21 +1914,19 @@ impl AdminApp {
             if resp.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             }
-            if flat {
-                if let Some(p) = e.parent {
-                    ui.weak(self.store.path_of(p));
-                }
+            if flat && let Some(p) = e.parent {
+                ui.weak(self.store.path_of(p));
             }
-            if !e.folder {
-                if let Some(s) = status {
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(10.0, 18.0), Sense::hover());
-                    let col = match s {
-                        Some(true) => OK_GREEN,
-                        Some(false) => BAD_RED,
-                        None => Color32::GRAY,
-                    };
-                    ui.painter().circle_filled(r.center(), 4.0, col);
-                }
+            if !e.folder
+                && let Some(s) = status
+            {
+                let (r, _) = ui.allocate_exact_size(Vec2::new(10.0, 18.0), Sense::hover());
+                let col = match s {
+                    Some(true) => OK_GREEN,
+                    Some(false) => BAD_RED,
+                    None => Color32::GRAY,
+                };
+                ui.painter().circle_filled(r.center(), 4.0, col);
             }
             let resp = if e.folder {
                 resp
@@ -2104,43 +2087,43 @@ impl AdminApp {
         });
         // drop target: upper quarter = before, lower quarter = after, middle of a folder = into
         let ctx = ui.ctx().clone();
-        if let Some(dragged) = egui::DragAndDrop::payload::<u64>(&ctx).map(|p| *p) {
-            if dragged != id {
-                let rect = row.response.rect;
-                if let Some(pos) = ctx.pointer_hover_pos().filter(|p| rect.contains(*p)) {
-                    let f = (pos.y - rect.top()) / rect.height().max(1.0);
-                    let where_ = if e.folder {
-                        if f < 0.25 {
-                            DropPos::Before
-                        } else if f > 0.75 {
-                            DropPos::After
-                        } else {
-                            DropPos::Into
-                        }
-                    } else if f < 0.5 {
+        if let Some(dragged) = egui::DragAndDrop::payload::<u64>(&ctx).map(|p| *p)
+            && dragged != id
+        {
+            let rect = row.response.rect;
+            if let Some(pos) = ctx.pointer_hover_pos().filter(|p| rect.contains(*p)) {
+                let f = (pos.y - rect.top()) / rect.height().max(1.0);
+                let where_ = if e.folder {
+                    if f < 0.25 {
                         DropPos::Before
-                    } else {
+                    } else if f > 0.75 {
                         DropPos::After
-                    };
-                    let blocked = self.store.get(dragged).map(|d| d.folder && (id == dragged || self.store.is_descendant(id, dragged))).unwrap_or(true);
-                    if !blocked {
-                        let painter = ui.painter();
-                        let stroke = Stroke::new(2.0, ACCENT);
-                        match where_ {
-                            DropPos::Before => {
-                                painter.hline(rect.x_range(), rect.top(), stroke);
-                            }
-                            DropPos::After => {
-                                painter.hline(rect.x_range(), rect.bottom(), stroke);
-                            }
-                            DropPos::Into => {
-                                painter.rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
-                            }
+                    } else {
+                        DropPos::Into
+                    }
+                } else if f < 0.5 {
+                    DropPos::Before
+                } else {
+                    DropPos::After
+                };
+                let blocked = self.store.get(dragged).map(|d| d.folder && (id == dragged || self.store.is_descendant(id, dragged))).unwrap_or(true);
+                if !blocked {
+                    let painter = ui.painter();
+                    let stroke = Stroke::new(2.0, ACCENT);
+                    match where_ {
+                        DropPos::Before => {
+                            painter.hline(rect.x_range(), rect.top(), stroke);
                         }
-                        if ctx.input(|i| i.pointer.any_released()) {
-                            egui::DragAndDrop::clear_payload(&ctx);
-                            acts.push(Act::Drop(dragged, id, where_));
+                        DropPos::After => {
+                            painter.hline(rect.x_range(), rect.bottom(), stroke);
                         }
+                        DropPos::Into => {
+                            painter.rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
+                        }
+                    }
+                    if ctx.input(|i| i.pointer.any_released()) {
+                        egui::DragAndDrop::clear_payload(&ctx);
+                        acts.push(Act::Drop(dragged, id, where_));
                     }
                 }
             }
@@ -2163,12 +2146,8 @@ impl AdminApp {
             self.selected = None;
             return;
         };
-        let folders: Vec<(u64, String)> = self
-            .store
-            .folders()
-            .into_iter()
-            .filter(|(fid, _)| *fid != id && !self.store.is_descendant(*fid, id))
-            .collect();
+        let folders: Vec<(u64, String)> =
+            self.store.folders().into_iter().filter(|(fid, _)| *fid != id && !self.store.is_descendant(*fid, id)).collect();
         let path = self.store.path_of(id);
         let inherited = self.store.data.entries[idx].parent.map(|p| self.store.credentials(p));
         let mut e = self.store.data.entries[idx].clone();
@@ -2379,9 +2358,9 @@ impl AdminApp {
                 });
                 if e.folder {
                     ui.weak(tr("User, domain and password apply to all connections in this folder that have nothing of their own."));
-                } else if e.inherit_credentials {
-                    if let Some((u, d, p)) = &inherited {
-                        if (e.username.is_empty() && !u.is_empty()) || (e.domain.is_empty() && !d.is_empty()) || (e.password.is_empty() && !p.is_empty()) {
+                } else if e.inherit_credentials
+                    && let Some((u, d, p)) = &inherited
+                        && ((e.username.is_empty() && !u.is_empty()) || (e.domain.is_empty() && !d.is_empty()) || (e.password.is_empty() && !p.is_empty())) {
                             let mut parts = Vec::new();
                             if e.username.is_empty() && !u.is_empty() {
                                 parts.push(tf("user {0}", &[&u]));
@@ -2394,8 +2373,6 @@ impl AdminApp {
                             }
                             ui.label(RichText::new(tf("From the folder: {0}", &[&(parts.join(", "))])).italics().color(ACCENT));
                         }
-                    }
-                }
             }
 
             if !e.folder {
@@ -2590,10 +2567,8 @@ impl AdminApp {
             self.kp_dialog = true;
             self.kp_msg = None;
         }
-        if kp_save {
-            if let Some(e) = self.store.data.entries.get(idx) {
-                self.kp_save = Some((e.id, String::new(), None));
-            }
+        if kp_save && let Some(e) = self.store.data.entries.get(idx) {
+            self.kp_save = Some((e.id, String::new(), None));
         }
         if open_settings {
             self.open_settings();
@@ -2637,15 +2612,15 @@ impl AdminApp {
                             ui.horizontal(|ui| {
                                 let (r, _) = ui.allocate_exact_size(Vec2::new(8.0, 14.0), Sense::hover());
                                 let mut dot = tab.color;
-                                if let TabKind::Term(t) = &tab.kind {
-                                    if t.term.as_ref().map(|x| x.exited.is_some()).unwrap_or(true) {
-                                        dot = Color32::GRAY;
-                                    }
+                                if let TabKind::Term(t) = &tab.kind
+                                    && t.term.as_ref().map(|x| x.exited.is_some()).unwrap_or(true)
+                                {
+                                    dot = Color32::GRAY;
                                 }
-                                if let TabKind::Proc(p) = &tab.kind {
-                                    if p.exited.is_some() {
-                                        dot = Color32::GRAY;
-                                    }
+                                if let TabKind::Proc(p) = &tab.kind
+                                    && p.exited.is_some()
+                                {
+                                    dot = Color32::GRAY;
                                 }
                                 ui.painter().circle_filled(r.center(), 4.0, dot);
                                 if let Some((rid, text)) = self.rename_tab.as_mut().filter(|(rid, _)| *rid == tab.id) {
@@ -2657,7 +2632,8 @@ impl AdminApp {
                                         rename_done = Some((*rid, Some(text.clone())));
                                     }
                                 } else {
-                                    let text = if active { RichText::new(&tab.title).strong().color(Color32::WHITE) } else { RichText::new(&tab.title) };
+                                    let text =
+                                        if active { RichText::new(&tab.title).strong().color(Color32::WHITE) } else { RichText::new(&tab.title) };
                                     let r = ui.add(egui::Label::new(text).sense(Sense::click_and_drag()).truncate());
                                     if r.clicked() {
                                         self.active = i;
@@ -2730,18 +2706,18 @@ impl AdminApp {
             self.rename_tab = Some(r);
         }
         if let Some((id, text)) = rename_done {
-            if let Some(text) = text.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
-                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
-                    tab.title = text;
-                }
+            if let Some(text) = text.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+                && let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id)
+            {
+                tab.title = text;
             }
             self.rename_tab = None;
         }
         if let Some(i) = close {
-            if let TabKind::Term(t) = &mut self.tabs[i].kind {
-                if let Some(term) = &mut t.term {
-                    term.kill();
-                }
+            if let TabKind::Term(t) = &mut self.tabs[i].kind
+                && let Some(term) = &mut t.term
+            {
+                term.kill();
             }
             if let TabKind::Ping(p) = &mut self.tabs[i].kind {
                 p.runner.stop();
@@ -2749,15 +2725,15 @@ impl AdminApp {
             if let TabKind::Proc(p) = &mut self.tabs[i].kind {
                 stop_proc(p);
             }
-            if let TabKind::NetScan(n) = &self.tabs[i].kind {
-                if let Some(s) = &n.scan {
-                    s.cancel();
-                }
+            if let TabKind::NetScan(n) = &self.tabs[i].kind
+                && let Some(s) = &n.scan
+            {
+                s.cancel();
             }
-            if let TabKind::Scan(s) = &self.tabs[i].kind {
-                if let Some(sc) = &s.scan {
-                    sc.cancel();
-                }
+            if let TabKind::Scan(s) = &self.tabs[i].kind
+                && let Some(sc) = &s.scan
+            {
+                sc.cancel();
             }
             self.tabs.remove(i);
             if self.active >= i && self.active > 0 {
@@ -2960,12 +2936,11 @@ impl AdminApp {
                 if i == active {
                     continue;
                 }
-                if let TabKind::Term(x) = &mut tab.kind {
-                    if x.broadcast {
-                        if let Some(term) = &mut x.term {
-                            term.send(&bytes);
-                        }
-                    }
+                if let TabKind::Term(x) = &mut tab.kind
+                    && x.broadcast
+                    && let Some(term) = &mut x.term
+                {
+                    term.send(&bytes);
                 }
             }
         }
@@ -2979,10 +2954,10 @@ impl AdminApp {
             match a {
                 TunnelAct::Start(id, idx) => self.start_tunnel(id, idx, now),
                 TunnelAct::Stop(id, idx) => {
-                    if let Some(mut r) = self.tunnels.remove(&(id, idx)) {
-                        if let Some(mut c) = r.child.take() {
-                            let _ = c.kill();
-                        }
+                    if let Some(mut r) = self.tunnels.remove(&(id, idx))
+                        && let Some(mut c) = r.child.take()
+                    {
+                        let _ = c.kill();
                     }
                 }
             }
@@ -2994,7 +2969,13 @@ impl AdminApp {
                         Some(f) => f,
                         None => {
                             let fid = self.store.next_id();
-                            self.store.data.entries.push(Entry { id: fid, folder: true, name: tr("Network scan").into(), inherit_credentials: false, ..Default::default() });
+                            self.store.data.entries.push(Entry {
+                                id: fid,
+                                folder: true,
+                                name: tr("Network scan").into(),
+                                inherit_credentials: false,
+                                ..Default::default()
+                            });
                             fid
                         }
                     };
@@ -3021,7 +3002,14 @@ impl AdminApp {
                     self.note(tf("Connection created: {0}", &[&h.ip]), false, now);
                 }
                 NetScanAct::Connect(h, proto) => {
-                    let e = Entry { name: h.ip.to_string(), protocol: proto, host: h.ip.to_string(), port: proto.default_port(), inherit_credentials: false, ..Default::default() };
+                    let e = Entry {
+                        name: h.ip.to_string(),
+                        protocol: proto,
+                        host: h.ip.to_string(),
+                        port: proto.default_port(),
+                        inherit_credentials: false,
+                        ..Default::default()
+                    };
                     self.open_session(e, Creds::default(), Vec::new(), &ctx, now);
                 }
             }
@@ -3043,7 +3031,9 @@ impl AdminApp {
                 StartAct::Status => self.check_status(&ctx),
                 StartAct::Tools => launch::open_folder(&programs::ensure_tools_dir()),
                 StartAct::NetScan => self.open_netscan(String::new()),
-                StartAct::Subnet => self.add_tab(tr("Subnet calculator").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab::default())),
+                StartAct::Subnet => {
+                    self.add_tab(tr("Subnet calculator").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab::default()))
+                }
                 StartAct::Cert => self.open_cert(String::new()),
                 StartAct::Tunnels => self.open_tunnels(),
                 StartAct::Help(topic) => self.open_help(topic),
@@ -3164,7 +3154,8 @@ impl AdminApp {
                             if *ok {
                                 ui.label(RichText::new(prog).weak());
                             } else {
-                                ui.label(RichText::new(tr("missing")).color(WARN)).on_hover_text(tf("Install or put into the programs folder: {0}", &[&prog]));
+                                ui.label(RichText::new(tr("missing")).color(WARN))
+                                    .on_hover_text(tf("Install or put into the programs folder: {0}", &[&prog]));
                             }
                             ui.end_row();
                         }
@@ -3266,7 +3257,13 @@ impl AdminApp {
                 let (user, _, _) = self.store.credentials(id);
                 let url = self.store.get(id).map(crate::kdbx::url_of).unwrap_or_default();
                 let s = self.store.data.settings.clone();
-                match self.keepass.key.clone().ok_or_else(|| tr("Unlock KeePass first").to_string()).and_then(|k| crate::kdbx::store_password(&s.keepass_path, &k, &name, &user, &pw, &url).map(|p| (k, p))) {
+                match self
+                    .keepass
+                    .key
+                    .clone()
+                    .ok_or_else(|| tr("Unlock KeePass first").to_string())
+                    .and_then(|k| crate::kdbx::store_password(&s.keepass_path, &k, &name, &user, &pw, &url).map(|p| (k, p)))
+                {
                     Ok((k, path)) => {
                         if let Some(i) = self.store.index_of(id) {
                             self.store.data.entries[i].keepass_entry = path.clone();
@@ -3296,7 +3293,11 @@ impl AdminApp {
                 } else {
                     ui.label(tr("Database:"));
                 }
-                ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Vault\Passwords.kdbx").desired_width(f32::INFINITY));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path)
+                        .hint_text(r"D:\Vault\Passwords.kdbx")
+                        .desired_width(f32::INFINITY),
+                );
                 ui.label(tr("Key file (optional):"));
                 ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_keyfile).desired_width(f32::INFINITY));
                 ui.label(tr("Master password of the KeePass database:"));
@@ -3372,9 +3373,9 @@ impl AdminApp {
                     });
                 });
             }
-            match result {
-                Some(true) => {
-                    let a = self.ask.take().unwrap();
+            match (result, if result == Some(true) { self.ask.take() } else { None }) {
+                (Some(true), None) => {}
+                (Some(true), Some(a)) => {
                     if a.key == 0 {
                         let c = Creds { user: a.user.clone(), domain: String::new(), password: a.pw.clone() };
                         let mut e = a.pending.entry.clone();
@@ -3385,8 +3386,8 @@ impl AdminApp {
                         self.start(a.pending.entry.id, a.pending.how, ctx, now);
                     }
                 }
-                Some(false) => self.ask = None,
-                None => {}
+                (Some(false), _) => self.ask = None,
+                (None, _) => {}
             }
         }
 
@@ -3519,7 +3520,8 @@ impl AdminApp {
                 r.request_focus();
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if self.unlock_failed {
-                    let why = if kp { self.store.last_error.clone().unwrap_or_else(|| tr("Wrong password.").into()) } else { tr("Wrong password.").into() };
+                    let why =
+                        if kp { self.store.last_error.clone().unwrap_or_else(|| tr("Wrong password.").into()) } else { tr("Wrong password.").into() };
                     ui.label(RichText::new(why).color(BAD_RED));
                 }
                 ui.horizontal(|ui| {
@@ -3556,7 +3558,11 @@ impl AdminApp {
         let shown = if self.store.data.settings.language.is_empty() {
             tf("System language ({0})", &[&crate::i18n::current()])
         } else {
-            langs.iter().find(|l| l.code == self.store.data.settings.language).map(|l| l.name.clone()).unwrap_or_else(|| self.store.data.settings.language.clone())
+            langs
+                .iter()
+                .find(|l| l.code == self.store.data.settings.language)
+                .map(|l| l.name.clone())
+                .unwrap_or_else(|| self.store.data.settings.language.clone())
         };
         ui.horizontal(|ui| {
             let mut pick: Option<String> = None;
@@ -3565,7 +3571,11 @@ impl AdminApp {
                     pick = Some(String::new());
                 }
                 for l in &langs {
-                    if ui.selectable_label(self.store.data.settings.language == l.code, format!("{} ({})", l.name, l.code)).on_hover_text(if l.source == "built in" { tr("built in") } else { l.source.as_str() }).clicked() {
+                    if ui
+                        .selectable_label(self.store.data.settings.language == l.code, format!("{} ({})", l.name, l.code))
+                        .on_hover_text(if l.source == "built in" { tr("built in") } else { l.source.as_str() })
+                        .clicked()
+                    {
                         pick = Some(l.code.clone());
                     }
                 }
@@ -3585,7 +3595,11 @@ impl AdminApp {
         ui.horizontal(|ui| {
             ui.label(tf("This is AdminCraft {0}.", &[&env!("CARGO_PKG_VERSION")]));
             let busy = self.update_result.as_ref().is_some_and(|r| r.lock().map(|g| g.is_none()).unwrap_or(false));
-            if ui.add_enabled(!busy, egui::Button::new(tr("Check for updates"))).on_hover_text(tr("Asks GitHub for the newest release. Nothing is downloaded by itself.")).clicked() {
+            if ui
+                .add_enabled(!busy, egui::Button::new(tr("Check for updates")))
+                .on_hover_text(tr("Asks GitHub for the newest release. Nothing is downloaded by itself."))
+                .clicked()
+            {
                 let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
                 let s2 = slot.clone();
                 let pre = self.store.data.settings.update_include_pre;
@@ -3611,10 +3625,10 @@ impl AdminApp {
                     let newer = matches!(o, crate::update::Outcome::Newer(_));
                     let text = RichText::new(crate::update::describe(&o));
                     ui.label(if newer { text.color(OK_GREEN).strong() } else { text });
-                    if let crate::update::Outcome::Newer(r) = &o {
-                        if ui.button(tr("Open download page")).clicked() {
-                            let _ = launch::open_url(if r.url.is_empty() { &self.releases_url } else { &r.url });
-                        }
+                    if let crate::update::Outcome::Newer(r) = &o
+                        && ui.button(tr("Open download page")).clicked()
+                    {
+                        let _ = launch::open_url(if r.url.is_empty() { &self.releases_url } else { &r.url });
                     }
                 });
             }
@@ -3632,7 +3646,10 @@ impl AdminApp {
         ui.add_enabled_ui(self.store.data.settings.agent_control, |ui| {
             changed |= ui.checkbox(&mut self.store.data.settings.agent_typing, tr("… and may type into terminal tabs")).changed();
             if self.store.data.settings.agent_typing {
-                ui.colored_label(Color32::from_rgb(255, 183, 77), tr("Careful: an agent can then run commands on your servers. Every typing is shown in the window."));
+                ui.colored_label(
+                    Color32::from_rgb(255, 183, 77),
+                    tr("Careful: an agent can then run commands on your servers. Every typing is shown in the window."),
+                );
             }
         });
         ui.horizontal(|ui| {
@@ -3655,9 +3672,7 @@ impl AdminApp {
             changed |= ui.radio_value(&mut self.store.data.settings.dark, true, tr("Dark")).changed();
             changed |= ui.radio_value(&mut self.store.data.settings.dark, false, tr("Light")).changed();
         });
-        changed |= ui
-            .add(egui::Slider::new(&mut self.store.data.settings.terminal_font_size, 10.0..=24.0).text(tr("Terminal font size")))
-            .changed();
+        changed |= ui.add(egui::Slider::new(&mut self.store.data.settings.terminal_font_size, 10.0..=24.0).text(tr("Terminal font size"))).changed();
         changed |= ui
             .checkbox(&mut self.store.data.settings.auto_password, tr("Type the stored password in the terminal automatically (SSH/Telnet)"))
             .changed();
@@ -3723,7 +3738,11 @@ impl AdminApp {
                     }
                 }
                 let entry = self.store.data.settings.programs.entry(p.key.to_string()).or_default();
-                let r = ui.add(egui::TextEdit::singleline(entry).hint_text(format!("{}{}", p.names[0], if cfg!(windows) { ".exe" } else { "" })).desired_width(260.0));
+                let r = ui.add(
+                    egui::TextEdit::singleline(entry)
+                        .hint_text(format!("{}{}", p.names[0], if cfg!(windows) { ".exe" } else { "" }))
+                        .desired_width(260.0),
+                );
                 if r.changed() {
                     changed = true;
                 }
@@ -3742,11 +3761,15 @@ impl AdminApp {
         }
 
         section_help(ui, tr("Password vault: KeePass"), crate::help::Topic::Passwords, &mut self.help_request);
-        ui.label(tr("Connections can take their password from a KeePass/KeePassXC database (.kdbx): choose \"Password from » KeePass\" on a connection."));
+        ui.label(tr(
+            "Connections can take their password from a KeePass/KeePassXC database (.kdbx): choose \"Password from » KeePass\" on a connection.",
+        ));
         egui::Grid::new("kp").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Database (.kdbx)"));
             changed |= ui
-                .add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Vault\Passwords.kdbx").desired_width(380.0))
+                .add(
+                    egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Vault\Passwords.kdbx").desired_width(380.0),
+                )
                 .changed();
             ui.end_row();
             ui.label(tr("Key file"));
@@ -3773,7 +3796,11 @@ impl AdminApp {
         if self.store.kdbx_mode() {
             ui.label(RichText::new(tr("The connection list is kept in this KeePass database (group \"AdminCraft\").")).color(OK_GREEN));
             ui.weak(tr("Every connection is a KeePass entry: title, user, password, URL and notes can also be changed in KeePass or KeePassXC; AdminCraft reloads them."));
-            if ui.button(tr("Back to AdminCraft's own list")).on_hover_text(tr("The connections are copied into AdminCraft's file; the KeePass database stays as it is.")).clicked() {
+            if ui
+                .button(tr("Back to AdminCraft's own list"))
+                .on_hover_text(tr("The connections are copied into AdminCraft's file; the KeePass database stays as it is."))
+                .clicked()
+            {
                 self.store.stop_using_keepass();
                 self.note(tr("Connections are kept in AdminCraft's own list again."), false, now);
             }
@@ -3782,18 +3809,19 @@ impl AdminApp {
                 let can = self.keepass.unlocked && self.keepass.key.is_some() && !self.store.data.settings.keepass_path.trim().is_empty();
                 if ui
                     .add_enabled(can, egui::Button::new(tr("Keep the connection list in KeePass")))
-                    .on_hover_text(tr("Connections become KeePass entries in the group \"AdminCraft\": one place for all passwords, editable in KeePass too."))
+                    .on_hover_text(tr(
+                        "Connections become KeePass entries in the group \"AdminCraft\": one place for all passwords, editable in KeePass too.",
+                    ))
                     .on_disabled_hover_text(tr("Set the database and unlock it first."))
                     .clicked()
+                    && let Some(key) = self.keepass.key.clone()
                 {
-                    if let Some(key) = self.keepass.key.clone() {
-                        match self.store.use_keepass(key) {
-                            Ok(msg) => {
-                                self.note(msg, false, now);
-                                self.selected = None;
-                            }
-                            Err(e) => self.note(e, true, now),
+                    match self.store.use_keepass(key) {
+                        Ok(msg) => {
+                            self.note(msg, false, now);
+                            self.selected = None;
                         }
+                        Err(e) => self.note(e, true, now),
                     }
                 }
                 ui.weak(tr("(the database must be unlocked)"));
@@ -3864,7 +3892,11 @@ impl AdminApp {
             2 => {
                 egui::Grid::new("dav").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                     ui.label(tr("Address"));
-                    ui.add(egui::TextEdit::singleline(&mut self.dav_url).desired_width(420.0).hint_text("https://cloud.firma.de/remote.php/dav/files/admin/AdminCraft/"));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.dav_url)
+                            .desired_width(420.0)
+                            .hint_text("https://cloud.firma.de/remote.php/dav/files/admin/AdminCraft/"),
+                    );
                     ui.end_row();
                     ui.label(tr("User"));
                     ui.add(egui::TextEdit::singleline(&mut self.dav_user).desired_width(220.0));
@@ -3888,9 +3920,14 @@ impl AdminApp {
         if ui.button(tr("Apply")).clicked() {
             self.store.save();
             let result = match self.storage_kind {
-                1 => crate::model::set_shared_location(&self.shared_edit, &self.store.path).and_then(|_| crate::remote::save_config(&Default::default())),
+                1 => crate::model::set_shared_location(&self.shared_edit, &self.store.path)
+                    .and_then(|_| crate::remote::save_config(&Default::default())),
                 2 => {
-                    let mut c = crate::remote::RemoteConfig { url: self.dav_url.trim().to_string(), user: self.dav_user.clone(), password_enc: String::new() };
+                    let mut c = crate::remote::RemoteConfig {
+                        url: self.dav_url.trim().to_string(),
+                        user: self.dav_user.clone(),
+                        password_enc: String::new(),
+                    };
                     c.set_password(&self.dav_pw);
                     // first time: put the current list on the server unless one is there already
                     match crate::remote::fetch(&c) {
@@ -3913,7 +3950,13 @@ impl AdminApp {
         }
         let can_seal = self.store.data.master;
         changed |= ui
-            .add_enabled(can_seal, egui::Checkbox::new(&mut self.store.data.settings.encrypt_file, tr("Encrypt the whole list with the master password (names, hosts, notes too)")))
+            .add_enabled(
+                can_seal,
+                egui::Checkbox::new(
+                    &mut self.store.data.settings.encrypt_file,
+                    tr("Encrypt the whole list with the master password (names, hosts, notes too)"),
+                ),
+            )
             .on_disabled_hover_text(tr("Set a master password below first."))
             .changed();
         ui.weak(tr("Recommended for central storage. Everyone in the team needs the same master password; alternatively passwords via KeePass."));
@@ -3960,9 +4003,7 @@ impl AdminApp {
             for p in Protocol::ALL {
                 ui.label(p.label());
                 let entry = self.store.data.settings.templates.entry(p.key().to_string()).or_default();
-                changed |= ui
-                    .add(egui::TextEdit::singleline(entry).hint_text(tr(launch::default_hint(p))).desired_width(320.0))
-                    .changed();
+                changed |= ui.add(egui::TextEdit::singleline(entry).hint_text(tr(launch::default_hint(p))).desired_width(320.0)).changed();
                 ui.end_row();
             }
         });
@@ -3971,11 +4012,11 @@ impl AdminApp {
         section(ui, tr("Storage location"));
         ui.label(self.store.path.display().to_string());
         ui.horizontal(|ui| {
-            if ui.button(tr("Open folder")).clicked() {
-                if let Some(dir) = self.store.path.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                    launch::open_folder(dir);
-                }
+            if ui.button(tr("Open folder")).clicked()
+                && let Some(dir) = self.store.path.parent()
+            {
+                let _ = std::fs::create_dir_all(dir);
+                launch::open_folder(dir);
             }
             if ui.button(tr("Repeat system check")).clicked() {
                 self.system_check = launch::system_check(&self.store.data.settings);
@@ -4009,7 +4050,7 @@ impl AdminApp {
                     let c2 = ctx.clone();
                     ctx.request_screenshot(move |img| {
                         let part = img.region(&r, Some(c2.pixels_per_point()));
-                        *slot.lock().unwrap() = Some(Arc::new(part));
+                        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(part));
                         c2.request_repaint();
                     });
                 }
@@ -4019,7 +4060,7 @@ impl AdminApp {
             self.shot_pending = Some(r);
             ctx.request_repaint();
         }
-        let got = self.shot_wait.lock().unwrap().take();
+        let got = self.shot_wait.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(img) = got {
             let [w, h] = img.size;
             ctx.copy_image((*img).clone());
@@ -4034,8 +4075,8 @@ impl AdminApp {
         // give outside programs (embedded windows) a few seconds to appear
         let waiting_embed = self.tabs.iter().any(|t| match &t.kind {
             TabKind::Proc(p) => p.want_embed && p.exited.is_none() && !p.embed.as_ref().map(|e| e.attached()).unwrap_or(false),
-            TabKind::NetScan(n) => n.scan.as_ref().map(|s| !s.state.lock().unwrap().finished).unwrap_or(false),
-            TabKind::Cert(c) => c.result.lock().unwrap().is_none(),
+            TabKind::NetScan(n) => n.scan.as_ref().map(|s| !s.state.lock().unwrap_or_else(|e| e.into_inner()).finished).unwrap_or(false),
+            TabKind::Cert(c) => c.result.lock().unwrap_or_else(|e| e.into_inner()).is_none(),
             _ => false,
         });
         let t = ctx.input(|i| i.time);
@@ -4044,11 +4085,11 @@ impl AdminApp {
             let slot = shot.image.clone();
             let c2 = ctx.clone();
             ctx.request_screenshot(move |img| {
-                *slot.lock().unwrap() = Some(img);
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(img);
                 c2.request_repaint();
             });
         }
-        let got = shot.image.lock().unwrap().take();
+        let got = shot.image.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(img) = got {
             let [w, h] = img.size;
             let mut bytes = Vec::with_capacity(w * h * 4);
@@ -4133,7 +4174,16 @@ impl eframe::App for AdminApp {
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui, now));
         egui::Panel::left("tree").resizable(true).default_size(300.0).size_range(200.0..=520.0).show(ui, |ui| self.tree_panel(ui, now));
         // remote desktops and file transfers get the whole width
-        let wide_tab = matches!(self.tabs.get(self.active).map(|t| &t.kind), Some(TabKind::Proc(_)) | Some(TabKind::Transfer(_)) | Some(TabKind::NetScan(_)) | Some(TabKind::Tunnels) | Some(TabKind::Help(_)) | Some(TabKind::Playback(_)) | Some(TabKind::Tool(_)));
+        let wide_tab = matches!(
+            self.tabs.get(self.active).map(|t| &t.kind),
+            Some(TabKind::Proc(_))
+                | Some(TabKind::Transfer(_))
+                | Some(TabKind::NetScan(_))
+                | Some(TabKind::Tunnels)
+                | Some(TabKind::Help(_))
+                | Some(TabKind::Playback(_))
+                | Some(TabKind::Tool(_))
+        );
         if self.show_props && !wide_tab {
             egui::Panel::right("props").resizable(true).default_size(340.0).size_range(260.0..=560.0).show(ui, |ui| self.props_panel(ui, now));
         }
@@ -4146,13 +4196,14 @@ impl eframe::App for AdminApp {
         self.dialogs(&ctx, now);
 
         // files dropped onto the window: upload into the open remote folder
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
-        if !dropped.is_empty() {
-            if let Some(TabKind::Transfer(t)) = self.tabs.get_mut(self.active).map(|t| &mut t.kind) {
-                let dir = t.xfer.shared.lock().unwrap().cwd.clone();
-                for p in dropped {
-                    t.xfer.send(Job::Upload { local: p, remote_dir: dir.clone() });
-                }
+        let dropped: Vec<PathBuf> =
+            ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        if !dropped.is_empty()
+            && let Some(TabKind::Transfer(t)) = self.tabs.get_mut(self.active).map(|t| &mut t.kind)
+        {
+            let dir = t.xfer.shared.lock().unwrap_or_else(|e| e.into_inner()).cwd.clone();
+            for p in dropped {
+                t.xfer.send(Job::Upload { local: p, remote_dir: dir.clone() });
             }
         }
 
@@ -4174,28 +4225,35 @@ impl eframe::App for AdminApp {
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             let TabKind::Proc(p) = &mut tab.kind else { continue };
             if p.exited.is_none() {
-                if let Some(child) = &mut p.child {
-                    if let Ok(Some(status)) = child.try_wait() {
-                        // mstsc hands over to an already running copy sometimes: keep the tab if its window is ours
-                        if !p.embed.as_ref().map(|e| e.attached()).unwrap_or(false) {
-                            p.exited = Some(if status.success() { tr("Session ended.").into() } else { tf("Program ended (code {0}).", &[&(status.code().unwrap_or(-1))]) });
-                        }
+                if let Some(child) = &mut p.child
+                    && let Ok(Some(status)) = child.try_wait()
+                {
+                    // mstsc hands over to an already running copy sometimes: keep the tab if its window is ours
+                    if !p.embed.as_ref().map(|e| e.attached()).unwrap_or(false) {
+                        p.exited = Some(if status.success() {
+                            tr("Session ended.").into()
+                        } else {
+                            tf("Program ended (code {0}).", &[&(status.code().unwrap_or(-1))])
+                        });
                     }
                 }
-                if let Some(em) = &mut p.embed {
-                    if em.lost() {
-                        p.exited = Some(tr("Window was closed.").into());
-                    }
+                if let Some(em) = &mut p.embed
+                    && em.lost()
+                {
+                    p.exited = Some(tr("Window was closed.").into());
                 }
             }
-            if p.want_embed && !p.detached && p.exited.is_none() {
-                if let (Some(em), Some(par)) = (&mut p.embed, parent) {
-                    if !em.attached() && now - p.last_try > 0.25 && now - p.started < 180.0 {
-                        p.last_try = now;
-                        if em.try_attach(par) {
-                            em.focus();
-                        }
-                    }
+            if p.want_embed
+                && !p.detached
+                && p.exited.is_none()
+                && let (Some(em), Some(par)) = (&mut p.embed, parent)
+                && !em.attached()
+                && now - p.last_try > 0.25
+                && now - p.started < 180.0
+            {
+                p.last_try = now;
+                if em.try_attach(par) {
+                    em.focus();
                 }
             }
             if let Some(em) = &mut p.embed {
@@ -4231,13 +4289,13 @@ impl eframe::App for AdminApp {
                 self.note(tr("Connection list was changed elsewhere – reloaded."), false, now);
             }
         }
-        if let Some((id, pw)) = extra::pwgen_window(&ctx, &mut self.pwgen) {
-            if let Some(i) = self.store.index_of(id) {
-                self.store.data.entries[i].password = pw;
-                self.store.data.entries[i].cred_source = CredSource::Stored;
-                self.mark_dirty(now);
-                self.note(tr("Password applied."), false, now);
-            }
+        if let Some((id, pw)) = extra::pwgen_window(&ctx, &mut self.pwgen)
+            && let Some(i) = self.store.index_of(id)
+        {
+            self.store.data.entries[i].password = pw;
+            self.store.data.entries[i].cred_source = CredSource::Stored;
+            self.mark_dirty(now);
+            self.note(tr("Password applied."), false, now);
         }
         self.power_dialog(&ctx, now);
         if !self.restored {
@@ -4259,20 +4317,20 @@ impl eframe::App for AdminApp {
         let busy = self.tabs.iter().any(|t| match &t.kind {
             TabKind::Term(t) => t.term.as_ref().map(|x| x.exited.is_none()).unwrap_or(false),
             TabKind::Ping(p) => p.runner.is_running(),
-            TabKind::Scan(s) => s.scan.as_ref().map(|x| !x.state.lock().unwrap().finished).unwrap_or(false),
+            TabKind::Scan(s) => s.scan.as_ref().map(|x| !x.state.lock().unwrap_or_else(|e| e.into_inner()).finished).unwrap_or(false),
             TabKind::Proc(p) => p.exited.is_none(),
             TabKind::Transfer(x) => x.xfer.busy(),
-            TabKind::NetScan(n) => n.scan.as_ref().map(|s| !s.state.lock().unwrap().finished).unwrap_or(false),
-            TabKind::Cert(c) => *c.busy.lock().unwrap(),
+            TabKind::NetScan(n) => n.scan.as_ref().map(|s| !s.state.lock().unwrap_or_else(|e| e.into_inner()).finished).unwrap_or(false),
+            TabKind::Cert(c) => *c.busy.lock().unwrap_or_else(|e| e.into_inner()),
             _ => false,
         });
         if busy {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
-        if let Some(t) = &self.toast {
-            if t.until > now {
-                ctx.request_repaint_after(std::time::Duration::from_millis(500));
-            }
+        if let Some(t) = &self.toast
+            && t.until > now
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
 
         if let Some(since) = self.dirty_since {
@@ -4294,7 +4352,9 @@ impl eframe::App for AdminApp {
             .filter_map(|t| match &t.kind {
                 TabKind::Term(x) if x.entry.id != 0 => Some((x.entry.id, "default".to_string())),
                 TabKind::Proc(x) if x.entry.id != 0 => Some((x.entry.id, "default".to_string())),
-                TabKind::Transfer(x) if x.entry.id != 0 => Some((x.entry.id, if x.entry.protocol.transfer() { "default" } else { "files" }.to_string())),
+                TabKind::Transfer(x) if x.entry.id != 0 => {
+                    Some((x.entry.id, if x.entry.protocol.transfer() { "default" } else { "files" }.to_string()))
+                }
                 _ => None,
             })
             .collect();
@@ -4311,15 +4371,15 @@ impl eframe::App for AdminApp {
             self.store.save();
         }
         for t in &mut self.tabs {
-            if let TabKind::Term(t) = &mut t.kind {
-                if let Some(term) = &mut t.term {
-                    term.kill();
-                }
+            if let TabKind::Term(t) = &mut t.kind
+                && let Some(term) = &mut t.term
+            {
+                term.kill();
             }
-            if let TabKind::Proc(p) = &mut t.kind {
-                if !p.detached {
-                    stop_proc(p);
-                }
+            if let TabKind::Proc(p) = &mut t.kind
+                && !p.detached
+            {
+                stop_proc(p);
             }
         }
     }
@@ -4342,9 +4402,7 @@ fn fill_snippet(cmd: &str, e: &Entry, c: &Creds) -> String {
 }
 
 fn url_enc(s: &str) -> String {
-    s.bytes()
-        .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
-        .collect()
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 fn short_client(c: SshClient) -> &'static str {
@@ -4356,12 +4414,7 @@ fn short_client(c: SshClient) -> &'static str {
 }
 
 fn default_ssh_config() -> PathBuf {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_default()
-        .join(".ssh")
-        .join("config")
+    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default().join(".ssh").join("config")
 }
 
 /// Header of a tab with an outside program; returns a reconnect request.
@@ -4386,10 +4439,11 @@ fn proc_ui(ui: &mut egui::Ui, p: &mut ProcTab, now: f64) -> (Option<(Entry, Cred
                     }
                     p.detached = true;
                 }
-                if attached && ui.button(tr("Focus")).on_hover_text(tr("Give the keyboard to the window")).clicked() {
-                    if let Some(em) = &p.embed {
-                        em.focus();
-                    }
+                if attached
+                    && ui.button(tr("Focus")).on_hover_text(tr("Give the keyboard to the window")).clicked()
+                    && let Some(em) = &p.embed
+                {
+                    em.focus();
                 }
             }
         });
@@ -4407,14 +4461,14 @@ fn proc_ui(ui: &mut egui::Ui, p: &mut ProcTab, now: f64) -> (Option<(Entry, Cred
     } else if p.want_embed {
         let secs = (now - p.started).max(0.0) as u32;
         (
-            tf("Connecting … the window will show here in the tab as soon as it appears ({0} s).\nCertificate or login questions briefly appear as their own window.", &[&secs]),
+            tf(
+                "Connecting … the window will show here in the tab as soon as it appears ({0} s).\nCertificate or login questions briefly appear as their own window.",
+                &[&secs],
+            ),
             ACCENT,
         )
     } else {
-        (
-            tr("Running in its own window. This tab shows the status; \"Disconnect\" ends the session.").to_string(),
-            ui.visuals().text_color(),
-        )
+        (tr("Running in its own window. This tab shows the status; \"Disconnect\" ends the session.").to_string(), ui.visuals().text_color())
     };
     if !msg.is_empty() {
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, msg, egui::FontId::proportional(15.0), color);
@@ -4458,7 +4512,12 @@ fn file_row(ui: &mut egui::Ui, selected: bool, is_dir: bool, name: &str, size: &
         painter.rect_filled(Rect::from_min_size(ir.min + Vec2::new(1.0, 2.0), Vec2::new(6.0, 3.0)), 1.0, c);
         painter.rect_filled(Rect::from_min_size(ir.min + Vec2::new(1.0, 4.0), Vec2::new(14.0, 10.0)), 2.0, c);
     } else {
-        painter.rect_stroke(Rect::from_min_size(ir.min + Vec2::new(3.0, 1.0), Vec2::new(10.0, 14.0)), 1.0, Stroke::new(1.0, weak), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            Rect::from_min_size(ir.min + Vec2::new(3.0, 1.0), Vec2::new(10.0, 14.0)),
+            1.0,
+            Stroke::new(1.0, weak),
+            egui::StrokeKind::Inside,
+        );
     }
     // columns: date and size on the right when there is room
     let show_date = rect.width() > 380.0;
@@ -4485,7 +4544,7 @@ fn file_row(ui: &mut egui::Ui, selected: bool, is_dir: bool, name: &str, size: &
 
 fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
     let (cwd, items, busy, queued, log, connected, local_changed) = {
-        let mut s = t.xfer.shared.lock().unwrap();
+        let mut s = t.xfer.shared.lock().unwrap_or_else(|e| e.into_inner());
         let lc = std::mem::take(&mut s.local_changed);
         (s.cwd.clone(), s.items.clone(), s.busy.clone(), s.queued, s.log.clone(), s.connected, lc)
     };
@@ -4530,10 +4589,10 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
         ui.set_min_height(pane_h);
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr("This PC")).strong());
-            if ui.small_button(tr("Up")).on_hover_text(tr("Folder up")).clicked() {
-                if let Some(p) = t.local_dir.parent() {
-                    nav_local = Some(p.to_path_buf());
-                }
+            if ui.small_button(tr("Up")).on_hover_text(tr("Folder up")).clicked()
+                && let Some(p) = t.local_dir.parent()
+            {
+                nav_local = Some(p.to_path_buf());
             }
             if cfg!(windows) {
                 egui::ComboBox::from_id_salt("drives").selected_text(tr("Drive")).width(70.0).show_ui(ui, |ui| {
@@ -4550,28 +4609,33 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
             }
         });
         egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(4).show(ui, |ui| {
-            egui::ScrollArea::vertical().id_salt("local_list").max_height(pane_h - 70.0).min_scrolled_height(pane_h - 70.0).auto_shrink([false, false]).show(ui, |ui| {
-                if let Some(e) = &t.local_err {
-                    ui.label(RichText::new(e).color(BAD_RED));
-                }
-                for it in &t.local_items {
-                    let sel = t.local_sel.contains(&it.name);
-                    let size = if it.is_dir { String::new() } else { transfer::human_size(it.size) };
-                    let (c, dc, ctrl) = file_row(ui, sel, it.is_dir, &it.name, &size, &it.modified);
-                    if dc && it.is_dir {
-                        nav_local = Some(it.path.clone());
-                    } else if c {
-                        if !ctrl {
-                            t.local_sel.clear();
-                        }
-                        if sel && ctrl {
-                            t.local_sel.remove(&it.name);
-                        } else {
-                            t.local_sel.insert(it.name.clone());
+            egui::ScrollArea::vertical()
+                .id_salt("local_list")
+                .max_height(pane_h - 70.0)
+                .min_scrolled_height(pane_h - 70.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if let Some(e) = &t.local_err {
+                        ui.label(RichText::new(e).color(BAD_RED));
+                    }
+                    for it in &t.local_items {
+                        let sel = t.local_sel.contains(&it.name);
+                        let size = if it.is_dir { String::new() } else { transfer::human_size(it.size) };
+                        let (c, dc, ctrl) = file_row(ui, sel, it.is_dir, &it.name, &size, &it.modified);
+                        if dc && it.is_dir {
+                            nav_local = Some(it.path.clone());
+                        } else if c {
+                            if !ctrl {
+                                t.local_sel.clear();
+                            }
+                            if sel && ctrl {
+                                t.local_sel.remove(&it.name);
+                            } else {
+                                t.local_sel.insert(it.name.clone());
+                            }
                         }
                     }
-                }
-            });
+                });
         });
         ui.horizontal_wrapped(|ui| {
             let n = t.local_sel.len();
@@ -4618,35 +4682,40 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
             }
         });
         egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(4).show(ui, |ui| {
-            egui::ScrollArea::vertical().id_salt("remote_list").max_height(pane_h - 70.0).min_scrolled_height(pane_h - 70.0).auto_shrink([false, false]).show(ui, |ui| {
-                if !connected {
-                    if busy.is_some() {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(tr("Connecting …"));
-                        });
-                    } else {
-                        ui.label(RichText::new(tr("Not connected – see message below. \"Refresh\" tries again.")).color(WARN));
-                    }
-                }
-                for it in items.iter().filter(|i| show_hidden || !i.name.starts_with('.')) {
-                    let sel = t.remote_sel.contains(&it.name);
-                    let size = if it.is_dir { String::new() } else { transfer::human_size(it.size) };
-                    let (c, dc, ctrl) = file_row(ui, sel, it.is_dir, &it.name, &size, &it.modified);
-                    if dc && (it.is_dir || it.is_link) {
-                        nav_remote = Some(transfer::join(&cwd, &it.name));
-                    } else if c {
-                        if !ctrl {
-                            t.remote_sel.clear();
-                        }
-                        if sel && ctrl {
-                            t.remote_sel.remove(&it.name);
+            egui::ScrollArea::vertical()
+                .id_salt("remote_list")
+                .max_height(pane_h - 70.0)
+                .min_scrolled_height(pane_h - 70.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if !connected {
+                        if busy.is_some() {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(tr("Connecting …"));
+                            });
                         } else {
-                            t.remote_sel.insert(it.name.clone());
+                            ui.label(RichText::new(tr("Not connected – see message below. \"Refresh\" tries again.")).color(WARN));
                         }
                     }
-                }
-            });
+                    for it in items.iter().filter(|i| show_hidden || !i.name.starts_with('.')) {
+                        let sel = t.remote_sel.contains(&it.name);
+                        let size = if it.is_dir { String::new() } else { transfer::human_size(it.size) };
+                        let (c, dc, ctrl) = file_row(ui, sel, it.is_dir, &it.name, &size, &it.modified);
+                        if dc && (it.is_dir || it.is_link) {
+                            nav_remote = Some(transfer::join(&cwd, &it.name));
+                        } else if c {
+                            if !ctrl {
+                                t.remote_sel.clear();
+                            }
+                            if sel && ctrl {
+                                t.remote_sel.remove(&it.name);
+                            } else {
+                                t.remote_sel.insert(it.name.clone());
+                            }
+                        }
+                    }
+                });
         });
         ui.horizontal_wrapped(|ui| {
             let n = t.remote_sel.len();
@@ -4681,7 +4750,9 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
     egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(6).show(ui, |ui| {
         egui::ScrollArea::vertical().id_salt("xfer_log").max_height(log_h - 12.0).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
             if log.is_empty() {
-                ui.weak(tr("Double-click opens folders. Select several entries with Ctrl+click. Drag files from the explorer into the window = upload."));
+                ui.weak(tr(
+                    "Double-click opens folders. Select several entries with Ctrl+click. Drag files from the explorer into the window = upload.",
+                ));
             }
             for (ok, l) in &log {
                 ui.label(RichText::new(l).small().color(if *ok { OK_GREEN } else { BAD_RED }));
@@ -4770,7 +4841,12 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
         });
     }
     if close {
-        let local = matches!(&t.dialog, Some(XferDialog::Mkdir { remote: false, .. }) | Some(XferDialog::Rename { remote: false, .. }) | Some(XferDialog::Delete { remote: false, .. }));
+        let local = matches!(
+            &t.dialog,
+            Some(XferDialog::Mkdir { remote: false, .. })
+                | Some(XferDialog::Rename { remote: false, .. })
+                | Some(XferDialog::Delete { remote: false, .. })
+        );
         t.dialog = None;
         if local {
             refresh_local(t, show_hidden);
@@ -4820,35 +4896,32 @@ fn ping_ui(ui: &mut egui::Ui, p: &mut PingTab, ctx: &egui::Context) {
         }
     });
     ui.separator();
-    output_box(ui, &p.runner.lines.lock().unwrap());
+    output_box(ui, &p.runner.lines.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
 fn output_box(ui: &mut egui::Ui, lines: &[String]) {
-    egui::Frame::new()
-        .fill(ui.visuals().extreme_bg_color)
-        .corner_radius(4.0)
-        .inner_margin(8)
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
-                if lines.is_empty() {
-                    ui.weak(tr("Enter a host and press Start."));
-                }
-                for l in lines {
-                    let color = if l.contains("TTL=") || l.contains("ttl=") || l.contains("Antwort von") || l.contains("bytes from") {
-                        OK_GREEN
-                    } else if l.contains("Zeitüberschreitung") || l.contains("timed out") || l.contains("nicht erreichbar") || l.contains("unreachable") {
-                        BAD_RED
-                    } else {
-                        ui.visuals().text_color()
-                    };
-                    ui.label(RichText::new(l).monospace().color(color));
-                }
-            });
+    egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(8).show(ui, |ui| {
+        egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
+            if lines.is_empty() {
+                ui.weak(tr("Enter a host and press Start."));
+            }
+            for l in lines {
+                let color = if l.contains("TTL=") || l.contains("ttl=") || l.contains("Antwort von") || l.contains("bytes from") {
+                    OK_GREEN
+                } else if l.contains("Zeitüberschreitung") || l.contains("timed out") || l.contains("nicht erreichbar") || l.contains("unreachable")
+                {
+                    BAD_RED
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.label(RichText::new(l).monospace().color(color));
+            }
         });
+    });
 }
 
 fn scan_ui(ui: &mut egui::Ui, s: &mut ScanTab, ctx: &egui::Context) {
-    let running = s.scan.as_ref().map(|x| !x.state.lock().unwrap().finished).unwrap_or(false);
+    let running = s.scan.as_ref().map(|x| !x.state.lock().unwrap_or_else(|e| e.into_inner()).finished).unwrap_or(false);
     egui::Grid::new("scan_form").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
         ui.label(tr("Host"));
         ui.add(egui::TextEdit::singleline(&mut s.host).desired_width(260.0).hint_text(tr("Name or IP")));
@@ -4873,10 +4946,10 @@ fn scan_ui(ui: &mut egui::Ui, s: &mut ScanTab, ctx: &egui::Context) {
     });
     ui.horizontal(|ui| {
         if running {
-            if ui.button(tr("Cancel")).clicked() {
-                if let Some(sc) = &s.scan {
-                    sc.cancel();
-                }
+            if ui.button(tr("Cancel")).clicked()
+                && let Some(sc) = &s.scan
+            {
+                sc.cancel();
             }
         } else if ui.add(egui::Button::new(RichText::new(tr("Scan")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
             match tools::parse_ports(&s.ports) {
@@ -4894,7 +4967,7 @@ fn scan_ui(ui: &mut egui::Ui, s: &mut ScanTab, ctx: &egui::Context) {
     });
     ui.separator();
     if let Some(sc) = &s.scan {
-        let st = sc.state.lock().unwrap();
+        let st = sc.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(err) = &st.error {
             ui.label(RichText::new(err).color(BAD_RED));
             return;
@@ -4944,7 +5017,7 @@ fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
     let server = d.server.trim().to_string();
     if d.rtype == "A" || d.rtype == "AAAA" {
         let slot = d.result.clone();
-        *slot.lock().unwrap() = None;
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let c2 = ctx.clone();
         let h2 = host.clone();
         let want_v6 = d.rtype == "AAAA";
@@ -4954,11 +5027,11 @@ fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
                 ips.dedup();
                 ips
             });
-            *slot.lock().unwrap() = Some(r);
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
             c2.request_repaint();
         });
     } else {
-        *d.result.lock().unwrap() = None;
+        *d.result.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
     // reverse lookups need the PTR name; nslookup does that by itself for an IP
     let rtype = if d.rtype == "PTR" { "PTR".to_string() } else { d.rtype.clone() };
@@ -5014,7 +5087,7 @@ fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
         dns_query(d, ctx);
     }
     ui.separator();
-    if let Some(r) = d.result.lock().unwrap().as_ref() {
+    if let Some(r) = d.result.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         match r {
             Ok(ips) => {
                 ui.label(RichText::new(tr("Addresses")).strong());
@@ -5034,7 +5107,7 @@ fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
         ui.add_space(8.0);
     }
     ui.label(RichText::new(tf("Answer ({0} records)", &[&d.rtype])).strong());
-    output_box(ui, &d.runner.lines.lock().unwrap());
+    output_box(ui, &d.runner.lines.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
 fn wol_ui(ui: &mut egui::Ui, w: &mut WolTab) {

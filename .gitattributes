@@ -7,3 +7,6 @@
 *.cmd text eol=crlf
 *.png binary
 *.exe binary
+*.yml text eol=lf
+NOTICE text eol=lf
+Cargo.lock text eol=lf
