@@ -3,7 +3,7 @@
 //! Nothing here ever returns a password; opening a connection starts the normal window.
 
 use crate::model::{Entry, Store};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -121,7 +121,11 @@ fn port_scan(host: &str, ports: &[u16], timeout: Duration) -> Result<Value, Stri
         let chunks: Vec<Vec<u16>> = ports.chunks(ports.len().div_ceil(64).max(1)).map(|c| c.to_vec()).collect();
         let hs: Vec<_> = chunks
             .into_iter()
-            .map(|c| sc.spawn(move || c.into_iter().filter(|&p| TcpStream::connect_timeout(&SocketAddr::new(addr, p), timeout).is_ok()).collect::<Vec<u16>>()))
+            .map(|c| {
+                sc.spawn(move || {
+                    c.into_iter().filter(|&p| TcpStream::connect_timeout(&SocketAddr::new(addr, p), timeout).is_ok()).collect::<Vec<u16>>()
+                })
+            })
             .collect();
         let mut v: Vec<u16> = hs.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect();
         v.sort_unstable();
@@ -178,10 +182,10 @@ pub fn call(name: &str, args: &Value) -> Result<Value, String> {
             let timeout = args.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(700).clamp(100, 5000);
             let scan = crate::netscan::NetScan::start(targets, ports, timeout, true, eframe::egui::Context::default());
             let t0 = std::time::Instant::now();
-            while !scan.state.lock().unwrap().finished && t0.elapsed().as_secs() < 600 {
+            while !scan.state.lock().unwrap_or_else(|e| e.into_inner()).finished && t0.elapsed().as_secs() < 600 {
                 std::thread::sleep(Duration::from_millis(100));
             }
-            let st = scan.state.lock().unwrap();
+            let st = scan.state.lock().unwrap_or_else(|e| e.into_inner());
             let saved = crate::netscan::load(range);
             let changes: Vec<Value> = match &saved {
                 Some(sv) => crate::netscan::diff(&st.hosts, &sv.hosts)
@@ -274,7 +278,10 @@ pub fn cli(args: &[String]) -> i32 {
             let (cmd, params) = match a(1).as_str() {
                 "tabs" | "" => ("list_tabs".to_string(), json!({})),
                 "read" => ("read_tab".to_string(), json!({"index": idx(a(2))})),
-                "type" => ("type_text".to_string(), json!({"index": idx(a(2)), "text": args.get(3..).map(|x| x.join(" ")).unwrap_or_default(), "enter": true})),
+                "type" => (
+                    "type_text".to_string(),
+                    json!({"index": idx(a(2)), "text": args.get(3..).map(|x| x.join(" ")).unwrap_or_default(), "enter": true}),
+                ),
                 "switch" => ("switch_tab".to_string(), json!({"index": idx(a(2))})),
                 "close" => ("close_tab".to_string(), json!({"index": idx(a(2))})),
                 "tool" => ("open_tool".to_string(), json!({"tool": a(2), "target": a(3)})),

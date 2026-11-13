@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Never crash (AGENTS.md): non-test code returns errors instead of panicking.
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod admintools;
 mod agent;
@@ -7,43 +9,35 @@ mod control;
 mod embed;
 mod extra;
 mod help;
-mod netscan;
-mod nettools;
-mod playback;
 mod i18n;
 mod import;
 mod kdbx;
 mod keepass_vault;
 mod launch;
 mod model;
+mod netscan;
+mod nettools;
+mod playback;
 mod programs;
 mod remote;
 mod sharing;
 mod terminal;
+#[cfg(test)]
+mod tests;
+mod timefmt;
 mod tools;
 mod tooltabs;
 mod transfer;
 mod update;
-#[cfg(test)]
-mod tests;
+mod winconsole;
+mod wincred;
 
 use eframe::egui;
 
 /// The program icon / logo (honey badger, rounded square, 256 px).
 pub const LOGO_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
 
-/// The release build is a window program; started from a terminal, its text output goes to
-/// that terminal (unless it is already redirected, e.g. to a pipe).
-fn attach_console() {
-    #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::System::Console::{AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_OUTPUT_HANDLE};
-        let h = GetStdHandle(STD_OUTPUT_HANDLE);
-        if h.is_null() || h as isize == -1 {
-            AttachConsole(ATTACH_PARENT_PROCESS);
-        }
-    }
-}
+use winconsole::attach as attach_console;
 
 fn window_icon() -> Option<egui::IconData> {
     let img = image::load_from_memory(LOGO_PNG).ok()?.to_rgba8();
@@ -83,10 +77,10 @@ fn main() -> eframe::Result<()> {
                     let ports = tools::parse_ports(netscan::DEFAULT_PORTS).unwrap_or_default();
                     let scan = netscan::NetScan::start(targets, ports, 700, true, ctx);
                     let t0 = std::time::Instant::now();
-                    while !scan.state.lock().unwrap().finished && t0.elapsed().as_secs() < 120 {
+                    while !scan.state.lock().unwrap_or_else(|e| e.into_inner()).finished && t0.elapsed().as_secs() < 120 {
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
-                    let st = scan.state.lock().unwrap();
+                    let st = scan.state.lock().unwrap_or_else(|e| e.into_inner());
                     let mut r = format!("finished={} total={} found={} secs={:.1}\n", st.finished, st.total, st.hosts.len(), st.seconds);
                     for h in &st.hosts {
                         r.push_str(&format!("{} name={} mac={} rtt={:?} ports={:?}\n", h.ip, h.name, h.mac, h.rtt_ms, h.ports));
@@ -109,16 +103,9 @@ fn main() -> eframe::Result<()> {
         eprintln!("[admincraft] start");
     }
     let args: Vec<String> = std::env::args().collect();
-    let screenshot = args
-        .iter()
-        .position(|a| a == "--screenshot")
-        .and_then(|i| args.get(i + 1))
-        .map(std::path::PathBuf::from);
+    let screenshot = args.iter().position(|a| a == "--screenshot").and_then(|i| args.get(i + 1)).map(std::path::PathBuf::from);
 
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title("AdminCraft")
-        .with_inner_size([1360.0, 820.0])
-        .with_min_inner_size([900.0, 560.0]);
+    let mut viewport = egui::ViewportBuilder::default().with_title("AdminCraft").with_inner_size([1360.0, 820.0]).with_min_inner_size([900.0, 560.0]);
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
     }
@@ -141,9 +128,5 @@ fn main() -> eframe::Result<()> {
     #[cfg(not(target_os = "macos"))]
     let _ = &mut options;
 
-    eframe::run_native(
-        "AdminCraft",
-        options,
-        Box::new(move |cc| Ok(Box::new(app::AdminApp::new(cc, screenshot)))),
-    )
+    eframe::run_native("AdminCraft", options, Box::new(move |cc| Ok(Box::new(app::AdminApp::new(cc, screenshot)))))
 }

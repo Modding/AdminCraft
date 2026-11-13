@@ -46,11 +46,7 @@ pub fn whois(query: &str, timeout: Duration) -> Result<WhoisResult, String> {
     if query.len() > 255 || query.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(tr("The query must be a single domain name or IP address.").to_string());
     }
-    let ip: Option<IpAddr> = query
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .ok();
+    let ip: Option<IpAddr> = query.trim_start_matches('[').trim_end_matches(']').parse().ok();
     let plain_query = match ip {
         Some(ip) => ip.to_string(),
         None => query.trim_end_matches('.').to_string(),
@@ -122,8 +118,7 @@ pub fn parse_referral(answer: &str) -> Option<String> {
 fn clean_referral(value: &str) -> Option<String> {
     let mut v = value.trim();
     let lower = v.to_ascii_lowercase();
-    if lower.starts_with("rwhois://") || lower.starts_with("http://") || lower.starts_with("https://")
-    {
+    if lower.starts_with("rwhois://") || lower.starts_with("http://") || lower.starts_with("https://") {
         return None;
     }
     if lower.starts_with("whois://") {
@@ -133,10 +128,7 @@ fn clean_referral(value: &str) -> Option<String> {
     if v.is_empty() || v.len() > 255 || !(v.contains('.') || v.contains(':')) {
         return None;
     }
-    if !v
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '[' | ']'))
-    {
+    if !v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '[' | ']')) {
         return None;
     }
     Some(v.to_ascii_lowercase())
@@ -144,21 +136,17 @@ fn clean_referral(value: &str) -> Option<String> {
 
 /// Splits `host`, `host:port` or `[v6]:port` into host and port.
 fn split_host_port(server: &str, default_port: u16) -> (String, u16) {
-    if let Some(rest) = server.strip_prefix('[') {
-        if let Some((host, after)) = rest.split_once(']') {
-            let port = after
-                .strip_prefix(':')
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(default_port);
-            return (host.to_string(), port);
-        }
+    if let Some(rest) = server.strip_prefix('[')
+        && let Some((host, after)) = rest.split_once(']')
+    {
+        let port = after.strip_prefix(':').and_then(|p| p.parse().ok()).unwrap_or(default_port);
+        return (host.to_string(), port);
     }
-    if server.matches(':').count() == 1 {
-        if let Some((host, port)) = server.split_once(':') {
-            if let Ok(port) = port.parse() {
-                return (host.to_string(), port);
-            }
-        }
+    if server.matches(':').count() == 1
+        && let Some((host, port)) = server.split_once(':')
+        && let Ok(port) = port.parse()
+    {
+        return (host.to_string(), port);
     }
     (server.to_string(), default_port)
 }
@@ -167,10 +155,7 @@ fn split_host_port(server: &str, default_port: u16) -> (String, u16) {
 fn whois_ask(server: &str, request: &str, timeout: Duration) -> Result<String, String> {
     let timeout = timeout.max(Duration::from_millis(1));
     let (host, port) = split_host_port(server, 43);
-    let addrs: Vec<SocketAddr> = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|e| tf("Cannot resolve {0}: {1}", &[&host, &e]))?
-        .collect();
+    let addrs: Vec<SocketAddr> = (host.as_str(), port).to_socket_addrs().map_err(|e| tf("Cannot resolve {0}: {1}", &[&host, &e]))?.collect();
     if addrs.is_empty() {
         return Err(tf("No address found for {0}.", &[&host]));
     }
@@ -189,9 +174,7 @@ fn whois_ask(server: &str, request: &str, timeout: Duration) -> Result<String, S
         return Err(tf("Cannot connect to {0}: {1}", &[&server, &last_error]));
     };
     let _ = stream.set_write_timeout(Some(timeout));
-    stream
-        .write_all(format!("{request}\r\n").as_bytes())
-        .map_err(|e| tf("Cannot send the query to {0}: {1}", &[&server, &e]))?;
+    stream.write_all(format!("{request}\r\n").as_bytes()).map_err(|e| tf("Cannot send the query to {0}: {1}", &[&server, &e]))?;
 
     let deadline = Instant::now() + timeout;
     let mut data = Vec::new();
@@ -298,11 +281,7 @@ pub fn http_check(url: &str, timeout: Duration) -> Result<HttpReport, String> {
     if input.is_empty() {
         return Err(tr("Enter a URL.").to_string());
     }
-    let with_scheme = if input.contains("://") {
-        input.to_string()
-    } else {
-        format!("https://{input}")
-    };
+    let with_scheme = if input.contains("://") { input.to_string() } else { format!("https://{input}") };
     let mut current = Url::parse(&with_scheme)?;
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
@@ -317,38 +296,18 @@ pub fn http_check(url: &str, timeout: Duration) -> Result<HttpReport, String> {
     loop {
         let address = current.to_string();
         let started = Instant::now();
-        let response = agent
-            .get(&address)
-            .call()
-            .map_err(|e| tf("Request to {0} failed: {1}", &[&address, &e]))?;
+        let response = agent.get(&address).call().map_err(|e| tf("Request to {0} failed: {1}", &[&address, &e]))?;
         let millis = started.elapsed().as_millis();
         let status = response.status().as_u16();
         let headers: Vec<(String, String)> = response
             .headers()
             .iter()
-            .map(|(name, value)| {
-                (
-                    name.as_str().to_string(),
-                    String::from_utf8_lossy(value.as_bytes()).into_owned(),
-                )
-            })
+            .map(|(name, value)| (name.as_str().to_string(), String::from_utf8_lossy(value.as_bytes()).into_owned()))
             .collect();
         // The body is never read: dropping the response closes the connection.
         drop(response);
-        let location = if (300..400).contains(&status) {
-            header_values(&headers, "location")
-                .into_iter()
-                .next()
-                .map(str::to_string)
-        } else {
-            None
-        };
-        hops.push(HttpHop {
-            url: address,
-            status,
-            headers,
-            millis,
-        });
+        let location = if (300..400).contains(&status) { header_values(&headers, "location").into_iter().next().map(str::to_string) } else { None };
+        hops.push(HttpHop { url: address, status, headers, millis });
         let Some(location) = location else {
             break;
         };
@@ -366,41 +325,25 @@ pub fn http_check(url: &str, timeout: Duration) -> Result<HttpReport, String> {
         Some(last) => evaluate_security(&last.headers, last.url.starts_with("https://")),
         None => Vec::new(),
     };
-    Ok(HttpReport {
-        hops,
-        security,
-        cookies,
-    })
+    Ok(HttpReport { hops, security, cookies })
 }
 
 /// All values of a header (name compared without regard to case), trimmed.
 fn header_values<'a>(headers: &'a [(String, String)], name: &str) -> Vec<&'a str> {
-    headers
-        .iter()
-        .filter(|(n, _)| n.trim().eq_ignore_ascii_case(name))
-        .map(|(_, v)| v.trim())
-        .collect()
+    headers.iter().filter(|(n, _)| n.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim()).collect()
 }
 
 /// All values of a header joined with `, `, or `None` when it is absent.
 fn header_joined(headers: &[(String, String)], name: &str) -> Option<String> {
     let values = header_values(headers, name);
-    if values.is_empty() {
-        None
-    } else {
-        Some(values.join(", "))
-    }
+    if values.is_empty() { None } else { Some(values.join(", ")) }
 }
 
 /// The `max-age` of a Strict-Transport-Security value, in seconds.
 fn hsts_max_age(value: &str) -> Option<u64> {
     value.split(';').find_map(|part| {
         let (k, v) = part.split_once('=')?;
-        if k.trim().eq_ignore_ascii_case("max-age") {
-            v.trim().trim_matches('"').parse().ok()
-        } else {
-            None
-        }
+        if k.trim().eq_ignore_ascii_case("max-age") { v.trim().trim_matches('"').parse().ok() } else { None }
     })
 }
 
@@ -425,12 +368,7 @@ pub fn evaluate_security(headers: &[(String, String)], https: bool) -> Vec<Secur
             },
         }
     };
-    out.push(SecurityHeader {
-        name: "Strict-Transport-Security",
-        present: hsts.is_some(),
-        value: hsts.unwrap_or_default(),
-        advice,
-    });
+    out.push(SecurityHeader { name: "Strict-Transport-Security", present: hsts.is_some(), value: hsts.unwrap_or_default(), advice });
 
     // Content-Security-Policy
     let csp = header_joined(headers, "content-security-policy");
@@ -438,9 +376,7 @@ pub fn evaluate_security(headers: &[(String, String)], https: bool) -> Vec<Secur
         None if header_joined(headers, "content-security-policy-report-only").is_some() => {
             tr("Only a report-only policy is set; it does not block anything.")
         }
-        None => tr(
-            "Missing: add a policy that limits where scripts and other content may load from.",
-        ),
+        None => tr("Missing: add a policy that limits where scripts and other content may load from."),
         Some(v) => {
             let lower = v.to_ascii_lowercase();
             if lower.contains("'unsafe-inline'") || lower.contains("'unsafe-eval'") {
@@ -450,18 +386,10 @@ pub fn evaluate_security(headers: &[(String, String)], https: bool) -> Vec<Secur
             }
         }
     };
-    let frame_ancestors = csp.as_deref().and_then(|v| {
-        v.split([';', ','])
-            .map(str::trim)
-            .find(|d| d.to_ascii_lowercase().starts_with("frame-ancestors"))
-            .map(str::to_string)
-    });
-    out.push(SecurityHeader {
-        name: "Content-Security-Policy",
-        present: csp.is_some(),
-        value: csp.unwrap_or_default(),
-        advice,
-    });
+    let frame_ancestors = csp
+        .as_deref()
+        .and_then(|v| v.split([';', ',']).map(str::trim).find(|d| d.to_ascii_lowercase().starts_with("frame-ancestors")).map(str::to_string));
+    out.push(SecurityHeader { name: "Content-Security-Policy", present: csp.is_some(), value: csp.unwrap_or_default(), advice });
 
     // X-Content-Type-Options
     let xcto = header_joined(headers, "x-content-type-options");
@@ -470,12 +398,7 @@ pub fn evaluate_security(headers: &[(String, String)], https: bool) -> Vec<Secur
         Some(v) if v.trim().eq_ignore_ascii_case("nosniff") => ok,
         Some(_) => tr("The value should be nosniff."),
     };
-    out.push(SecurityHeader {
-        name: "X-Content-Type-Options",
-        present: xcto.is_some(),
-        value: xcto.unwrap_or_default(),
-        advice,
-    });
+    out.push(SecurityHeader { name: "X-Content-Type-Options", present: xcto.is_some(), value: xcto.unwrap_or_default(), advice });
 
     // X-Frame-Options or CSP frame-ancestors
     let xfo = header_joined(headers, "x-frame-options");
@@ -489,9 +412,7 @@ pub fn evaluate_security(headers: &[(String, String)], https: bool) -> Vec<Secur
                 tr("The value should be DENY or SAMEORIGIN (or use CSP frame-ancestors).")
             }
         }
-        (None, None) => {
-            tr("Missing: add X-Frame-Options: DENY or a CSP frame-ancestors directive.")
-        }
+        (None, None) => tr("Missing: add X-Frame-Options: DENY or a CSP frame-ancestors directive."),
     };
     let value = match (&xfo, &frame_ancestors) {
         (Some(x), Some(f)) => format!("{x}; {f}"),
@@ -499,12 +420,7 @@ pub fn evaluate_security(headers: &[(String, String)], https: bool) -> Vec<Secur
         (None, Some(f)) => f.clone(),
         (None, None) => String::new(),
     };
-    out.push(SecurityHeader {
-        name: "X-Frame-Options",
-        present: xfo.is_some() || frame_ancestors.is_some(),
-        value,
-        advice,
-    });
+    out.push(SecurityHeader { name: "X-Frame-Options", present: xfo.is_some() || frame_ancestors.is_some(), value, advice });
 
     // Referrer-Policy (browsers use the last policy they understand)
     let referrer = header_joined(headers, "referrer-policy");
@@ -512,35 +428,19 @@ pub fn evaluate_security(headers: &[(String, String)], https: bool) -> Vec<Secur
         None => tr("Missing: add e.g. Referrer-Policy: strict-origin-when-cross-origin."),
         Some(v) => {
             let last = v.rsplit(',').next().unwrap_or("").trim().to_ascii_lowercase();
-            if last == "unsafe-url" || last == "no-referrer-when-downgrade" {
-                tr("This policy sends full URLs to other sites.")
-            } else {
-                ok
-            }
+            if last == "unsafe-url" || last == "no-referrer-when-downgrade" { tr("This policy sends full URLs to other sites.") } else { ok }
         }
     };
-    out.push(SecurityHeader {
-        name: "Referrer-Policy",
-        present: referrer.is_some(),
-        value: referrer.unwrap_or_default(),
-        advice,
-    });
+    out.push(SecurityHeader { name: "Referrer-Policy", present: referrer.is_some(), value: referrer.unwrap_or_default(), advice });
 
     // Permissions-Policy
     let permissions = header_joined(headers, "permissions-policy");
     let advice = match &permissions {
         Some(_) => ok,
-        None if header_joined(headers, "feature-policy").is_some() => {
-            tr("Only the outdated Feature-Policy is set; switch to Permissions-Policy.")
-        }
+        None if header_joined(headers, "feature-policy").is_some() => tr("Only the outdated Feature-Policy is set; switch to Permissions-Policy."),
         None => tr("Missing: add it to switch off browser features the site does not use."),
     };
-    out.push(SecurityHeader {
-        name: "Permissions-Policy",
-        present: permissions.is_some(),
-        value: permissions.unwrap_or_default(),
-        advice,
-    });
+    out.push(SecurityHeader { name: "Permissions-Policy", present: permissions.is_some(), value: permissions.unwrap_or_default(), advice });
 
     out
 }
@@ -559,12 +459,7 @@ pub fn parse_cookies(headers: &[(String, String)]) -> Vec<CookieInfo> {
             if name.is_empty() {
                 return None;
             }
-            let mut info = CookieInfo {
-                name: name.to_string(),
-                secure: false,
-                http_only: false,
-                same_site: String::new(),
-            };
+            let mut info = CookieInfo { name: name.to_string(), secure: false, http_only: false, same_site: String::new() };
             for attr in parts {
                 let (key, value) = attr.split_once('=').unwrap_or((attr, ""));
                 match key.trim().to_ascii_lowercase().as_str() {
@@ -601,19 +496,14 @@ impl Url {
         let end = rest.find(['/', '?']).unwrap_or(rest.len());
         let authority = &rest[..end];
         let authority = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
-        if authority.is_empty() || authority.chars().any(|c| c.is_whitespace() || c.is_control())
-        {
+        if authority.is_empty() || authority.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return Err(invalid());
         }
         let mut path = rest[end..].to_string();
         if !path.starts_with('/') {
             path.insert(0, '/');
         }
-        Ok(Url {
-            scheme,
-            authority: authority.to_string(),
-            path,
-        })
+        Ok(Url { scheme, authority: authority.to_string(), path })
     }
 
     /// Resolves a `Location` value against this URL. `None` when it points somewhere that
@@ -626,11 +516,7 @@ impl Url {
         }
         if let Some(scheme_end) = loc.find("://") {
             let scheme = &loc[..scheme_end];
-            if !scheme.is_empty()
-                && scheme
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-            {
+            if !scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) {
                 return Url::parse(loc).ok();
             }
         }
@@ -652,11 +538,7 @@ impl Url {
             path.push('?');
             path.push_str(query);
         }
-        Some(Url {
-            scheme: self.scheme.clone(),
-            authority: self.authority.clone(),
-            path,
-        })
+        Some(Url { scheme: self.scheme.clone(), authority: self.authority.clone(), path })
     }
 }
 
@@ -788,7 +670,13 @@ fn ber_int(v: i64) -> Vec<u8> {
 
 /// "1.3.6.1.2.1.1.1.0" as BER (without tag and length).
 pub fn encode_oid(oid: &str) -> Result<Vec<u8>, String> {
-    let arcs: Vec<u64> = oid.trim().trim_start_matches('.').split('.').map(|a| a.parse::<u64>()).collect::<Result<_, _>>().map_err(|_| tf("Not an OID: {0}", &[&oid]))?;
+    let arcs: Vec<u64> = oid
+        .trim()
+        .trim_start_matches('.')
+        .split('.')
+        .map(|a| a.parse::<u64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| tf("Not an OID: {0}", &[&oid]))?;
     if arcs.len() < 2 || arcs[0] > 2 || (arcs[0] < 2 && arcs[1] >= 40) {
         return Err(tf("Not an OID: {0}", &[&oid]));
     }
@@ -915,8 +803,11 @@ fn value_of(tag: u8, c: &[u8]) -> Result<SnmpValue, String> {
     })
 }
 
-/// Reads a GetResponse: request id, error status and the (OID, value) pairs.
-pub fn decode_response(bytes: &[u8]) -> Result<(i32, i64, Vec<(String, SnmpValue)>), String> {
+/// A GetResponse: request id, error status and the (OID, value) pairs.
+pub type SnmpResponse = (i32, i64, Vec<(String, SnmpValue)>);
+
+/// Reads a GetResponse.
+pub fn decode_response(bytes: &[u8]) -> Result<SnmpResponse, String> {
     let bad = || tr("The SNMP answer is damaged.").to_string();
     let (tag, msg) = Ber { b: bytes, pos: 0 }.next()?;
     if tag != 0x30 {
@@ -960,7 +851,8 @@ fn next_request_id() -> i32 {
 }
 
 fn snmp_exchange(host: &str, port: u16, community: &str, pdu_type: u8, oids: &[&str], timeout: Duration) -> Result<Vec<(String, SnmpValue)>, String> {
-    let addr: SocketAddr = (host.trim(), port).to_socket_addrs().map_err(|e| tf("{0}: {1}", &[&host, &e]))?.next().ok_or_else(|| tf("{0}: no address", &[&host]))?;
+    let addr: SocketAddr =
+        (host.trim(), port).to_socket_addrs().map_err(|e| tf("{0}: {1}", &[&host, &e]))?.next().ok_or_else(|| tf("{0}: no address", &[&host]))?;
     let local: SocketAddr = if addr.is_ipv4() { (Ipv4Addr::UNSPECIFIED, 0).into() } else { (Ipv6Addr::UNSPECIFIED, 0).into() };
     let sock = UdpSocket::bind(local).map_err(|e| e.to_string())?;
     sock.set_read_timeout(Some(timeout)).map_err(|e| e.to_string())?;

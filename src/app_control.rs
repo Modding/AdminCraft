@@ -2,7 +2,7 @@
 //! A child module of `app`, so it can reach the window's state.
 
 use super::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 impl AdminApp {
     /// Starts or stops the control channel to match the setting.
@@ -67,23 +67,28 @@ impl AdminApp {
             TabKind::Proc(x) => x.exited.clone().unwrap_or_else(|| x.label.clone()),
             TabKind::Scan(x) => match &x.scan {
                 Some(s) => {
-                    let st = s.state.lock().unwrap();
+                    let st = s.state.lock().unwrap_or_else(|e| e.into_inner());
                     let open: Vec<String> = st.open.iter().map(|p| format!("{p} {}", tools::well_known(*p))).collect();
                     format!("{} ({}) {}/{}{}\n{}", x.host, st.address, st.done, st.total, if st.finished { "" } else { " …" }, open.join("\n"))
                 }
                 None => x.error.clone().unwrap_or_default(),
             },
             TabKind::NetScan(x) => match &x.scan {
-                Some(s) => serde_json::to_string_pretty(&s.state.lock().unwrap().hosts).unwrap_or_default(),
+                Some(s) => serde_json::to_string_pretty(&s.state.lock().unwrap_or_else(|e| e.into_inner()).hosts).unwrap_or_default(),
                 None => x.error.clone().unwrap_or_default(),
             },
-            TabKind::Cert(x) => match &*x.result.lock().unwrap() {
-                Some(Ok(c)) => format!("{}\n{}\n{} – {} ({} days left)\n{:?}", c.subject, c.issuer, c.not_before, c.not_after, c.days_left, c.trusted),
+            TabKind::Cert(x) => match &*x.result.lock().unwrap_or_else(|e| e.into_inner()) {
+                Some(Ok(c)) => {
+                    format!("{}\n{}\n{} – {} ({} days left)\n{:?}", c.subject, c.issuer, c.not_before, c.not_after, c.days_left, c.trusted)
+                }
                 Some(Err(e)) => e.clone(),
                 None => String::new(),
             },
             TabKind::Subnet(x) => match crate::admintools::subnet(&x.input) {
-                Ok(c) => format!("{}/{} mask {} broadcast {} first {} last {} usable {}", c.network, c.prefix, c.mask, c.broadcast, c.first, c.last, c.hosts),
+                Ok(c) => format!(
+                    "{}/{} mask {} broadcast {} first {} last {} usable {}",
+                    c.network, c.prefix, c.mask, c.broadcast, c.first, c.last, c.hosts
+                ),
                 Err(e) => e,
             },
             TabKind::Transfer(x) => x.shown_cwd.clone(),
@@ -95,11 +100,7 @@ impl AdminApp {
 
     fn tab_index(&self, args: &Value) -> Result<usize, String> {
         let i = args["index"].as_u64().map(|i| i as usize).unwrap_or(self.active);
-        if i < self.tabs.len() {
-            Ok(i)
-        } else {
-            Err(format!("no tab {i} (there are {})", self.tabs.len()))
-        }
+        if i < self.tabs.len() { Ok(i) } else { Err(format!("no tab {i} (there are {})", self.tabs.len())) }
     }
 
     fn control_answer(&mut self, cmd: &str, args: &Value, ctx: &egui::Context, now: f64) -> Result<Value, String> {
@@ -179,19 +180,23 @@ impl AdminApp {
                     "dns" => self.open_dns(target),
                     "netscan" => {
                         self.open_netscan(target);
-                        if let Some(Tab { kind: TabKind::NetScan(n), .. }) = self.tabs.last_mut() {
-                            if let (Ok(t), Ok(p)) = (crate::netscan::parse_targets(&n.range), crate::tools::parse_ports(&n.ports)) {
-                                n.scan = Some(crate::netscan::NetScan::start(t, p, n.timeout, n.names, ctx.clone()));
-                            }
+                        if let Some(Tab { kind: TabKind::NetScan(n), .. }) = self.tabs.last_mut()
+                            && let (Ok(t), Ok(p)) = (crate::netscan::parse_targets(&n.range), crate::tools::parse_ports(&n.ports))
+                        {
+                            n.scan = Some(crate::netscan::NetScan::start(t, p, n.timeout, n.names, ctx.clone()));
                         }
                     }
-                    "subnet" => self.add_tab(tr("Subnet calculator").into(), Color32::from_rgb(0, 137, 123), TabKind::Subnet(extra::SubnetTab { input: target })),
+                    "subnet" => self.add_tab(
+                        tr("Subnet calculator").into(),
+                        Color32::from_rgb(0, 137, 123),
+                        TabKind::Subnet(extra::SubnetTab { input: target }),
+                    ),
                     "cert" => {
                         self.open_cert(target);
                         if let Some(Tab { kind: TabKind::Cert(c), .. }) = self.tabs.last_mut() {
                             let (h, slot, c2) = (c.host.clone(), c.result.clone(), ctx.clone());
                             std::thread::spawn(move || {
-                                *slot.lock().unwrap() = Some(crate::admintools::check_cert(&h, 443));
+                                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(crate::admintools::check_cert(&h, 443));
                                 c2.request_repaint();
                             });
                         }

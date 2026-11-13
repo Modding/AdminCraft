@@ -6,8 +6,8 @@ use crate::i18n::{t as tr, tf};
 use crate::model::{Entry, Protocol};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use base64::Engine as _;
-use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
 
 pub struct Imported {
@@ -95,11 +95,12 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
             if let Some(k) = a.get("KdfIterations").and_then(|v| v.parse().ok()) {
                 iterations = k;
             }
-            if let Some(p) = a.get("Protected") {
-                if decrypt_mremote(p, &password, iterations).is_none() && master.is_empty() {
-                    // protected with an own password we don't know: import without passwords
-                    password.clear();
-                }
+            if let Some(p) = a.get("Protected")
+                && decrypt_mremote(p, &password, iterations).is_none()
+                && master.is_empty()
+            {
+                // protected with an own password we don't know: import without passwords
+                password.clear();
             }
             continue;
         }
@@ -120,7 +121,7 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
             description: get("Descr"),
             username: get("Username"),
             domain: get("Domain"),
-            inherit_credentials: is_folder.then_some(false).unwrap_or(true),
+            inherit_credentials: !is_folder,
             ..Default::default()
         };
         if !is_folder {
@@ -189,7 +190,14 @@ pub fn import_ssh_config(text: &str, first_id: u64, parent: Option<u64>) -> Vec<
                     if alias.contains('*') || alias.contains('?') || alias.starts_with('!') {
                         continue;
                     }
-                    hosts.push(H { alias: alias.to_string(), host: String::new(), user: String::new(), port: 22, key: String::new(), jump: String::new() });
+                    hosts.push(H {
+                        alias: alias.to_string(),
+                        host: String::new(),
+                        user: String::new(),
+                        port: 22,
+                        key: String::new(),
+                        jump: String::new(),
+                    });
                     current.push(hosts.len() - 1);
                 }
             }

@@ -1,0 +1,30 @@
+AdminCraft
+Copyright (c) 2026 the AdminCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+Third-party material
+
+This product is built from third-party Rust crates under their own licenses. The list of every
+crate with its version and license, and the list of the assets in this repository (author,
+source, license), is in ATTRIBUTION.md.
+
+Fonts
+
+AdminCraft contains no font files of its own. The interface uses the fonts egui ships through
+epaint_default_fonts: Ubuntu Light (Ubuntu Font Licence 1.0), Hack (MIT License and Bitstream
+Vera License), Noto Emoji (SIL Open Font License 1.1) and the emoji-icon-font subset (MIT
+License, Copyright (c) 2014 John Slegers). Their license texts are distributed with that crate:
+https://github.com/emilk/egui/tree/main/crates/epaint_default_fonts/fonts
+
+Root certificates
+
+The list of trusted certificate authorities comes from the webpki-roots crate (Mozilla's root
+program), under the Community Data License Agreement - Permissive, Version 2.0.
+
+Other programs
+
+PuTTY, OpenSSH, mstsc, FreeRDP, Remmina, VNC viewers and KeePass are not part of AdminCraft. It
+only starts the copies installed on the computer or placed in the AdminCraftTools folder by the
+person using it. mRemoteNG, PuTTY, KeePass, Angry IP Scanner and other names are mentioned only
+to describe compatibility; they belong to their owners.

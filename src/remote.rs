@@ -24,26 +24,22 @@ pub struct RemoteConfig {
     pub password_enc: String,
 }
 
-fn local_vault() -> Vault {
-    Vault::derive(LOCAL_KEY, b"admincraft-remote-salt")
+fn local_vault() -> Option<Vault> {
+    Vault::derive(LOCAL_KEY, b"admincraft-remote-salt").ok()
 }
 
 impl RemoteConfig {
     pub fn password(&self) -> String {
-        local_vault().decrypt(&self.password_enc).unwrap_or_default()
+        local_vault().and_then(|v| v.decrypt(&self.password_enc)).unwrap_or_default()
     }
 
     pub fn set_password(&mut self, pw: &str) {
-        self.password_enc = if pw.is_empty() { String::new() } else { local_vault().encrypt(pw) };
+        self.password_enc = if pw.is_empty() { String::new() } else { local_vault().and_then(|v| v.encrypt(pw).ok()).unwrap_or_default() };
     }
 
     pub fn file_url(&self) -> String {
         let u = self.url.trim();
-        if u.ends_with('/') {
-            format!("{u}connections.json")
-        } else {
-            u.to_string()
-        }
+        if u.ends_with('/') { format!("{u}connections.json") } else { u.to_string() }
     }
 
     fn auth(&self) -> Option<String> {
@@ -73,11 +69,7 @@ pub fn save_config(c: &RemoteConfig) -> Result<(), String> {
 }
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(15)))
-        .http_status_as_error(false)
-        .build()
-        .into()
+    ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).http_status_as_error(false).build().into()
 }
 
 fn status_error(code: u16) -> String {
@@ -129,11 +121,7 @@ pub fn upload(c: &RemoteConfig, body: &str) -> Result<(), String> {
             code = send()?;
         }
     }
-    if (200..300).contains(&code) {
-        Ok(())
-    } else {
-        Err(status_error(code))
-    }
+    if (200..300).contains(&code) { Ok(()) } else { Err(status_error(code)) }
 }
 
 /// "Test connection": can we read (and is there already a list)?

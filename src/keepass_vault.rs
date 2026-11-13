@@ -80,7 +80,7 @@ impl KeePassVault {
         })?;
         let mut out = Vec::new();
         walk(db.root(), "", &mut out, 0);
-        out.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+        out.sort_by_key(|a| a.path.to_lowercase());
         self.entries = out;
         self.opened_path = path.to_string();
         self.unlocked = true;

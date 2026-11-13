@@ -1,0 +1,30 @@
+name: House rules
+
+# The house-rules blocks at the top of AGENTS.md must match storytold/craft-contrib.
+on:
+  push:
+    branches: [main]
+    paths:
+      - AGENTS.md
+      - CLAUDE.md
+      - .github/workflows/house-rules.yml
+  pull_request:
+    paths:
+      - AGENTS.md
+      - CLAUDE.md
+      - .github/workflows/house-rules.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: house-rules-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  house-rules:
+    # Tracks @main like the other Craft apps, so suite-wide fixes arrive without a PR here.
+    uses: storytold/craft-common-actions/.github/workflows/house-rules.yml@main
+    with:
+      rust: true

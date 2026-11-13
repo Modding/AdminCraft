@@ -42,11 +42,7 @@ pub struct CmdRunner {
 
 impl Default for CmdRunner {
     fn default() -> Self {
-        Self {
-            lines: Arc::new(Mutex::new(Vec::new())),
-            running: Arc::new(AtomicBool::new(false)),
-            child: Arc::new(Mutex::new(None)),
-        }
+        Self { lines: Arc::new(Mutex::new(Vec::new())), running: Arc::new(AtomicBool::new(false)), child: Arc::new(Mutex::new(None)) }
     }
 }
 
@@ -66,7 +62,7 @@ impl CmdRunner {
             Ok(mut child) => {
                 let out = child.stdout.take();
                 let err = child.stderr.take();
-                *self.child.lock().unwrap() = Some(child);
+                *self.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
                 self.running.store(true, Ordering::SeqCst);
                 let running = self.running.clone();
                 let child_slot = self.child.clone();
@@ -78,7 +74,7 @@ impl CmdRunner {
                         let _ = err.read_to_end(&mut buf);
                         let text = decode(&buf);
                         if !text.trim().is_empty() {
-                            l2.lock().unwrap().extend(text.lines().map(|s| s.to_string()));
+                            l2.lock().unwrap_or_else(|e| e.into_inner()).extend(text.lines().map(|s| s.to_string()));
                             c2.request_repaint();
                         }
                     });
@@ -93,28 +89,28 @@ impl CmdRunner {
                                 Ok(0) | Err(_) => break,
                                 Ok(_) => {
                                     let line = decode(&buf).trim_end().to_string();
-                                    lines.lock().unwrap().push(line);
+                                    lines.lock().unwrap_or_else(|e| e.into_inner()).push(line);
                                     ctx.request_repaint();
                                 }
                             }
                         }
                     }
-                    if let Some(mut c) = child_slot.lock().unwrap().take() {
+                    if let Some(mut c) = child_slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
                         let _ = c.wait();
                     }
-                    lines.lock().unwrap().push(tr("— done —").into());
+                    lines.lock().unwrap_or_else(|e| e.into_inner()).push(tr("— done —").into());
                     running.store(false, Ordering::SeqCst);
                     ctx.request_repaint();
                 });
             }
             Err(e) => {
-                lines.lock().unwrap().push(tf("Could not start '{0}': {1}", &[&program, &e]));
+                lines.lock().unwrap_or_else(|e| e.into_inner()).push(tf("Could not start '{0}': {1}", &[&program, &e]));
             }
         }
     }
 
     pub fn stop(&mut self) {
-        if let Some(mut c) = self.child.lock().unwrap().take() {
+        if let Some(mut c) = self.child.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = c.kill();
         }
     }
@@ -124,7 +120,7 @@ impl CmdRunner {
     }
 
     pub fn text(&self) -> String {
-        self.lines.lock().unwrap().join("\n")
+        self.lines.lock().unwrap_or_else(|e| e.into_inner()).join("\n")
     }
 }
 
@@ -132,22 +128,18 @@ pub fn ping_args(host: &str, count: Option<u32>) -> Vec<String> {
     let mut a = Vec::new();
     if cfg!(windows) {
         match count {
-            Some(n) => a.extend([tr("-n").to_string(), n.to_string()]),
-            None => a.push(tr("-t").into()),
+            Some(n) => a.extend(["-n".to_string(), n.to_string()]),
+            None => a.push("-t".into()),
         }
     } else if let Some(n) = count {
-        a.extend([tr("-c").to_string(), n.to_string()]);
+        a.extend(["-c".to_string(), n.to_string()]);
     }
     a.push(host.to_string());
     a
 }
 
 pub fn traceroute_cmd(host: &str) -> (String, Vec<String>) {
-    if cfg!(windows) {
-        (tr("tracert").into(), vec![tr("-d").into(), host.into()])
-    } else {
-        (tr("traceroute").into(), vec![tr("-n").into(), host.into()])
-    }
+    if cfg!(windows) { ("tracert".into(), vec!["-d".into(), host.into()]) } else { ("traceroute".into(), vec!["-n".into(), host.into()]) }
 }
 
 pub fn well_known(port: u16) -> &'static str {
@@ -221,10 +213,7 @@ pub fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
 }
 
 pub fn resolve(host: &str) -> Result<Vec<SocketAddr>, String> {
-    (host.trim(), 0)
-        .to_socket_addrs()
-        .map(|i| i.collect())
-        .map_err(|e| tf("Name can't be resolved: {0}", &[&e]))
+    (host.trim(), 0).to_socket_addrs().map(|i| i.collect()).map_err(|e| tf("Name can't be resolved: {0}", &[&e]))
 }
 
 #[derive(Default)]
@@ -253,20 +242,20 @@ impl PortScan {
             let addr = match resolve(&host) {
                 Ok(a) if !a.is_empty() => a.iter().find(|a| a.is_ipv4()).copied().unwrap_or(a[0]).ip(),
                 Ok(_) => {
-                    let mut s = st.lock().unwrap();
+                    let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                     s.error = Some(tr("No address found.").into());
                     s.finished = true;
                     return;
                 }
                 Err(e) => {
-                    let mut s = st.lock().unwrap();
+                    let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                     s.error = Some(e);
                     s.finished = true;
                     ctx.request_repaint();
                     return;
                 }
             };
-            st.lock().unwrap().address = addr.to_string();
+            st.lock().unwrap_or_else(|e| e.into_inner()).address = addr.to_string();
             let ports = Arc::new(ports);
             let next = Arc::new(AtomicUsize::new(0));
             let workers = 128.min(ports.len()).max(1);
@@ -277,31 +266,33 @@ impl PortScan {
                 let st = st.clone();
                 let cc = cc.clone();
                 let ctx = ctx.clone();
-                handles.push(std::thread::spawn(move || loop {
-                    if cc.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    if i >= ports.len() {
-                        break;
-                    }
-                    let p = ports[i];
-                    let ok = TcpStream::connect_timeout(&SocketAddr::new(addr, p), Duration::from_millis(timeout_ms)).is_ok();
-                    let mut s = st.lock().unwrap();
-                    s.done += 1;
-                    if ok {
-                        s.open.push(p);
-                        s.open.sort_unstable();
-                    }
-                    if s.done % 16 == 0 || ok {
-                        ctx.request_repaint();
+                handles.push(std::thread::spawn(move || {
+                    loop {
+                        if cc.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= ports.len() {
+                            break;
+                        }
+                        let p = ports[i];
+                        let ok = TcpStream::connect_timeout(&SocketAddr::new(addr, p), Duration::from_millis(timeout_ms)).is_ok();
+                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                        s.done += 1;
+                        if ok {
+                            s.open.push(p);
+                            s.open.sort_unstable();
+                        }
+                        if s.done.is_multiple_of(16) || ok {
+                            ctx.request_repaint();
+                        }
                     }
                 }));
             }
             for h in handles {
                 let _ = h.join();
             }
-            st.lock().unwrap().finished = true;
+            st.lock().unwrap_or_else(|e| e.into_inner()).finished = true;
             ctx.request_repaint();
         });
         PortScan { state, cancel }
@@ -344,7 +335,7 @@ pub type StatusMap = Arc<Mutex<HashMap<u64, Option<bool>>>>;
 
 pub fn check_reachability(targets: Vec<(u64, String, u16)>, map: StatusMap, ctx: eframe::egui::Context) {
     {
-        let mut m = map.lock().unwrap();
+        let mut m = map.lock().unwrap_or_else(|e| e.into_inner());
         for (id, _, _) in &targets {
             m.insert(*id, None);
         }
@@ -354,17 +345,16 @@ pub fn check_reachability(targets: Vec<(u64, String, u16)>, map: StatusMap, ctx:
         let queue = queue.clone();
         let map = map.clone();
         let ctx = ctx.clone();
-        std::thread::spawn(move || loop {
-            let Some((id, host, port)) = queue.lock().unwrap().pop() else { break };
-            let ok = match (host.as_str(), port).to_socket_addrs() {
-                Ok(mut addrs) => addrs
-                    .next()
-                    .map(|a| TcpStream::connect_timeout(&a, Duration::from_millis(1500)).is_ok())
-                    .unwrap_or(false),
-                Err(_) => false,
-            };
-            map.lock().unwrap().insert(id, Some(ok));
-            ctx.request_repaint();
+        std::thread::spawn(move || {
+            loop {
+                let Some((id, host, port)) = queue.lock().unwrap_or_else(|e| e.into_inner()).pop() else { break };
+                let ok = match (host.as_str(), port).to_socket_addrs() {
+                    Ok(mut addrs) => addrs.next().map(|a| TcpStream::connect_timeout(&a, Duration::from_millis(1500)).is_ok()).unwrap_or(false),
+                    Err(_) => false,
+                };
+                map.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Some(ok));
+                ctx.request_repaint();
+            }
         });
     }
 }
