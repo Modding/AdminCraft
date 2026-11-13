@@ -255,13 +255,13 @@ fn no_window(cmd: &mut Command) {
 pub fn askpass_env(hops: &[Hop]) -> Vec<(String, String)> {
     let mut v = Vec::new();
     let Ok(exe) = std::env::current_exe() else { return v };
-    v.push((tr("SSH_ASKPASS").into(), exe.display().to_string()));
-    v.push((tr("SSH_ASKPASS_REQUIRE").into(), tr("force").into()));
+    v.push(("SSH_ASKPASS".into(), exe.display().to_string()));
+    v.push(("SSH_ASKPASS_REQUIRE".into(), "force".into()));
     if std::env::var_os("DISPLAY").is_none() {
-        v.push((tr("DISPLAY").into(), ":0".into()));
+        v.push(("DISPLAY".into(), ":0".into()));
     }
-    v.push((tr("AC_ASKPASS").into(), "1".into()));
-    v.push((tr("AC_ASKPASS_N").into(), hops.len().to_string()));
+    v.push(("AC_ASKPASS".into(), "1".into()));
+    v.push(("AC_ASKPASS_N".into(), hops.len().to_string()));
     for (i, h) in hops.iter().enumerate() {
         v.push((format!("AC_ASKPASS_HOST_{i}"), h.host.clone()));
         v.push((format!("AC_ASKPASS_USER_{i}"), h.user.clone()));
@@ -336,21 +336,21 @@ fn jump_arg(ep: &Endpoint) -> Option<String> {
 
 fn openssh_opts(ep: &Endpoint) -> Vec<String> {
     let mut v: Vec<String> = vec![
-        tr("-o").into(),
-        tr("BatchMode=no").into(),
-        tr("-o").into(),
-        tr("StrictHostKeyChecking=accept-new").into(),
-        tr("-o").into(),
-        tr("ConnectTimeout=20").into(),
-        tr("-o").into(),
-        tr("NumberOfPasswordPrompts=1").into(),
+        "-o".into(),
+        "BatchMode=no".into(),
+        "-o".into(),
+        "StrictHostKeyChecking=accept-new".into(),
+        "-o".into(),
+        "ConnectTimeout=20".into(),
+        "-o".into(),
+        "NumberOfPasswordPrompts=1".into(),
     ];
     if !ep.key_file.trim().is_empty() {
-        v.push(tr("-i").into());
+        v.push("-i".into());
         v.push(ep.key_file.trim().to_string());
     }
     if let Some(j) = jump_arg(ep) {
-        v.push(tr("-J").into());
+        v.push("-J".into());
         v.push(j);
     }
     v
@@ -481,16 +481,16 @@ fn sftp_batch(ep: &Endpoint, script: &str) -> Result<RunOut, String> {
     if putty {
         let file = std::env::temp_dir().join(format!("admincraft-psftp-{}.txt", std::process::id()));
         std::fs::write(&file, script).map_err(|e| e.to_string())?;
-        let mut args = vec![tr("-batch").to_string(), tr("-P").into(), t.port.to_string()];
+        let mut args = vec!["-batch".to_string(), "-P".into(), t.port.to_string()];
         if !t.password.is_empty() {
-            args.push(tr("-pw").into());
+            args.push("-pw".into());
             args.push(t.password.clone());
         }
         if !ep.key_file.trim().is_empty() {
-            args.push(tr("-i").into());
+            args.push("-i".into());
             args.push(ep.key_file.trim().into());
         }
-        args.push(tr("-b").into());
+        args.push("-b".into());
         args.push(file.display().to_string());
         args.push(user_host(t));
         let r = run(&prog, &args, None, &[]);
@@ -498,9 +498,9 @@ fn sftp_batch(ep: &Endpoint, script: &str) -> Result<RunOut, String> {
         r
     } else {
         let mut args = openssh_opts(ep);
-        args.push(tr("-P").into());
+        args.push("-P".into());
         args.push(t.port.to_string());
-        args.push(tr("-b").into());
+        args.push("-b".into());
         args.push("-".into());
         args.push(user_host(t));
         run(&prog, &args, Some(script), &askpass_env(&hops_all(ep)))
@@ -565,7 +565,7 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
         }
         Job::Download { remote, is_dir, local_dir } => {
             let r = if *is_dir { "-r " } else { "" };
-            let script = tf("lcd {0}\nget {1}{2}\n", &[&(local_q(local_dir)), &r, &(q(remote))]);
+            let script = format!("lcd {0}\nget {1}{2}\n", local_q(local_dir), r, q(remote));
             let out = sftp_batch(ep, &script)?;
             done(out, tf("Downloaded: {0} » {1}", &[&(base_name(remote)), &(local_dir.display())]))
         }
@@ -574,14 +574,14 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
             let name = local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let mut script = format!("cd {}\n", q(remote_dir));
             if local.is_dir() {
-                script.push_str(&tf("-mkdir {0}\n", &[&(q(&name))]));
+                script.push_str(&format!("-mkdir {0}\n", q(&name)));
             }
-            script.push_str(&tf("put {0}{1} {2}\n", &[&r, &(local_q(local)), &(q(&name))]));
+            script.push_str(&format!("put {0}{1} {2}\n", r, local_q(local), q(&name)));
             let out = sftp_batch(ep, &script)?;
             done(out, tf("Uploaded: {0} » {1}", &[&name, &remote_dir]))
         }
         Job::Mkdir(p) => {
-            let out = sftp_batch(ep, &tf("mkdir {0}\n", &[&(q(p))]))?;
+            let out = sftp_batch(ep, &format!("mkdir {0}\n", q(p)))?;
             done(out, tf("Folder created: {0}", &[&p]))
         }
         Job::Delete { path, is_dir } => {
@@ -597,13 +597,13 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
                 script.push_str(&format!("rm {}\n", q(f)));
             }
             for d in &dirs {
-                script.push_str(&tf("rmdir {0}\n", &[&(q(d))]));
+                script.push_str(&format!("rmdir {0}\n", q(d)));
             }
             let out = sftp_batch(ep, &script)?;
             done(out, tf("Folder deleted: {0} ({1} files)", &[&path, &(files.len())]))
         }
         Job::Rename { from, to } => {
-            let out = sftp_batch(ep, &tf("rename {0} {1}\n", &[&(q(from)), &(q(to))]))?;
+            let out = sftp_batch(ep, &format!("rename {0} {1}\n", q(from), q(to)))?;
             done(out, tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
         }
     }
@@ -620,9 +620,9 @@ fn ssh_command(ep: &Endpoint, command: &str) -> Result<RunOut, String> {
     let use_putty = ep.tool == Tool::Putty || ep.progs.ssh.is_none();
     if use_putty {
         if let Some(plink) = &ep.progs.plink {
-            let mut args = vec![tr("-batch").to_string(), tr("-ssh").into(), tr("-P").into(), t.port.to_string()];
+            let mut args = vec!["-batch".to_string(), "-ssh".into(), "-P".into(), t.port.to_string()];
             if !t.password.is_empty() {
-                args.push(tr("-pw").into());
+                args.push("-pw".into());
                 args.push(t.password.clone());
             }
             args.push(user_host(t));
@@ -632,7 +632,7 @@ fn ssh_command(ep: &Endpoint, command: &str) -> Result<RunOut, String> {
     }
     let ssh = ep.progs.ssh.clone().ok_or(tr("No ssh program found (OpenSSH client or plink.exe)."))?;
     let mut args = openssh_opts(ep);
-    args.push(tr("-p").into());
+    args.push("-p".into());
     args.push(t.port.to_string());
     args.push(user_host(t));
     args.push(command.to_string());
@@ -644,13 +644,13 @@ fn scp_copy(ep: &Endpoint, recursive: bool, from: &str, to: &str) -> Result<RunO
     let use_putty = ep.tool == Tool::Putty || ep.progs.scp.is_none();
     if use_putty {
         if let Some(pscp) = &ep.progs.pscp {
-            let mut args = vec![tr("-batch").to_string(), tr("-scp").into(), tr("-P").into(), t.port.to_string()];
+            let mut args = vec!["-batch".to_string(), "-scp".into(), "-P".into(), t.port.to_string()];
             if !t.password.is_empty() {
-                args.push(tr("-pw").into());
+                args.push("-pw".into());
                 args.push(t.password.clone());
             }
             if recursive {
-                args.push(tr("-r").into());
+                args.push("-r".into());
             }
             args.push(from.into());
             args.push(to.into());
@@ -659,10 +659,10 @@ fn scp_copy(ep: &Endpoint, recursive: bool, from: &str, to: &str) -> Result<RunO
     }
     let scp = ep.progs.scp.clone().ok_or(tr("No scp program found (OpenSSH client or pscp.exe)."))?;
     let mut args = openssh_opts(ep);
-    args.push(tr("-P").into());
+    args.push("-P".into());
     args.push(t.port.to_string());
     if recursive {
-        args.push(tr("-r").into());
+        args.push("-r".into());
     }
     args.push(from.into());
     args.push(to.into());
@@ -678,7 +678,7 @@ fn run_scp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, String
     match job {
         Job::List(p) => {
             let cd = if p.is_empty() { String::new() } else { format!("cd -- {} && ", sh(p)) };
-            let out = ssh_command(ep, &tf("{0}echo \"Remote working directory: $(pwd)\" && LC_ALL=C ls -la", &[&cd]))?;
+            let out = ssh_command(ep, &format!("{0}echo \"Remote working directory: $(pwd)\" && LC_ALL=C ls -la", cd))?;
             let (dir, items) = parse_listing(&out.stdout);
             match dir {
                 Some(d) if out.ok => {
@@ -697,10 +697,10 @@ fn run_scp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, String
             let out = scp_copy(ep, local.is_dir(), &local.display().to_string(), &remote_spec(ep, &target))?;
             done(out, tf("Uploaded: {0} » {1}", &[&(local.display()), &remote_dir]))
         }
-        Job::Mkdir(p) => done(ssh_command(ep, &tf("mkdir -p -- {0}", &[&(sh(p))]))?, tf("Folder created: {0}", &[&p])),
+        Job::Mkdir(p) => done(ssh_command(ep, &format!("mkdir -p -- {0}", sh(p)))?, tf("Folder created: {0}", &[&p])),
         Job::Delete { path, is_dir } => {
             let flag = if *is_dir { "-rf" } else { "-f" };
-            done(ssh_command(ep, &tf("rm {0} -- {1}", &[&flag, &(sh(path))]))?, tf("Deleted: {0}", &[&path]))
+            done(ssh_command(ep, &format!("rm {0} -- {1}", flag, sh(path)))?, tf("Deleted: {0}", &[&path]))
         }
         Job::Rename { from, to } => done(
             ssh_command(ep, &format!("mv -- {} {}", sh(from), sh(to)))?,
@@ -791,8 +791,8 @@ fn ftp_err(e: suppaftp::FtpError) -> String {
 fn ftp_connect(ep: &Endpoint) -> Result<FtpConn, String> {
     let t = &ep.target;
     let addr = format!("{}:{}", t.host, if t.port == 0 { 21 } else { t.port });
-    let user = if t.user.is_empty() { tr("anonymous").to_string() } else { t.user.clone() };
-    let pass = if t.user.is_empty() && t.password.is_empty() { tr("admincraft@").to_string() } else { t.password.clone() };
+    let user = if t.user.is_empty() { "anonymous".to_string() } else { t.user.clone() };
+    let pass = if t.user.is_empty() && t.password.is_empty() { "admincraft@".to_string() } else { t.password.clone() };
     let mut conn = if ep.tls {
         let s = suppaftp::RustlsFtpStream::connect(&addr).map_err(ftp_err)?;
         let cfg = tls_config(ep.check_cert)?;
@@ -1091,7 +1091,7 @@ pub fn cli_check(kind: &str, host: &str, user: &str, download_dir: &Path) -> Str
     };
     match go(Job::List(String::new()), &mut cwd) {
         Ok(Outcome::Listing(dir, items)) => {
-            out.push_str(&tf("LIST OK {0}: {1} entries\n", &[&dir, &(items.len())]));
+            out.push_str(&format!("LIST OK {0}: {1} entries\n", dir, items.len()));
             for it in items.iter().take(12) {
                 out.push_str(&format!("  {} {} {}\n", if it.is_dir { "D" } else { "F" }, it.size, it.name));
             }
@@ -1101,15 +1101,15 @@ pub fn cli_check(kind: &str, host: &str, user: &str, download_dir: &Path) -> Str
                 match go(Job::Download { remote, is_dir: false, local_dir: download_dir.to_path_buf() }, &mut cwd) {
                     Ok(Outcome::Done(m)) => {
                         let ok = download_dir.join(&f.name).is_file();
-                        out.push_str(&tf("GET OK ({0}): {1}\n", &[&ok, &m]));
+                        out.push_str(&format!("GET OK ({0}): {1}\n", ok, m));
                     }
                     Ok(_) => out.push_str("GET ?\n"),
-                    Err(e) => out.push_str(&tf("GET ERROR: {0}\n", &[&e])),
+                    Err(e) => out.push_str(&format!("GET ERROR: {0}\n", e)),
                 }
             }
         }
         Ok(_) => out.push_str("LIST ?\n"),
-        Err(e) => out.push_str(&tf("LIST ERROR: {0}\n", &[&e])),
+        Err(e) => out.push_str(&format!("LIST ERROR: {0}\n", e)),
     }
     out
 }

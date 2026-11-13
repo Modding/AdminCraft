@@ -10,7 +10,7 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
 * Benutzer / Domäne / Passwort am Ordner eintragen – Verbindungen darin erben sie
 * **Terminal im Tab:** SSH (OpenSSH), Telnet, PowerShell Remoting (Enter-PSSession), lokale Shell –
   gespeicherte Passwörter werden bei der Abfrage automatisch eingegeben
-* **Programmfenster im Tab (Windows):** Remotedesktop (mstsc, automatische Anmeldung per cmdkey),
+* **Programmfenster im Tab (Windows):** Remotedesktop (mstsc, automatische Anmeldung),
   PuTTY und VNC-Viewer werden in den Tab eingebettet; „Als eigenes Fenster“ löst sie wieder.
   Linux/macOS: eigenes Fenster, der Tab zeigt Status und „Trennen“.
 * **SSH-Programm wählbar:** eingebautes Terminal, PuTTY (im Tab) oder OpenSSH in eigenem Terminalfenster

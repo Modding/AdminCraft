@@ -495,7 +495,7 @@ impl AdminApp {
                 "embedtest" => {
                     // check of the window embedding with a harmless program (Character Map)
                     let e = Entry { name: tr("Embedding (test)").into(), protocol: Protocol::Vnc, ..Default::default() };
-                    let prog = if host.is_empty() { tr("charmap.exe").to_string() } else { host.clone() };
+                    let prog = if host.is_empty() { "charmap.exe".to_string() } else { host.clone() };
                     match std::process::Command::new(&prog).spawn() {
                         Ok(child) => {
                             let pid = child.id();
@@ -517,7 +517,7 @@ impl AdminApp {
                                 })),
                             );
                         }
-                        Err(err) => app.log.push(tf("embedtest: {0}", &[&err])),
+                        Err(err) => app.log.push(format!("embedtest: {0}", err)),
                     }
                 }
                 "connect" => {
@@ -1485,7 +1485,7 @@ impl AdminApp {
         self.add_tab(
             tr("DNS lookup").into(),
             Color32::from_rgb(156, 39, 176),
-            TabKind::Dns(DnsTab { host, result: Default::default(), runner: CmdRunner::default(), rtype: tr("A").into(), server: String::new() }),
+            TabKind::Dns(DnsTab { host, result: Default::default(), runner: CmdRunner::default(), rtype: "A".into(), server: String::new() }),
         );
     }
 
@@ -2241,7 +2241,7 @@ impl AdminApp {
             ui.add_space(8.0);
 
             section(ui, tr("General"));
-            egui::Grid::new(tr("props_general")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+            egui::Grid::new("props_general").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                 ui.label(tr("Name"));
                 ui.add(egui::TextEdit::singleline(&mut e.name).desired_width(f32::INFINITY));
                 ui.end_row();
@@ -2292,7 +2292,7 @@ impl AdminApp {
 
             if e.protocol != Protocol::LocalShell || e.folder {
                 section_help(ui, tr("Login"), crate::help::Topic::Passwords, &mut self.help_request);
-                egui::Grid::new(tr("props_login")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                egui::Grid::new("props_login").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                     ui.label(tr("User"));
                     ui.add(egui::TextEdit::singleline(&mut e.username).desired_width(f32::INFINITY));
                     ui.end_row();
@@ -2404,7 +2404,7 @@ impl AdminApp {
                         section(ui, tr("Remote desktop"));
                         let presets = [(1280, 720), (1366, 768), (1600, 900), (1920, 1080), (2560, 1440)];
                         let current = if e.rdp.fullscreen { tr("Full screen").to_string() } else { format!("{} × {}", e.rdp.width, e.rdp.height) };
-                        egui::Grid::new(tr("props_rdp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                        egui::Grid::new("props_rdp").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                             ui.label(tr("Screen"));
                             egui::ComboBox::from_id_salt("rdp_res").selected_text(current).show_ui(ui, |ui| {
                                 if ui.selectable_label(e.rdp.fullscreen, tr("Full screen")).clicked() {
@@ -2423,7 +2423,7 @@ impl AdminApp {
                         });
                         ui.checkbox(&mut e.rdp.pass_credentials, tr("Pass the login automatically"))
                             .on_hover_text(tr(if cfg!(windows) {
-                                "Stores user and password for this host in the Windows Credential Manager (cmdkey), so Remote Desktop logs in by itself."
+                                "Stores user and password for this host in the Windows Credential Manager, so Remote Desktop logs in by itself. The entry is removed again shortly after the connection started."
                             } else {
                                 "Passes user and password to FreeRDP."
                             }));
@@ -2434,7 +2434,7 @@ impl AdminApp {
                     }
                     Protocol::Ssh | Protocol::Sftp | Protocol::Scp => {
                         section(ui, if e.protocol == Protocol::Ssh { "SSH" } else { "SSH / Dateien" });
-                        egui::Grid::new(tr("props_ssh")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                        egui::Grid::new("props_ssh").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                             if e.protocol == Protocol::Ssh {
                                 ui.label(tr("Open with"));
                                 let shown = if e.ssh_client == SshClient::Default {
@@ -2525,7 +2525,7 @@ impl AdminApp {
                             ui.checkbox(&mut e.tls_ignore_cert, tr("Don't check the certificate (self-signed, e.g. NAS)"))
                                 .on_hover_text(tr("Only for your own devices in your own network: the connection stays encrypted, but the server is not verified."));
                         }
-                        egui::Grid::new(tr("props_ftp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                        egui::Grid::new("props_ftp").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                             ui.label(tr("Start folder"));
                             ui.add(egui::TextEdit::singleline(&mut e.start_path).hint_text(tr("/ (optional)")).desired_width(f32::INFINITY));
                             ui.end_row();
@@ -2542,7 +2542,7 @@ impl AdminApp {
                     }
                     Protocol::Telnet | Protocol::Vnc => {
                         section(ui, tr("Advanced"));
-                        egui::Grid::new(tr("props_extra")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                        egui::Grid::new("props_extra").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                             ui.label(tr("Extra options"));
                             ui.add(egui::TextEdit::singleline(&mut e.extra_args).desired_width(f32::INFINITY));
                             ui.end_row();
@@ -2553,7 +2553,7 @@ impl AdminApp {
 
                 if e.protocol.needs_host() {
                     section(ui, tr("Network"));
-                    egui::Grid::new(tr("props_net")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                    egui::Grid::new("props_net").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                         ui.label(tr("MAC address"));
                         ui.add(egui::TextEdit::singleline(&mut e.mac).hint_text(tr("for Wake-on-LAN")).desired_width(f32::INFINITY));
                         ui.end_row();
@@ -3156,7 +3156,7 @@ impl AdminApp {
                 ui.add_space(4.0);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    egui::Grid::new(tr("syscheck")).num_columns(3).spacing([12.0, 5.0]).show(ui, |ui| {
+                    egui::Grid::new("syscheck").num_columns(3).spacing([12.0, 5.0]).show(ui, |ui| {
                         for (what, prog, ok) in &self.system_check {
                             let (r, _) = ui.allocate_exact_size(Vec2::new(10.0, 14.0), Sense::hover());
                             ui.painter().circle_filled(r.center(), 5.0, if *ok { OK_GREEN } else { WARN });
@@ -3194,7 +3194,7 @@ impl AdminApp {
         if let Some(id) = self.confirm_delete {
             let name = self.store.get(id).map(|e| e.name.clone()).unwrap_or_default();
             let is_folder = self.store.get(id).map(|e| e.folder).unwrap_or(false);
-            let resp = egui::Modal::new(egui::Id::new(tr("confirm_delete"))).show(ctx, |ui| {
+            let resp = egui::Modal::new(egui::Id::new("confirm_delete")).show(ctx, |ui| {
                 ui.set_width(360.0);
                 ui.heading(tr("Really delete?"));
                 ui.add_space(6.0);
@@ -3287,7 +3287,7 @@ impl AdminApp {
         if self.kp_dialog {
             let mut close = false;
             let mut unlock = false;
-            egui::Modal::new(egui::Id::new(tr("kp_unlock"))).show(ctx, |ui| {
+            egui::Modal::new(egui::Id::new("kp_unlock")).show(ctx, |ui| {
                 ui.set_width(400.0);
                 ui.heading(tr("Unlock KeePass"));
                 ui.add_space(4.0);
@@ -3340,11 +3340,11 @@ impl AdminApp {
         if self.ask.is_some() {
             let mut result: Option<bool> = None;
             if let Some(a) = &mut self.ask {
-                egui::Modal::new(egui::Id::new(tr("ask_pw"))).show(ctx, |ui| {
+                egui::Modal::new(egui::Id::new("ask_pw")).show(ctx, |ui| {
                     ui.set_width(380.0);
                     ui.heading(tr("Login"));
                     ui.label(tf("Password for \"{0}\"", &[&a.name]));
-                    egui::Grid::new(tr("ask_grid")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                    egui::Grid::new("ask_grid").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                         ui.label(tr("User"));
                         if a.key == 0 {
                             ui.add(egui::TextEdit::singleline(&mut a.user).desired_width(240.0));
@@ -3500,7 +3500,7 @@ impl AdminApp {
         }
 
         if self.store.locked() {
-            egui::Modal::new(egui::Id::new(tr("unlock"))).show(ctx, |ui| {
+            egui::Modal::new(egui::Id::new("unlock")).show(ctx, |ui| {
                 ui.set_width(340.0);
                 ui.horizontal(|ui| {
                     logo(ui, 28.0);
@@ -3663,7 +3663,7 @@ impl AdminApp {
             .changed();
 
         section_help(ui, tr("SSH, remote desktop and files"), crate::help::Topic::Protocols, &mut self.help_request);
-        egui::Grid::new(tr("ssh_defaults")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+        egui::Grid::new("ssh_defaults").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Open SSH with"));
             let cur = self.store.data.settings.default_ssh_client;
             egui::ComboBox::from_id_salt("def_client").selected_text(cur.label()).width(300.0).show_ui(ui, |ui| {
@@ -3705,7 +3705,7 @@ impl AdminApp {
         });
         ui.add_space(4.0);
         let mut recheck = false;
-        egui::Grid::new(tr("progs")).num_columns(4).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
+        egui::Grid::new("progs").num_columns(4).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
             ui.label(RichText::new(tr("Program")).strong());
             ui.label(RichText::new(tr("For")).strong());
             ui.label(RichText::new(tr("Found")).strong());
@@ -3743,7 +3743,7 @@ impl AdminApp {
 
         section_help(ui, tr("Password vault: KeePass"), crate::help::Topic::Passwords, &mut self.help_request);
         ui.label(tr("Connections can take their password from a KeePass/KeePassXC database (.kdbx): choose \"Password from » KeePass\" on a connection."));
-        egui::Grid::new(tr("kp")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+        egui::Grid::new("kp").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Database (.kdbx)"));
             changed |= ui
                 .add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_path).hint_text(r"D:\Vault\Passwords.kdbx").desired_width(380.0))
@@ -3924,7 +3924,7 @@ impl AdminApp {
         } else {
             "No master password yet: passwords are only obfuscated. Set one for real protection."
         }));
-        egui::Grid::new(tr("master")).num_columns(2).show(ui, |ui| {
+        egui::Grid::new("master").num_columns(2).show(ui, |ui| {
             ui.label(tr("New password"));
             ui.add(egui::TextEdit::singleline(&mut self.new_master).password(true));
             ui.end_row();
@@ -3956,7 +3956,7 @@ impl AdminApp {
 
         section(ui, tr("Own command per protocol (for experts)"));
         ui.weak(tr("Replaces the built-in start completely. Empty = default. Placeholders: {host} {port} {user} {domain} {password} {name}"));
-        egui::Grid::new(tr("templates")).num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
+        egui::Grid::new("templates").num_columns(2).spacing([10.0, 4.0]).show(ui, |ui| {
             for p in Protocol::ALL {
                 ui.label(p.label());
                 let entry = self.store.data.settings.templates.entry(p.key().to_string()).or_default();
@@ -4701,7 +4701,7 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
     let mut close = false;
     if let Some(d) = &mut t.dialog {
         let ctx = ui.ctx().clone();
-        egui::Modal::new(egui::Id::new(tr("xfer_dialog"))).show(&ctx, |ui| {
+        egui::Modal::new(egui::Id::new("xfer_dialog")).show(&ctx, |ui| {
             ui.set_width(380.0);
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
             match d {
@@ -4849,7 +4849,7 @@ fn output_box(ui: &mut egui::Ui, lines: &[String]) {
 
 fn scan_ui(ui: &mut egui::Ui, s: &mut ScanTab, ctx: &egui::Context) {
     let running = s.scan.as_ref().map(|x| !x.state.lock().unwrap().finished).unwrap_or(false);
-    egui::Grid::new(tr("scan_form")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new("scan_form").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
         ui.label(tr("Host"));
         ui.add(egui::TextEdit::singleline(&mut s.host).desired_width(260.0).hint_text(tr("Name or IP")));
         ui.end_row();
@@ -4904,7 +4904,7 @@ fn scan_ui(ui: &mut egui::Ui, s: &mut ScanTab, ctx: &egui::Context) {
         ui.add_space(6.0);
         ui.label(RichText::new(tf("{0} open ports", &[&(st.open.len())])).strong());
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Grid::new(tr("scan_res")).striped(true).num_columns(3).spacing([24.0, 4.0]).show(ui, |ui| {
+            egui::Grid::new("scan_res").striped(true).num_columns(3).spacing([24.0, 4.0]).show(ui, |ui| {
                 ui.label(RichText::new(tr("Port")).strong());
                 ui.label(RichText::new(tr("Service")).strong());
                 ui.label(RichText::new(tr("Status")).strong());
@@ -4961,7 +4961,7 @@ fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
         *d.result.lock().unwrap() = None;
     }
     // reverse lookups need the PTR name; nslookup does that by itself for an IP
-    let rtype = if d.rtype == "PTR" { tr("PTR").to_string() } else { d.rtype.clone() };
+    let rtype = if d.rtype == "PTR" { "PTR".to_string() } else { d.rtype.clone() };
     if launch::which("nslookup").is_some() {
         let mut args = vec![format!("-type={rtype}"), host];
         if !server.is_empty() {
@@ -4969,12 +4969,12 @@ fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
         }
         d.runner.start("nslookup", &args, ctx.clone());
     } else {
-        let mut args = vec![tr("+noall").to_string(), tr("+answer").into()];
+        let mut args = vec!["+noall".to_string(), "+answer".into()];
         if !server.is_empty() {
             args.push(format!("@{server}"));
         }
         if rtype == "PTR" {
-            args.push(tr("-x").into());
+            args.push("-x".into());
             args.push(host);
         } else {
             args.push(host);
@@ -4986,7 +4986,7 @@ fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
 
 fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
     let mut go = false;
-    egui::Grid::new(tr("dns_form")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new("dns_form").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
         ui.label(tr("Name or IP"));
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut d.host).desired_width(260.0).hint_text("example.com"));
@@ -5040,7 +5040,7 @@ fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
 fn wol_ui(ui: &mut egui::Ui, w: &mut WolTab) {
     ui.label(tr("Switches a PC on over the network (Wake-on-LAN must be enabled in BIOS/network adapter)."));
     ui.add_space(6.0);
-    egui::Grid::new(tr("wol")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+    egui::Grid::new("wol").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
         ui.label(tr("MAC address"));
         ui.add(egui::TextEdit::singleline(&mut w.mac).hint_text("00:11:22:33:44:55").desired_width(220.0));
         ui.end_row();

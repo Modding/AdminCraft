@@ -664,3 +664,26 @@ fn whois_and_http_reading() {
     assert!(c[0].secure && c[0].http_only && c[0].same_site == "Lax");
     assert!(!c[1].secure && c[1].name == "theme");
 }
+#[test]
+fn control_words_are_not_translated() {
+    // A language file must never change what is started: program names and arguments are plain
+    // text in the code. With German active, "open" (a status word) is translated, the command is not.
+    for file in [include_str!("launch.rs"), include_str!("transfer.rs"), include_str!("tools.rs"), include_str!("programs.rs")] {
+        assert!(!file.contains("Command::new(tr("), "a program name goes through the translation");
+        for arg in ["tr(\"-", "tr(\"/", "tr(\"ssh\")", "tr(\"cmdkey\")"] {
+            assert!(!file.contains(arg), "a command-line argument goes through the translation: {arg}");
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn rdp_login_through_the_credential_manager() {
+    let target = format!("AdminCraftTest/{}", std::process::id());
+    assert!(!crate::wincred::exists(&target));
+    assert_eq!(crate::wincred::store(&target, "DOMAIN\\user", "pässword"), Ok(false), "new entry");
+    assert!(crate::wincred::exists(&target));
+    assert_eq!(crate::wincred::store(&target, "DOMAIN\\user", "other"), Ok(true), "was there before");
+    assert!(crate::wincred::delete(&target));
+    assert!(!crate::wincred::exists(&target));
+}
