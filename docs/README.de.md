@@ -10,7 +10,7 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
 * Benutzer / Domäne / Passwort am Ordner eintragen – Verbindungen darin erben sie
 * **Terminal im Tab:** SSH (OpenSSH), Telnet, PowerShell Remoting (Enter-PSSession), lokale Shell –
   gespeicherte Passwörter werden bei der Abfrage automatisch eingegeben
-* **Programmfenster im Tab (Windows):** Remotedesktop (mstsc, automatische Anmeldung per cmdkey),
+* **Programmfenster im Tab (Windows):** Remotedesktop (mstsc, automatische Anmeldung),
   PuTTY und VNC-Viewer werden in den Tab eingebettet; „Als eigenes Fenster“ löst sie wieder.
   Linux/macOS: eigenes Fenster, der Tab zeigt Status und „Trennen“.
 * **SSH-Programm wählbar:** eingebautes Terminal, PuTTY (im Tab) oder OpenSSH in eigenem Terminalfenster
@@ -21,7 +21,7 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
   hoch- und herunterladen (auch ganze Ordner), Ordner anlegen, umbenennen, löschen,
   Dateien aus dem Explorer ins Fenster ziehen = hochladen.
   SFTP/SCP über OpenSSH (sftp/scp) oder PuTTY (psftp/pscp), Passwort wird automatisch übergeben.
-* **Passwörter:** in AdminCraft (AES-256, optional Masterpasswort), aus einer KeePass/KeePassXC-Datenbank
+* **Passwörter:** in AdminCraft (AES-256 mit Masterpasswort; ohne Masterpasswort nur verschleiert), aus einer KeePass/KeePassXC-Datenbank
   (.kdbx, nur lesend; Eintrag per Titel/Pfad oder automatisch passend zum Host) oder jedes Mal fragen
 * **Einstellungsseite (Tab):** Pfad je Programm (PuTTY, plink, psftp, pscp, mstsc, VNC, Telnet, WinSCP …),
   Standard-SSH-Programm, Einbetten an/aus, KeePass-Datei
@@ -82,8 +82,14 @@ benutzt. `--data <ordner>` wählt einen eigenen Datenordner.
 
 `.gitignore` hält heraus: Verbindungen und Passwörter (`AdminCraftData/`), abgelegte Programme
 (`AdminCraftTools/`), eigene Sprachdateien (`AdminCraftLang/`), KeePass-Dateien, SSH-Schlüssel,
-`.rdp`-Dateien, mRemoteNG-Exporte sowie Bauordner (`target/`, `dist/`) und die lokale Werkzeugkette
-(`.toolchain/`, mehrere GB). Die Beispielverbindungen im Code sind erfunden (10.0.0.x, 203.0.113.x).
+`.rdp`-Dateien, mRemoteNG-Exporte sowie Bauordner (`target/`, `dist/`).
+Die Beispielverbindungen im Code sind erfunden (10.0.0.x, 203.0.113.x).
+
+**Wie sicher sind gespeicherte Passwörter?** Mit Masterpasswort sind sie mit AES-256-GCM verschlüsselt,
+der Schlüssel entsteht per Argon2 aus dem Masterpasswort. **Ohne Masterpasswort sind sie nur
+verschleiert:** wer die Datei `connections.json` hat, kann sie lesen. Für einen USB-Stick oder einen
+gemeinsamen Ordner also immer ein Masterpasswort setzen (Einstellungen) oder KeePass benutzen.
+Das Gleiche gilt für das gespeicherte WebDAV-Passwort.
 
 ## Versionen und Releases
 
@@ -91,20 +97,16 @@ Versionen nach Semantic Versioning (`0.x.y`) wie bei den anderen Craft-Apps. Fer
 (portabel), Linux und macOS gibt es unter [Releases](https://github.com/Modding/AdminCraft/releases) mit `SHA256SUMS.txt`. Wie ein Release
 entsteht: [AGENTS.md](../AGENTS.md#versions-and-releases). Was getestet ist und was noch kommt:
 [ROADMAP.md](../ROADMAP.md).
+
 ## Bauen
 
-Windows mit lokaler Werkzeugkette in `.toolchain` (nicht im Repository; nur auf dem PC, auf dem
-AdminCraft entstanden ist):
-
-    cargo.cmd build --release
-
-Nach dem Klonen auf Windows: Rust von rustup.rs installieren (mit Visual-Studio-Build-Tools) und
-`cargo build --release` – die Einträge für `.toolchain` in `.cargo/config.toml` gelten nur für das
-Ziel `x86_64-pc-windows-gnullvm` und stören den normalen Bau nicht.
-
-Mit normal installiertem Rust (rustup.rs) auf jedem System:
+Mit Rust von rustup.rs auf jedem System:
 
     cargo build --release
+
+Windows: mit den Visual-Studio-Build-Tools (Standard) oder ohne Visual Studio mit dem Ziel
+`x86_64-pc-windows-gnullvm` und LLVM-MinGW. Linker und C-Compiler dafür trägt man in der eigenen
+Cargo-Konfiguration ein (`~/.cargo/config.toml`), nicht im Repository.
 
 Ein C-Compiler wird für die TLS-Bibliothek (FTPS) gebraucht: Linux `gcc`/`clang`,
 macOS die Xcode-Kommandozeilenwerkzeuge. Linux braucht außerdem die üblichen Pakete für

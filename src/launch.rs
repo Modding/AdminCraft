@@ -58,11 +58,7 @@ pub enum Launch {
 pub fn which(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     let exts: Vec<String> = if cfg!(windows) {
-        std::env::var("PATHEXT")
-            .unwrap_or_else(|_| tr(".EXE;.CMD;.BAT;.COM").into())
-            .split(';')
-            .map(|s| s.to_lowercase())
-            .collect()
+        std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into()).split(';').map(|s| s.to_lowercase()).collect()
     } else {
         vec![String::new()]
     };
@@ -84,11 +80,7 @@ pub fn which(program: &str) -> Option<PathBuf> {
 fn first_found(names: &[&str]) -> Option<PathBuf> {
     names.iter().find_map(|n| {
         let p = PathBuf::from(n);
-        if p.is_absolute() {
-            p.is_file().then_some(p)
-        } else {
-            which(n)
-        }
+        if p.is_absolute() { p.is_file().then_some(p) } else { which(n) }
     })
 }
 
@@ -139,39 +131,32 @@ fn hidden(cmd: &mut Command) -> &mut Command {
 }
 
 fn spawn(program: &PathBuf, args: &[String]) -> Result<Child, String> {
-    Command::new(program)
-        .args(args)
-        .spawn()
-        .map_err(|e| tf("{0} could not be started: {1}", &[&(program.display()), &e]))
+    Command::new(program).args(args).spawn().map_err(|e| tf("{0} could not be started: {1}", &[&(program.display()), &e]))
 }
 
 pub fn open_url(url: &str) -> Result<(), String> {
     let r = if cfg!(windows) {
-        hidden(Command::new(tr("rundll32")).args(["url.dll,FileProtocolHandler", url])).spawn()
+        hidden(Command::new("rundll32").args(["url.dll,FileProtocolHandler", url])).spawn()
     } else if cfg!(target_os = "macos") {
-        Command::new(tr("open")).arg(url).spawn()
+        Command::new("open").arg(url).spawn()
     } else {
-        Command::new(tr("xdg-open")).arg(url).spawn()
+        Command::new("xdg-open").arg(url).spawn()
     };
     r.map(|_| ()).map_err(|e| tf("Could not open {0}: {1}", &[&url, &e]))
 }
 
 pub fn open_folder(path: &std::path::Path) {
     let _ = if cfg!(windows) {
-        Command::new(tr("explorer")).arg(path).spawn()
+        Command::new("explorer").arg(path).spawn()
     } else if cfg!(target_os = "macos") {
-        Command::new(tr("open")).arg(path).spawn()
+        Command::new("open").arg(path).spawn()
     } else {
-        Command::new(tr("xdg-open")).arg(path).spawn()
+        Command::new("xdg-open").arg(path).spawn()
     };
 }
 
 fn user_host(user: &str, host: &str) -> String {
-    if user.is_empty() {
-        host.trim().to_string()
-    } else {
-        format!("{}@{}", user, host.trim())
-    }
+    if user.is_empty() { host.trim().to_string() } else { format!("{}@{}", user, host.trim()) }
 }
 
 fn terminal_env(cmd: &mut CommandBuilder) {
@@ -180,11 +165,7 @@ fn terminal_env(cmd: &mut CommandBuilder) {
 }
 
 fn effective_port(e: &Entry) -> u16 {
-    if e.port == 0 {
-        e.protocol.default_port()
-    } else {
-        e.port
-    }
+    if e.port == 0 { e.protocol.default_port() } else { e.port }
 }
 
 pub fn ssh_client_for(e: &Entry, settings: &Settings) -> SshClient {
@@ -232,7 +213,8 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
         }
         let prog = PathBuf::from(&words[0]);
         let child = spawn(&prog, &words[1..])?;
-        let embed: Option<&'static [&'static str]> = if settings.embed_windows && matches!(e.protocol, Protocol::Rdp | Protocol::Vnc | Protocol::Ssh) { Some(&[]) } else { None };
+        let embed: Option<&'static [&'static str]> =
+            if settings.embed_windows && matches!(e.protocol, Protocol::Rdp | Protocol::Vnc | Protocol::Ssh) { Some(&[]) } else { None };
         return Ok(Launch::Process { child, label: tf("Own command: {0}", &[&preview]), embed });
     }
 
@@ -247,7 +229,8 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
         Protocol::Telnet => {
             let prog = programs::find("telnet", settings).ok_or_else(|| {
                 if cfg!(windows) {
-                    tr("Telnet client missing. Turn it on: Windows key » \"Turn Windows features on or off\" » Telnet Client. Or use PuTTY.").to_string()
+                    tr("Telnet client missing. Turn it on: Windows key » \"Turn Windows features on or off\" » Telnet Client. Or use PuTTY.")
+                        .to_string()
                 } else {
                     tr("Program 'telnet' not found (install package telnet / inetutils).").to_string()
                 }
@@ -257,14 +240,19 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
             cmd.arg(e.host.trim());
             cmd.arg(effective_port(e).to_string());
             terminal_env(&mut cmd);
-            Ok(Launch::Terminal { cmd, preview: tf("telnet {0} {1}", &[&(e.host.trim()), &(effective_port(e))]), passwords: single_pw, chain: Vec::new() })
+            Ok(Launch::Terminal {
+                cmd,
+                preview: format!("telnet {0} {1}", e.host.trim(), effective_port(e)),
+                passwords: single_pw,
+                chain: Vec::new(),
+            })
         }
         Protocol::PowerShell => {
             let ps = if cfg!(windows) { first_found(&["pwsh", "powershell"]) } else { first_found(&["pwsh"]) }
                 .ok_or(tr("PowerShell not found (install pwsh)."))?;
             let mut script = String::from("Enter-PSSession -ComputerName $env:AC_HOST");
             if e.port != 0 && e.port != 5985 {
-                script.push_str(&tf(" -Port {0}", &[&e.port]));
+                script.push_str(&format!(" -Port {0}", e.port));
                 if e.port == 5986 {
                     script.push_str(" -UseSSL");
                 }
@@ -275,13 +263,16 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
                 cmd.env("AC_USER", c.full_user());
                 if !c.password.is_empty() {
                     cmd.env("AC_PW", &c.password);
-                    script = tf("$c = New-Object System.Management.Automation.PSCredential($env:AC_USER, (ConvertTo-SecureString $env:AC_PW -AsPlainText -Force)); Remove-Item Env:AC_PW; {0} -Credential $c", &[&script]);
+                    script = format!(
+                        "$c = New-Object System.Management.Automation.PSCredential($env:AC_USER, (ConvertTo-SecureString $env:AC_PW -AsPlainText -Force)); Remove-Item Env:AC_PW; {0} -Credential $c",
+                        script
+                    );
                 } else {
                     script.push_str(" -Credential $env:AC_USER");
                 }
             }
             cmd.args(["-NoLogo", "-NoExit", "-Command", &script]);
-            let preview = tf("Enter-PSSession -ComputerName {0}", &[&(e.host.trim())]);
+            let preview = format!("Enter-PSSession -ComputerName {0}", e.host.trim());
             Ok(Launch::Terminal { cmd, preview, passwords: Vec::new(), chain: Vec::new() })
         }
         Protocol::LocalShell => {
@@ -310,20 +301,22 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
             } else {
                 format!("{scheme}://{host}:{}", e.port)
             };
-            if e.web_in_tab && settings.embed_windows && cfg!(windows) {
-                if let Some(browser) = programs::find("browser", settings) {
-                    // own profile per connection: a new browser process whose window we can take in
-                    let profile = std::env::temp_dir().join("admincraft").join(format!("web-{}", e.id));
-                    let args = vec![
-                        format!("--app={url}"),
-                        format!("--user-data-dir={}", profile.display()),
-                        "--no-first-run".to_string(),
-                        "--no-default-browser-check".to_string(),
-                        "--disable-features=Translate".to_string(),
-                    ];
-                    let child = spawn(&browser, &args)?;
-                    return Ok(Launch::Process { child, label: tf("Web in tab: {0}", &[&url]), embed: Some(&["Chrome_WidgetWin_1"]) });
-                }
+            if e.web_in_tab
+                && settings.embed_windows
+                && cfg!(windows)
+                && let Some(browser) = programs::find("browser", settings)
+            {
+                // own profile per connection: a new browser process whose window we can take in
+                let profile = std::env::temp_dir().join("admincraft").join(format!("web-{}", e.id));
+                let args = vec![
+                    format!("--app={url}"),
+                    format!("--user-data-dir={}", profile.display()),
+                    "--no-first-run".to_string(),
+                    "--no-default-browser-check".to_string(),
+                    "--disable-features=Translate".to_string(),
+                ];
+                let child = spawn(&browser, &args)?;
+                return Ok(Launch::Process { child, label: tf("Web in tab: {0}", &[&url]), embed: Some(&["Chrome_WidgetWin_1"]) });
             }
             open_url(&url)?;
             Ok(Launch::Done(tf("Browser opened: {0}", &[&url])))
@@ -410,8 +403,8 @@ fn ssh_program(settings: &Settings) -> Result<PathBuf, String> {
 #[allow(dead_code)]
 pub fn chain_command(e: &Entry, c: &Creds) -> String {
     let port = effective_port(e);
-    let p = if port == 22 { String::new() } else { tf(" -p {0}", &[&port]) };
-    tf("ssh -t{0} {1}", &[&p, &(user_host(&c.user, &e.host))])
+    let p = if port == 22 { String::new() } else { format!(" -p {0}", port) };
+    format!("ssh -t{0} {1}", p, user_host(&c.user, &e.host))
 }
 
 fn jump_spec(jumps: &[JumpHop]) -> String {
@@ -433,11 +426,11 @@ pub fn chain_remote_args(e: &Entry, c: &Creds, jumps: &[JumpHop]) -> Vec<String>
     hops.push((e, c));
     let mut v = Vec::new();
     for (he, hc) in hops {
-        v.push(tr("ssh").into());
-        v.push(tr("-t").into());
+        v.push("ssh".into());
+        v.push("-t".into());
         let port = effective_port(he);
         if port != 22 {
-            v.push(tr("-p").into());
+            v.push("-p".into());
             v.push(port.to_string());
         }
         v.push(user_host(&hc.user, &he.host));
@@ -454,16 +447,16 @@ fn launch_ssh_builtin(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHo
     let remote: Vec<String> = if chain_mode { chain_remote_args(e, c, jumps) } else { Vec::new() };
     let chain: Vec<String> = Vec::new();
     let mut cmd = CommandBuilder::new(&prog);
-    let mut preview = vec![tr("ssh").to_string()];
+    let mut preview = vec!["ssh".to_string()];
     if chain_mode {
         cmd.arg("-t");
-        preview.push(tr("-t").into());
+        preview.push("-t".into());
     }
     let port = effective_port(first);
     if port != 22 {
         cmd.arg("-p");
         cmd.arg(port.to_string());
-        preview.push(tf("-p {0}", &[&port]));
+        preview.push(format!("-p {0}", port));
     }
     if !first.ssh_key.trim().is_empty() {
         cmd.arg("-i");
@@ -474,7 +467,7 @@ fn launch_ssh_builtin(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHo
         let spec = jump_spec(jumps);
         cmd.arg("-J");
         cmd.arg(&spec);
-        preview.push(tf("-J {0}", &[&spec]));
+        preview.push(format!("-J {0}", spec));
     }
     let fextra = split_words(&first.extra_args);
     let extra_used: &[String] = if std::ptr::eq(first, e) { extra } else { &fextra };
@@ -497,19 +490,19 @@ fn launch_ssh_external(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpH
     let chain_mode = !jumps.is_empty() && e.jump_mode == JumpMode::Chain;
     let (first, first_c) = if chain_mode { (&jumps[0].entry, &jumps[0].creds) } else { (e, c) };
     if chain_mode {
-        args.push(tr("-t").into());
+        args.push("-t".into());
     }
     let port = effective_port(first);
     if port != 22 {
-        args.push(tr("-p").into());
+        args.push("-p".into());
         args.push(port.to_string());
     }
     if !first.ssh_key.trim().is_empty() {
-        args.push(tr("-i").into());
+        args.push("-i".into());
         args.push(first.ssh_key.trim().into());
     }
     if !jumps.is_empty() && !chain_mode {
-        args.push(tr("-J").into());
+        args.push("-J".into());
         args.push(jump_spec(jumps));
     }
     args.extend(split_words(&first.extra_args));
@@ -519,7 +512,12 @@ fn launch_ssh_external(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpH
     }
     let mut hops: Vec<crate::transfer::Hop> = jumps
         .iter()
-        .map(|j| crate::transfer::Hop { user: j.creds.user.clone(), host: j.entry.host.trim().into(), port: effective_port(&j.entry), password: j.creds.password.clone() })
+        .map(|j| crate::transfer::Hop {
+            user: j.creds.user.clone(),
+            host: j.entry.host.trim().into(),
+            port: effective_port(&j.entry),
+            password: j.creds.password.clone(),
+        })
         .collect();
     hops.push(crate::transfer::Hop { user: c.user.clone(), host: e.host.trim().into(), port, password: c.password.clone() });
     let env = if hops.iter().any(|h| !h.password.is_empty()) { crate::transfer::askpass_env(&hops) } else { Vec::new() };
@@ -535,17 +533,17 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
     // (the SSH key for the next hop stays on the jump host).
     let chain_mode = !jumps.is_empty() && e.jump_mode == JumpMode::Chain;
     let (first, first_c) = if chain_mode { (&jumps[0].entry, &jumps[0].creds) } else { (e, c) };
-    let mut args = vec![tr("-ssh").to_string(), tr("-P").into(), effective_port(first).to_string()];
+    let mut args = vec!["-ssh".to_string(), "-P".into(), effective_port(first).to_string()];
     if !first_c.user.is_empty() {
-        args.push(tr("-l").into());
+        args.push("-l".into());
         args.push(first_c.user.clone());
     }
     if !first_c.password.is_empty() {
-        args.push(tr("-pw").into());
+        args.push("-pw".into());
         args.push(first_c.password.clone());
     }
     if !first.ssh_key.trim().is_empty() {
-        args.push(tr("-i").into());
+        args.push("-i".into());
         args.push(first.ssh_key.trim().into());
     }
     if chain_mode {
@@ -553,8 +551,8 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
         std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
         let file = dir.join(format!("putty-chain-{}.txt", e.id));
         std::fs::write(&file, chain_remote_args(e, c, jumps).join(" ")).map_err(|err| err.to_string())?;
-        args.push(tr("-t").into());
-        args.push(tr("-m").into());
+        args.push("-t".into());
+        args.push("-m".into());
         args.push(file.display().to_string());
         args.push(first.host.trim().into());
         let child = spawn(&putty, &args)?;
@@ -568,18 +566,17 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
     match jumps.len() {
         0 => {}
         1 => {
-            let plink = programs::find("plink", settings)
-                .ok_or(tr("A jump host with PuTTY needs plink.exe (put it into the programs folder)."))?;
+            let plink = programs::find("plink", settings).ok_or(tr("A jump host with PuTTY needs plink.exe (put it into the programs folder)."))?;
             let j = &jumps[0];
-            let mut pc = tf("\"{0}\" -batch -ssh -P {1}", &[&(plink.display()), &(effective_port(&j.entry))]);
+            let mut pc = format!("\"{0}\" -batch -ssh -P {1}", plink.display(), effective_port(&j.entry));
             if !j.creds.user.is_empty() {
                 pc.push_str(&format!(" -l {}", j.creds.user));
             }
             if !j.creds.password.is_empty() {
                 pc.push_str(&format!(" -pw \"{}\"", j.creds.password.replace('"', "\\\"")));
             }
-            pc.push_str(&tf(" -nc %host:%port {0}", &[&(j.entry.host.trim())]));
-            args.push(tr("-proxycmd").into());
+            pc.push_str(&format!(" -nc %host:%port {0}", j.entry.host.trim()));
+            args.push("-proxycmd".into());
             args.push(pc);
         }
         _ => return Err(tr("PuTTY can only go through one jump host. For more: choose the built-in terminal.").into()),
@@ -596,26 +593,22 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
 fn rdp_file(e: &Entry, c: &Creds, size: Option<(u32, u32)>) -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join("admincraft");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let safe: String = e
-        .name
-        .chars()
-        .map(|ch| if ch.is_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
-        .collect();
+    let safe: String = e.name.chars().map(|ch| if ch.is_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' }).collect();
     let path = dir.join(format!("{}.rdp", if safe.is_empty() { "connection".into() } else { safe }));
     let o = &e.rdp;
     let mut s = String::new();
     let addr = if e.port == 3389 || e.port == 0 { e.host.trim().to_string() } else { format!("{}:{}", e.host.trim(), e.port) };
-    s.push_str(&tf("full address:s:{0}\r\n", &[&addr]));
+    s.push_str(&format!("full address:s:{0}\r\n", addr));
     if !c.user.is_empty() {
         s.push_str(&format!("username:s:{}\r\n", c.full_user()));
     }
     let fullscreen = o.fullscreen && size.is_none();
-    s.push_str(&tf("screen mode id:i:{0}\r\n", &[&(if fullscreen { 2 } else { 1 })]));
+    s.push_str(&format!("screen mode id:i:{0}\r\n", if fullscreen { 2 } else { 1 }));
     let (w, h) = size.unwrap_or((o.width, o.height));
     if !fullscreen && w > 0 && h > 0 {
         s.push_str(&format!("desktopwidth:i:{w}\r\ndesktopheight:i:{h}\r\n"));
     }
-    s.push_str(&tf("use multimon:i:{0}\r\n", &[&((o.multimon && size.is_none()) as u8)]));
+    s.push_str(&format!("use multimon:i:{0}\r\n", (o.multimon && size.is_none()) as u8));
     s.push_str(&format!("redirectclipboard:i:{}\r\n", o.redirect_clipboard as u8));
     if o.redirect_drives {
         s.push_str("drivestoredirect:s:*\r\n");
@@ -635,37 +628,35 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
         let size = if embed && tab_px.0 > 200 && tab_px.1 > 150 { Some((tab_px.0, tab_px.1)) } else { None };
         let file = rdp_file(e, c, size)?;
         let mut note = String::new();
+        let mut forget = None;
         if e.rdp.pass_credentials && !c.user.is_empty() && !c.password.is_empty() {
             let target = format!("TERMSRV/{host}");
-            let ok = hidden(Command::new(tr("cmdkey")).args([
-                format!("/generic:{target}"),
-                format!("/user:{}", c.full_user()),
-                format!("/pass:{}", c.password),
-            ]))
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+            // through the Windows API, so the password is on no command line; removed again
+            // once Remote Desktop has read it (unless the entry was there before)
+            let stored = crate::wincred::store(&target, &c.full_user(), &c.password);
+            let ok = stored.is_ok();
+            if stored == Ok(false) {
+                forget = Some(target);
+            }
             note = if ok { tr(" – login passed").into() } else { tr(" – login could not be passed").into() };
         }
         let mut args = vec![file.display().to_string()];
         if e.rdp.admin_session {
-            args.push(tr("/admin").into());
+            args.push("/admin".into());
         }
         let mstsc = programs::find("mstsc", settings).unwrap_or_else(|| PathBuf::from("mstsc"));
         let child = spawn(&mstsc, &args)?;
+        crate::wincred::clean_up_later(forget, vec![file]);
         let classes: Option<&'static [&'static str]> = if embed { Some(&["TscShellContainerClass"]) } else { None };
         Ok(Launch::Process { child, label: tf("Remote desktop: {0}{1}", &[&host, &note]), embed: classes })
     } else if cfg!(target_os = "macos") && programs::find("rdp", settings).is_none() {
         let file = rdp_file(e, c, None)?;
-        Command::new(tr("open"))
-            .arg(&file)
-            .spawn()
-            .map_err(|err| tf("Could not open .rdp file: {0}", &[&err]))?;
+        Command::new("open").arg(&file).spawn().map_err(|err| tf("Could not open .rdp file: {0}", &[&err]))?;
         Ok(Launch::Done(tf("RDP file opened (Windows App / Microsoft Remote Desktop): {0}", &[&host])))
     } else {
         if let Some(prog) = programs::find("rdp", settings) {
             let addr = if e.port == 3389 || e.port == 0 { host.to_string() } else { format!("{host}:{}", e.port) };
-            let mut args = vec![format!("/v:{addr}"), tr("/cert:tofu").to_string(), tr("/dynamic-resolution").into()];
+            let mut args = vec![format!("/v:{addr}"), "/cert:tofu".to_string(), "/dynamic-resolution".into()];
             if !c.user.is_empty() {
                 args.push(format!("/u:{}", c.user));
             }
@@ -676,21 +667,21 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
                 args.push(format!("/p:{}", c.password));
             }
             if e.rdp.fullscreen {
-                args.push(tr("/f").into());
+                args.push("/f".into());
             } else if e.rdp.width > 0 {
                 args.push(format!("/size:{}x{}", e.rdp.width, e.rdp.height));
             }
             if e.rdp.multimon {
-                args.push(tr("/multimon").into());
+                args.push("/multimon".into());
             }
             if e.rdp.redirect_clipboard {
-                args.push(tr("+clipboard").into());
+                args.push("+clipboard".into());
             }
             if e.rdp.redirect_drives {
-                args.push(tr("/drive:home,~").into());
+                args.push("/drive:home,~".into());
             }
             if e.rdp.admin_session {
-                args.push(tr("/admin").into());
+                args.push("/admin".into());
             }
             args.extend(split_words(&e.extra_args));
             let child = spawn(&prog, &args)?;
@@ -698,7 +689,7 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
         }
         if let Some(prog) = programs::find("remmina", settings) {
             let url = if c.user.is_empty() { format!("rdp://{host}:{}", e.port) } else { format!("rdp://{}@{host}:{}", c.user, e.port) };
-            let child = spawn(&prog, &[tr("-c").into(), url])?;
+            let child = spawn(&prog, &["-c".into(), url])?;
             return Ok(Launch::Process { child, label: tf("Remmina: {0}", &[&host]), embed: None });
         }
         Err(tr("No RDP program found. Please install FreeRDP (xfreerdp) or Remmina.").into())
@@ -719,16 +710,19 @@ fn launch_vnc(e: &Entry, c: &Creds, settings: &Settings) -> Result<Launch, Strin
     }
     if cfg!(target_os = "macos") {
         let url = if c.user.is_empty() { format!("vnc://{host}:{port}") } else { format!("vnc://{}@{host}:{port}", c.user) };
-        Command::new(tr("open")).arg(&url).spawn().map_err(|err| err.to_string())?;
+        Command::new("open").arg(&url).spawn().map_err(|err| err.to_string())?;
         return Ok(Launch::Done(tf("Screen Sharing opened: {0}", &[&host])));
     }
-    if !cfg!(windows) {
-        if let Some(prog) = programs::find("remmina", settings) {
-            let child = spawn(&prog, &[tr("-c").into(), format!("vnc://{host}:{port}")])?;
-            return Ok(Launch::Process { child, label: tf("Remmina: {0}", &[&host]), embed: None });
-        }
+    if !cfg!(windows)
+        && let Some(prog) = programs::find("remmina", settings)
+    {
+        let child = spawn(&prog, &["-c".into(), format!("vnc://{host}:{port}")])?;
+        return Ok(Launch::Process { child, label: tf("Remmina: {0}", &[&host]), embed: None });
     }
-    Err(tf("No VNC viewer found. Install TigerVNC/TightVNC or put vncviewer.exe into the programs folder ({0}).", &[&(programs::tools_dir().display())]))
+    Err(tf(
+        "No VNC viewer found. Install TigerVNC/TightVNC or put vncviewer.exe into the programs folder ({0}).",
+        &[&(programs::tools_dir().display())],
+    ))
 }
 
 /// Which helper programs this computer has – shown on the start page.
@@ -759,7 +753,7 @@ pub fn default_hint(p: Protocol) -> &'static str {
         Protocol::Telnet => "telnet {host} {port}",
         Protocol::Rdp => {
             if cfg!(windows) {
-                "mstsc in a tab (.rdp file, login via cmdkey)"
+                "mstsc in a tab (.rdp file, login via the Credential Manager)"
             } else if cfg!(target_os = "macos") {
                 "open connection.rdp (Windows App)"
             } else {

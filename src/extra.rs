@@ -26,18 +26,7 @@ fn hidden(cmd: &mut Command) {
 }
 
 pub fn fmt_time(secs: u64) -> String {
-    let days = (secs / 86400) as i64;
-    let rem = secs % 86400;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    format!("{y}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, (rem % 3600) / 60)
+    crate::timefmt::iso_minutes(secs)
 }
 
 // ------------------------------------------------------------------ network scanner
@@ -57,9 +46,20 @@ pub struct NetScanTab {
 
 impl NetScanTab {
     pub fn new(range: String) -> NetScanTab {
-        let range = if range.trim().is_empty() { netscan::local_subnets().into_iter().next().unwrap_or_else(|| "192.168.1.0/24".into()) } else { range };
+        let range =
+            if range.trim().is_empty() { netscan::local_subnets().into_iter().next().unwrap_or_else(|| "192.168.1.0/24".into()) } else { range };
         let saved = netscan::load(&range);
-        NetScanTab { range, ports: netscan::DEFAULT_PORTS.into(), timeout: 700, names: true, scan: None, error: None, saved, only_changes: false, msg: None }
+        NetScanTab {
+            range,
+            ports: netscan::DEFAULT_PORTS.into(),
+            timeout: 700,
+            names: true,
+            scan: None,
+            error: None,
+            saved,
+            only_changes: false,
+            msg: None,
+        }
     }
 }
 
@@ -88,7 +88,7 @@ fn change_badge(ui: &mut egui::Ui, c: Change) {
 
 pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) -> Vec<NetScanAct> {
     let mut acts = Vec::new();
-    let running = t.scan.as_ref().map(|s| !s.state.lock().unwrap().finished).unwrap_or(false);
+    let running = t.scan.as_ref().map(|s| !s.state.lock().unwrap_or_else(|e| e.into_inner()).finished).unwrap_or(false);
     egui::Grid::new("netscan_form").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
         ui.label(tr("Range"));
         ui.horizontal(|ui| {
@@ -120,10 +120,10 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
     });
     ui.horizontal(|ui| {
         if running {
-            if ui.button(tr("Cancel")).clicked() {
-                if let Some(s) = &t.scan {
-                    s.cancel();
-                }
+            if ui.button(tr("Cancel")).clicked()
+                && let Some(s) = &t.scan
+            {
+                s.cancel();
             }
         } else if ui.add(egui::Button::new(RichText::new(tr("Scan")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
             match (netscan::parse_targets(&t.range), crate::tools::parse_ports(if t.ports.trim().is_empty() { "80" } else { &t.ports })) {
@@ -137,13 +137,13 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                 (Err(e), _) | (_, Err(e)) => t.error = Some(e),
             }
         }
-        let finished = t.scan.as_ref().map(|s| s.state.lock().unwrap().finished).unwrap_or(false);
+        let finished = t.scan.as_ref().map(|s| s.state.lock().unwrap_or_else(|e| e.into_inner()).finished).unwrap_or(false);
         if ui
             .add_enabled(finished, egui::Button::new(tr("Save as comparison baseline")))
             .on_hover_text(tr("The next scan of this range then shows what is new, gone or changed."))
             .clicked()
         {
-            let hosts = t.scan.as_ref().map(|s| s.state.lock().unwrap().hosts.clone()).unwrap_or_default();
+            let hosts = t.scan.as_ref().map(|s| s.state.lock().unwrap_or_else(|e| e.into_inner()).hosts.clone()).unwrap_or_default();
             match netscan::save(&t.range, &hosts) {
                 Ok(s) => {
                     t.msg = Some(tf("Saved: {0} devices.", &[&s.hosts.len()]));
@@ -152,16 +152,16 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                 Err(e) => t.error = Some(e),
             }
         }
-        if ui.add_enabled(finished, egui::Button::new(tr("Copy as text"))).clicked() {
-            if let Some(s) = &t.scan {
-                let st = s.state.lock().unwrap();
-                let text: String = st
-                    .hosts
-                    .iter()
-                    .map(|h| format!("{}\t{}\t{}\t{}\n", h.ip, h.name, h.mac, h.ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",")))
-                    .collect();
-                ui.ctx().copy_text(text);
-            }
+        if ui.add_enabled(finished, egui::Button::new(tr("Copy as text"))).clicked()
+            && let Some(s) = &t.scan
+        {
+            let st = s.state.lock().unwrap_or_else(|e| e.into_inner());
+            let text: String = st
+                .hosts
+                .iter()
+                .map(|h| format!("{}\t{}\t{}\t{}\n", h.ip, h.name, h.mac, h.ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",")))
+                .collect();
+            ui.ctx().copy_text(text);
         }
         ui.checkbox(&mut t.only_changes, tr("Changes only"));
         if let Some(e) = &t.error {
@@ -180,7 +180,7 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
         ui.weak(tr("Finds devices in the network by ping and port checks. Only use in your own networks."));
         return acts;
     };
-    let st = scan.state.lock().unwrap();
+    let st = scan.state.lock().unwrap_or_else(|e| e.into_inner());
     let frac = if st.total == 0 { 0.0 } else { st.done as f32 / st.total as f32 };
     let status = if st.finished {
         tf("{0} addresses checked in {1} s · {2} devices found", &[&st.total, &format!("{:.1}", st.seconds), &st.hosts.len()])
@@ -199,7 +199,7 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
         Change::Changed => (a.0, a.1, a.2 + 1),
         Change::Same => a,
     });
-    if t.saved.is_some() && scan.state.lock().unwrap().finished {
+    if t.saved.is_some() && scan.state.lock().unwrap_or_else(|e| e.into_inner()).finished {
         ui.horizontal(|ui| {
             ui.label(RichText::new(tf("{0} new", &[&n_new])).color(OK_GREEN).strong());
             ui.label(RichText::new(tf("{0} gone", &[&n_gone])).color(BAD_RED).strong());
@@ -226,7 +226,8 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                     if *change != Change::Gone {
                         // what the open ports offer first, every other type below "Other"
                         let found = netscan::protocol_candidates(&h.ports);
-                        let others: Vec<Protocol> = Protocol::ALL.iter().copied().filter(|p| *p != Protocol::LocalShell && !found.contains(p)).collect();
+                        let others: Vec<Protocol> =
+                            Protocol::ALL.iter().copied().filter(|p| *p != Protocol::LocalShell && !found.contains(p)).collect();
                         let pick = |ui: &mut egui::Ui, acts: &mut Vec<NetScanAct>, add: bool| {
                             let mut chosen = None;
                             for p in &found {
@@ -336,7 +337,7 @@ impl CertTab {
 }
 
 pub fn cert_ui(ui: &mut egui::Ui, t: &mut CertTab, ctx: &egui::Context) {
-    let busy = *t.busy.lock().unwrap();
+    let busy = *t.busy.lock().unwrap_or_else(|e| e.into_inner());
     let mut go = false;
     ui.horizontal(|ui| {
         ui.label(tr("Host"));
@@ -353,16 +354,16 @@ pub fn cert_ui(ui: &mut egui::Ui, t: &mut CertTab, ctx: &egui::Context) {
     });
     if go && !busy && !t.host.trim().is_empty() {
         let (host, port, slot, flag, c2) = (t.host.trim().to_string(), t.port, t.result.clone(), t.busy.clone(), ctx.clone());
-        *flag.lock().unwrap() = true;
+        *flag.lock().unwrap_or_else(|e| e.into_inner()) = true;
         std::thread::spawn(move || {
             let r = admintools::check_cert(&host, port);
-            *slot.lock().unwrap() = Some(r);
-            *flag.lock().unwrap() = false;
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+            *flag.lock().unwrap_or_else(|e| e.into_inner()) = false;
             c2.request_repaint();
         });
     }
     ui.separator();
-    let res = t.result.lock().unwrap();
+    let res = t.result.lock().unwrap_or_else(|e| e.into_inner());
     match res.as_ref() {
         None => {
             ui.weak(tr("Shows a server's TLS certificate: for whom, from whom, how long valid, trusted?"));
@@ -371,8 +372,15 @@ pub fn cert_ui(ui: &mut egui::Ui, t: &mut CertTab, ctx: &egui::Context) {
             ui.label(RichText::new(e).color(BAD_RED));
         }
         Some(Ok(c)) => {
-            let col = if c.days_left < 0 { BAD_RED } else if c.days_left < 30 { WARN } else { OK_GREEN };
-            let headline = if c.days_left < 0 { tf("Expired {0} days ago", &[&-c.days_left]) } else { tf("Valid for {0} more days", &[&c.days_left]) };
+            let col = if c.days_left < 0 {
+                BAD_RED
+            } else if c.days_left < 30 {
+                WARN
+            } else {
+                OK_GREEN
+            };
+            let headline =
+                if c.days_left < 0 { tf("Expired {0} days ago", &[&-c.days_left]) } else { tf("Valid for {0} more days", &[&c.days_left]) };
             ui.label(RichText::new(headline).size(18.0).strong().color(col));
             match &c.trusted {
                 Ok(()) => ui.label(RichText::new(tr("Trusted (chain and name match)")).color(OK_GREEN)),
@@ -402,18 +410,13 @@ pub fn cert_ui(ui: &mut egui::Ui, t: &mut CertTab, ctx: &egui::Context) {
 
 // ------------------------------------------------------------------ password generator
 
+#[derive(Default)]
 pub struct PwGen {
     pub open: bool,
     pub opts: PwOptions,
     pub value: String,
     /// Connection whose password field "Apply" fills.
     pub target: Option<u64>,
-}
-
-impl Default for PwGen {
-    fn default() -> Self {
-        PwGen { open: false, opts: PwOptions::default(), value: String::new(), target: None }
-    }
 }
 
 /// Returns a password to put into the target connection.
@@ -447,10 +450,10 @@ pub fn pwgen_window(ctx: &egui::Context, g: &mut PwGen) -> Option<(u64, String)>
             if ui.button(tr("Copy")).clicked() {
                 ui.ctx().copy_text(g.value.clone());
             }
-            if let Some(id) = g.target {
-                if ui.add(egui::Button::new(RichText::new(tr("Use for the connection")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
-                    apply = Some((id, g.value.clone()));
-                }
+            if let Some(id) = g.target
+                && ui.add(egui::Button::new(RichText::new(tr("Use for the connection")).color(Color32::WHITE)).fill(ACCENT)).clicked()
+            {
+                apply = Some((id, g.value.clone()));
             }
         });
     });
@@ -499,14 +502,20 @@ pub fn start_tunnel(e: &Entry, c: &Creds, jumps: &[JumpHop], t: &Tunnel, setting
                 .iter()
                 .map(|j| {
                     let p = if j.entry.port == 0 { 22 } else { j.entry.port };
-                    let uh = if j.creds.user.is_empty() { j.entry.host.trim().to_string() } else { format!("{}@{}", j.creds.user, j.entry.host.trim()) };
+                    let uh =
+                        if j.creds.user.is_empty() { j.entry.host.trim().to_string() } else { format!("{}@{}", j.creds.user, j.entry.host.trim()) };
                     if p == 22 { uh } else { format!("{uh}:{p}") }
                 })
                 .collect::<Vec<_>>()
                 .join(","),
         );
         for j in jumps {
-            hops.push(crate::transfer::Hop { user: j.creds.user.clone(), host: j.entry.host.trim().into(), port: 22, password: j.creds.password.clone() });
+            hops.push(crate::transfer::Hop {
+                user: j.creds.user.clone(),
+                host: j.entry.host.trim().into(),
+                port: 22,
+                password: j.creds.password.clone(),
+            });
         }
     }
     hops.push(crate::transfer::Hop { user: c.user.clone(), host: e.host.trim().into(), port, password: c.password.clone() });
@@ -577,17 +586,17 @@ pub fn tunnels_ui(ui: &mut egui::Ui, entries: &[Entry], runs: &mut HashMap<(u64,
 /// Watches running tunnels: a tunnel that ended gets the reason from ssh's error output.
 pub fn poll_tunnels(runs: &mut HashMap<(u64, usize), TunnelRun>) {
     for r in runs.values_mut() {
-        if let Some(c) = r.child.as_mut() {
-            if let Ok(Some(status)) = c.try_wait() {
-                let mut text = String::new();
-                if let Some(mut err) = c.stderr.take() {
-                    use std::io::Read;
-                    let _ = err.read_to_string(&mut text);
-                }
-                let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
-                r.error = Some(if line.is_empty() { tf("ended (code {0})", &[&status.code().unwrap_or(-1)]) } else { line });
-                r.child = None;
+        if let Some(c) = r.child.as_mut()
+            && let Ok(Some(status)) = c.try_wait()
+        {
+            let mut text = String::new();
+            if let Some(mut err) = c.stderr.take() {
+                use std::io::Read;
+                let _ = err.read_to_string(&mut text);
             }
+            let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+            r.error = Some(if line.is_empty() { tf("ended (code {0})", &[&status.code().unwrap_or(-1)]) } else { line });
+            r.child = None;
         }
     }
 }

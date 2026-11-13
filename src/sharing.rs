@@ -3,7 +3,7 @@
 
 #[allow(unused_imports)]
 use crate::i18n::{t as tr, tf};
-use crate::model::{new_salt, Entry, Store, Vault};
+use crate::model::{Entry, Store, Vault, new_salt};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -93,12 +93,12 @@ pub fn export(store: &Store, root: Option<u64>, mode: PwMode, export_pw: &str, p
                 return Err(tr("Please enter an export password.").into());
             }
             let salt = new_salt();
-            let v = Vault::derive(export_pw, &salt);
+            let v = Vault::derive(export_pw, &salt)?;
             let json = serde_json::to_string(&Payload { entries, passwords }).map_err(|e| e.to_string())?;
             file.passwords = "encrypted".into();
             file.salt = Some(B64.encode(&salt));
-            file.check = Some(v.encrypt(CHECK));
-            file.payload = Some(v.encrypt(&json));
+            file.check = Some(v.encrypt(CHECK)?);
+            file.payload = Some(v.encrypt(&json)?);
         }
     }
     let text = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
@@ -128,7 +128,8 @@ pub fn read(text: &str, export_pw: &str) -> Result<(Vec<Entry>, BTreeMap<u64, St
             return Err(ReadError::NeedPassword);
         }
         let salt = B64.decode(file.salt.unwrap_or_default()).map_err(|e| ReadError::Other(e.to_string()))?;
-        let v = Vault::derive(export_pw, &salt);
+        // a damaged file (salt too short for the key derivation) is an error, not a crash
+        let v = Vault::derive(export_pw, &salt).map_err(|_| ReadError::Other(tr("This is not an AdminCraft export file.").into()))?;
         if v.decrypt(&file.check.unwrap_or_default()).as_deref() != Some(CHECK) {
             return Err(ReadError::WrongPassword);
         }

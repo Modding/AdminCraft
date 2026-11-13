@@ -1,15 +1,7 @@
-# Windows build with the LLVM-MinGW toolchain kept in .toolchain (no Visual Studio needed):
-# link the runtime statically so the program is a single portable .exe (no libunwind.dll).
-# The linker and C compiler (for the TLS library) are found relative to this folder, so a
-# plain `cargo build` works too, not only cargo.cmd.
-[target.x86_64-pc-windows-gnullvm]
-rustflags = ["-C", "target-feature=+crt-static"]
-linker = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-clang.exe"
-
+# Windows: link the C runtime statically, so the program is a single portable .exe
+# (no vcruntime140.dll or libunwind.dll next to it).
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
-[env]
-CC_x86_64_pc_windows_gnullvm = { value = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-clang.exe", relative = true }
-RC_x86_64_pc_windows_gnullvm = { value = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-windres.exe", relative = true }
-AR_x86_64_pc_windows_gnullvm ={ value = ".toolchain/llvm-mingw-20261104-ucrt-x86_64/bin/x86_64-w64-mingw32-llvm-ar.exe", relative = true }
+[target.x86_64-pc-windows-gnullvm]
+rustflags = ["-C", "target-feature=+crt-static"]
