@@ -2,10 +2,10 @@
 
 ## Tested
 
-- Builds as one portable Windows executable; 23 unit tests (encryption, master password, inheritance,
+- Builds as one portable Windows executable; 25 unit tests (encryption, master password, inheritance,
   mRemoteNG and `~/.ssh/config` import, KeePass read, jump-host commands, drag & drop, network scan
   ranges and differences, subnet math, TOTP against the RFC 6238 vectors, export/import, whole-file
-  encryption, translations).
+  encryption, all five languages complete with their placeholders, the user guide in every language).
 - SFTP (OpenSSH with automatic password), FTP and FTPS: listing and download against a public test server.
 - Window embedding into tabs (with a Windows program), certificate check against a real HTTPS site,
   network scan on the local machine.
@@ -34,8 +34,8 @@
 ## Ideas
 
 - JSON control channel to the running window (open tabs, read terminal text) for agents.
-
 - Native RDP/VNC rendering on Linux and macOS inside the tab.
 - Writing passwords back to KeePass.
-- More languages (`AdminCraftLang/xx.lang`).
+- More languages (`AdminCraftLang/xx.lang`); the French, Italian and Ukrainian texts would profit from a native speaker's review.
+- Screenshots inside the user guide (in the program; on GitHub they are shown already).
 - Scheduled network scans with a report of changes.

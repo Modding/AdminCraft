@@ -24,6 +24,7 @@
 <p align="center">
   <a href="#a-look-around">A look around</a> ·
   <a href="#features">Features</a> ·
+  <a href="docs/help/en.md">User guide</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#portable-and-private">Portable and private</a> ·
   <a href="#building">Building</a> ·
@@ -85,9 +86,10 @@
 
 **More**
 - Import from **mRemoteNG** (`confCons.xml`) and OpenSSH (`~/.ssh/config`, including ProxyJump).
-- English (the program's own text) and German (`lang/de.lang`) built in; more languages as plain text
-  files (`AdminCraftLang/xx.lang`, copy `de.lang.example` there and translate the right side);
-  the system language is used by default.
+- **English, German, French, Italian and Ukrainian** built in; the system language is used by default.
+  More languages as plain text files (`AdminCraftLang/xx.lang`: copy `de.lang.example` there and
+  translate the right side).
+- **Built-in user guide** (F1, *Help » User guide*) with contents, search and a `?` next to settings.
 - A settings page for the paths of helper programs, or simply drop portable programs such as
   `putty.exe` into the `AdminCraftTools` folder next to AdminCraft.
 
@@ -97,6 +99,11 @@
    and unpack it.
 2. Put it into any folder — a USB stick is fine — and start it.
 3. Double-click an example connection, or create your own with **+ Connection**.
+4. Press **F1** for the user guide.
+
+The full guide — every feature explained step by step — is also here:
+[English](docs/help/en.md) · [Deutsch](docs/help/de.md) · [Français](docs/help/fr.md) ·
+[Italiano](docs/help/it.md) · [Українська](docs/help/uk.md).
 
 Helper programs AdminCraft can use: OpenSSH (built into Windows 10/11, macOS and Linux), `mstsc`
 (Windows), FreeRDP or Remmina (Linux), a VNC viewer, PuTTY. The start page shows what was found.
@@ -124,7 +131,7 @@ cargo test
 - **macOS:** the Xcode command line tools.
 
 Command line for checks: `--screenshot <file.png>` (draws ~120 frames, saves the window, exits),
-`--lang de|en`, `--data <folder>`.
+`--lang en|de|fr|it|uk`, `--data <folder>`, `--open help[:chapter]|settings|netscan:RANGE|…`.
 
 ## For agents: CLI and MCP
 
