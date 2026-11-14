@@ -79,7 +79,11 @@ impl AdminApp {
             },
             TabKind::Cert(x) => match &*x.result.lock().unwrap_or_else(|e| e.into_inner()) {
                 Some(Ok(c)) => {
-                    format!("{}\n{}\n{} – {} ({} days left)\n{:?}", c.subject, c.issuer, c.not_before, c.not_after, c.days_left, c.trusted)
+                    let trust = match &c.trusted {
+                        Ok(()) => "trusted".to_string(),
+                        Err(e) => format!("not trusted: {e}"),
+                    };
+                    format!("{}\n{}\n{} – {} ({} days left)\n{trust}", c.subject, c.issuer, c.not_before, c.not_after, c.days_left)
                 }
                 Some(Err(e)) => e.clone(),
                 None => String::new(),
@@ -176,8 +180,25 @@ impl AdminApp {
                 match args["tool"].as_str().unwrap_or("") {
                     "ping" => self.open_ping(target, PingMode::Ping, ctx),
                     "traceroute" => self.open_ping(target, PingMode::Trace, ctx),
-                    "portscan" => self.open_scan(target),
-                    "dns" => self.open_dns(target),
+                    // a person presses "Scan" / "Query" in the tab; for an agent the tool starts
+                    // right away, or reading the tab would give nothing
+                    "portscan" => {
+                        self.open_scan(target);
+                        if let Some(Tab { kind: TabKind::Scan(s), .. }) = self.tabs.last_mut()
+                            && !s.host.trim().is_empty()
+                            && let Ok(ports) = crate::tools::parse_ports(&s.ports)
+                        {
+                            s.scan = Some(crate::tools::PortScan::start(&s.host, ports, s.timeout, ctx.clone()));
+                        }
+                    }
+                    "dns" => {
+                        self.open_dns(target);
+                        if let Some(Tab { kind: TabKind::Dns(d), .. }) = self.tabs.last_mut()
+                            && !d.host.trim().is_empty()
+                        {
+                            dns_query(d, ctx);
+                        }
+                    }
                     "netscan" => {
                         self.open_netscan(target);
                         if let Some(Tab { kind: TabKind::NetScan(n), .. }) = self.tabs.last_mut()
