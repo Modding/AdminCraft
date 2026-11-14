@@ -325,7 +325,8 @@ admincraft cli window tabs              le schede aperte
 admincraft cli window read 2            cosa mostra la scheda 2
 admincraft cli window tool ping web01   apre una scheda strumento
 admincraft cli window switch 2          porta una scheda in primo piano
-admincraft cli window type 2 uptime     scrive in un terminale + Invio
+admincraft cli window screenshot 2 t.png  immagine della scheda 2 (anche PuTTY / Desktop remoto incorporati)
+admincraft cli window type 2 uptime     scrive in un terminale o in un PuTTY incorporato + Invio
 ```
 
 Il server MCP offre lo stesso come strumenti `window_…`. Scrivere nei terminali è possibile solo dopo averlo

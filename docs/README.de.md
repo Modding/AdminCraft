@@ -64,7 +64,7 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
 ## Für Skripte und KI-Agenten
 
     admincraft cli list | scan <bereich> | ports <host> | dns <name> | subnet <cidr> | cert <host>
-    admincraft cli window tabs | read [n] | type <n> <text> | switch <n> | tool <werkzeug> [ziel]
+    admincraft cli window tabs | read [n] | screenshot [n] [datei.png] | type <n> <text> | switch <n> | tool <werkzeug> [ziel]
     admincraft mcp            MCP-Server für KI-Assistenten (stdin/stdout)
 
 `cli window …` steuert das **offene Fenster** (Einstellungen » KI-Agenten): Tabs lesen, Verbindungen und

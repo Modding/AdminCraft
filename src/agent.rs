@@ -9,7 +9,7 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 /// Tool name, description, JSON schema of its arguments.
-fn tool_list() -> Vec<(&'static str, &'static str, Value)> {
+pub(crate) fn tool_list() -> Vec<(&'static str, &'static str, Value)> {
     vec![
         (
             "list_connections",
@@ -70,8 +70,13 @@ fn tool_list() -> Vec<(&'static str, &'static str, Value)> {
             json!({"type": "object", "properties": {"index": {"type": "integer"}}}),
         ),
         (
+            "window_screenshot",
+            "A picture (PNG) of what a tab of the open window shows, including a PuTTY, Remote Desktop or VNC window embedded in it, where window_read_tab has no text. The tab is brought to the front. Default: the active tab.",
+            json!({"type": "object", "properties": {"index": {"type": "integer"}}}),
+        ),
+        (
             "window_type",
-            "Type text into a terminal tab of the open window (SSH, Telnet, PowerShell, shell). Only works when the person allowed it in Settings » AI agents. Set enter=true to press Enter after the text.",
+            "Type text into a terminal tab of the open window (SSH, Telnet, PowerShell, shell) or into an embedded PuTTY window (look at the result with window_screenshot). Only works when the person allowed it in Settings » AI agents. Set enter=true to press Enter after the text.",
             json!({"type": "object", "properties": {"index": {"type": "integer"}, "text": {"type": "string"}, "enter": {"type": "boolean"}}, "required": ["text"]}),
         ),
         (
@@ -254,7 +259,8 @@ const HELP: &str = "AdminCraft command line (JSON output)
   admincraft cli cert <host> [port]            TLS certificate check
   admincraft cli window tabs                   tabs of the open window
   admincraft cli window read [index]           text a tab shows (terminal screen, results)
-  admincraft cli window type <index> <text>    type into a terminal tab (+ Enter), if allowed
+  admincraft cli window screenshot [index] [file.png]  picture of a tab (embedded PuTTY/RDP too)
+  admincraft cli window type <index> <text>    type into a terminal tab or embedded PuTTY (+ Enter), if allowed
   admincraft cli window switch|close <index>   bring a tab to the front / close it
   admincraft cli window tool <tool> [target]   open a tool: ping, portscan, dns, netscan, cert, whois, http, snmp …
   admincraft cli window <command> [json]       any command, e.g. status, notify {\"text\":\"hi\"}
@@ -278,6 +284,7 @@ pub fn cli(args: &[String]) -> i32 {
             let (cmd, params) = match a(1).as_str() {
                 "tabs" | "" => ("list_tabs".to_string(), json!({})),
                 "read" => ("read_tab".to_string(), json!({"index": idx(a(2))})),
+                "screenshot" => ("screenshot".to_string(), json!({"index": idx(a(2)), "path": a(3)})),
                 "type" => (
                     "type_text".to_string(),
                     json!({"index": idx(a(2)), "text": args.get(3..).map(|x| x.join(" ")).unwrap_or_default(), "enter": true}),
@@ -359,11 +366,22 @@ pub fn handle(line: &str, out: &mut impl Write) {
         "tools/call" => {
             let name = req.pointer("/params/name").and_then(|v| v.as_str()).unwrap_or("");
             let args = req.pointer("/params/arguments").cloned().unwrap_or(json!({}));
-            let (text, is_error) = match call(name, &args) {
+            let result = call(name, &args);
+            // a screenshot goes back as a picture, not as the name of a file
+            let picture = match (&result, name) {
+                (Ok(v), "window_screenshot") => v["file"].as_str().and_then(|f| std::fs::read(f).ok()),
+                _ => None,
+            };
+            let (text, is_error) = match result {
                 Ok(v) => (serde_json::to_string_pretty(&v).unwrap_or_default(), false),
                 Err(e) => (e, true),
             };
-            reply(out, &id, json!({"content": [{"type": "text", "text": text}], "isError": is_error}));
+            let mut content = vec![json!({"type": "text", "text": text})];
+            if let Some(png) = picture {
+                use base64::Engine as _;
+                content.insert(0, json!({"type": "image", "data": base64::engine::general_purpose::STANDARD.encode(png), "mimeType": "image/png"}));
+            }
+            reply(out, &id, json!({"content": content, "isError": is_error}));
         }
         _ => error(out, &id, -32601, "method not found"),
     }

@@ -326,7 +326,8 @@ admincraft cli window tabs              les onglets ouverts
 admincraft cli window read 2            ce que montre l'onglet 2
 admincraft cli window tool ping web01   ouvrir un onglet d'outil
 admincraft cli window switch 2          mettre un onglet au premier plan
-admincraft cli window type 2 uptime     taper dans un terminal + Entrée
+admincraft cli window screenshot 2 t.png  image de l'onglet 2 (PuTTY / Bureau à distance intégrés aussi)
+admincraft cli window type 2 uptime     taper dans un terminal ou un PuTTY intégré + Entrée
 ```
 
 Le serveur MCP offre la même chose sous forme d'outils `window_…`. Taper dans les terminaux n'est possible

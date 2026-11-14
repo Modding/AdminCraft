@@ -159,7 +159,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("switch_tab", "{index}: bring a tab to the front"),
     ("close_tab", "{index}: close a tab"),
     ("read_tab", "{index?}: the text a tab shows (terminal screen, ping/DNS output, scan results)"),
-    ("type_text", "{index?, text, enter?}: type into a terminal tab (only when allowed in the settings)"),
+    ("screenshot", "{index?, path?}: a PNG picture of a tab (embedded PuTTY / Remote Desktop / VNC windows too); answers with the file"),
+    ("type_text", "{index?, text, enter?}: type into a terminal tab or an embedded PuTTY window (only when allowed in the settings)"),
     ("open_tool", "{tool, target?}: ping, traceroute, portscan, dns, netscan, subnet, cert, whois, http, snmp, help, settings"),
     ("notify", "{text}: show a short message in the window"),
 ];

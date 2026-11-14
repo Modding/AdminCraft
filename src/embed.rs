@@ -20,7 +20,7 @@ mod imp {
     use std::sync::atomic::{AtomicIsize, Ordering};
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::*;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus, VK_RETURN};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     /// The embedded window shown in the active tab (0 = none).
@@ -113,6 +113,61 @@ mod imp {
                 px[3] = 255;
             }
             Some((r.w as usize, r.h as usize, buf))
+        }
+    }
+
+    /// Picture of part of our window taken from the window itself, not from the screen: it
+    /// shows our window (embedded windows included) even when another window lies on top, and
+    /// never what that other window shows.
+    pub fn capture_window(parent: isize, r: PxRect) -> Option<(usize, usize, Vec<u8>)> {
+        use windows_sys::Win32::Storage::Xps::PrintWindow;
+        /// PW_CLIENTONLY | PW_RENDERFULLCONTENT: the client area as the compositor draws it.
+        const CLIENT_AS_DRAWN: u32 = 1 | 2;
+        // SAFETY: every handle is created here and released before returning; the pixel buffer
+        // is as large as the bitmap GetDIBits fills (width * height * 4 bytes).
+        unsafe {
+            let mut client: RECT = std::mem::zeroed();
+            if GetClientRect(parent as HWND, &mut client) == 0 {
+                return None;
+            }
+            let (cw, ch) = (client.right - client.left, client.bottom - client.top);
+            // the wanted part, kept inside the window
+            let x = r.x.clamp(0, cw);
+            let y = r.y.clamp(0, ch);
+            let w = r.w.min(cw - x);
+            let h = r.h.min(ch - y);
+            if cw <= 0 || ch <= 0 || w <= 0 || h <= 0 || cw > 16_384 || ch > 16_384 {
+                return None;
+            }
+            let screen = GetDC(std::ptr::null_mut());
+            let mem = CreateCompatibleDC(screen);
+            let bmp = CreateCompatibleBitmap(screen, cw, ch);
+            let old = SelectObject(mem, bmp as HGDIOBJ);
+            let drawn = PrintWindow(parent as HWND, mem, CLIENT_AS_DRAWN);
+            SelectObject(mem, old);
+            let mut info: BITMAPINFO = std::mem::zeroed();
+            info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+            info.bmiHeader.biWidth = cw;
+            info.bmiHeader.biHeight = -ch; // top-down
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            info.bmiHeader.biCompression = BI_RGB;
+            let mut all = vec![0u8; (cw as usize) * (ch as usize) * 4];
+            let lines = if drawn != 0 { GetDIBits(mem, bmp, 0, ch as u32, all.as_mut_ptr() as *mut _, &mut info, DIB_RGB_COLORS) } else { 0 };
+            DeleteObject(bmp as HGDIOBJ);
+            DeleteDC(mem);
+            ReleaseDC(std::ptr::null_mut(), screen);
+            if lines == 0 {
+                return None;
+            }
+            let (x, y, w, h, cw) = (x as usize, y as usize, w as usize, h as usize, cw as usize);
+            let mut out = Vec::with_capacity(w * h * 4);
+            for row in all.chunks_exact(cw * 4).skip(y).take(h) {
+                for px in row[x * 4..(x + w) * 4].as_chunks::<4>().0 {
+                    out.extend_from_slice(&[px[2], px[1], px[0], 255]); // BGRA -> RGBA
+                }
+            }
+            Some((w, h, out))
         }
     }
 
@@ -295,6 +350,36 @@ mod imp {
             }
         }
 
+        /// The window class of the embedded window ("PuTTY", "TscShellContainerClass" …).
+        pub fn class(&self) -> String {
+            if self.attached() { class_name(self.hwnd) } else { String::new() }
+        }
+
+        /// Types into the embedded window by posting the characters to it. The keyboard focus
+        /// stays where it is, so the person at the computer is not interrupted. Works for
+        /// windows that take characters themselves (PuTTY); `false` when a message was refused.
+        pub fn type_text(&self, text: &str) -> bool {
+            if !self.attached() {
+                return false;
+            }
+            /// Scan code of the Return key, as a real keyboard reports it.
+            const RETURN_SCAN: isize = 0x1C << 16;
+            let post = |msg: u32, wp: WPARAM, lp: LPARAM| {
+                // SAFETY: a plain message with two integers to a window handle; a window that is
+                // gone makes the call fail, which is reported.
+                unsafe { PostMessageW(self.hwnd, msg, wp, lp) != 0 }
+            };
+            text.replace("\r\n", "\r").replace('\n', "\r").encode_utf16().all(|unit| {
+                if unit == 13 {
+                    // Enter as a key press, not as a character: with PuTTY's own line editing
+                    // (raw, serial, some Telnet servers) a posted carriage return is only shown as ^M
+                    post(WM_KEYDOWN, VK_RETURN as WPARAM, 1 | RETURN_SCAN) && post(WM_KEYUP, VK_RETURN as WPARAM, 1 | RETURN_SCAN | (0b11 << 30))
+                } else {
+                    post(WM_CHAR, unit as WPARAM, 0)
+                }
+            })
+        }
+
         /// Gives the window back as a normal window of its own.
         pub fn detach(&mut self) {
             if !self.attached() {
@@ -332,6 +417,9 @@ mod imp {
     pub fn capture(_parent: isize, _r: PxRect) -> Option<(usize, usize, Vec<u8>)> {
         None
     }
+    pub fn capture_window(_parent: isize, _r: PxRect) -> Option<(usize, usize, Vec<u8>)> {
+        None
+    }
 
     impl Embedded {
         pub fn new(_pid: u32, _class_hint: &'static [&'static str]) -> Self {
@@ -351,12 +439,18 @@ mod imp {
         }
         pub fn place(&mut self, _rect: Option<PxRect>) {}
         pub fn focus(&self) {}
+        pub fn class(&self) -> String {
+            String::new()
+        }
+        pub fn type_text(&self, _text: &str) -> bool {
+            false
+        }
         pub fn detach(&mut self) {}
         pub fn close(&mut self) {}
     }
 }
 
-pub use imp::{Embedded, capture, install_focus_hook, set_active};
+pub use imp::{Embedded, capture, capture_window, install_focus_hook, set_active};
 
 /// Can this system put other programs' windows into tabs?
 pub const SUPPORTED: bool = cfg!(windows);

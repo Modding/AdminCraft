@@ -324,7 +324,8 @@ admincraft cli window tabs              die offenen Tabs
 admincraft cli window read 2            was Tab 2 zeigt (Terminal, Ergebnisse)
 admincraft cli window tool ping web01   einen Werkzeug-Tab öffnen
 admincraft cli window switch 2          einen Tab nach vorn holen
-admincraft cli window type 2 uptime     in einen Terminal-Tab tippen + Enter
+admincraft cli window screenshot 2 t.png  Bild von Tab 2 (auch eingebettetes PuTTY / Remotedesktop)
+admincraft cli window type 2 uptime     in Terminal-Tab oder eingebettetes PuTTY tippen + Enter
 ```
 
 Der MCP-Server bietet dasselbe als `window_…`-Werkzeuge. In Terminals tippen geht erst, wenn Sie es in den

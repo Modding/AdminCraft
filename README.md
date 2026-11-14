@@ -170,13 +170,15 @@ MCP client configuration (Claude Desktop, Claude Code, Cursor …):
 
 Tools: `list_connections`, `open_connection`, `scan_network`, `port_scan`, `dns_lookup`, `subnet`,
 `check_certificate`, and for the open window `window_status`, `window_list_tabs`, `window_read_tab`,
-`window_type`, `window_switch_tab`, `window_close_tab`, `window_open_tool`, `window_notify`.
+`window_screenshot`, `window_type`, `window_switch_tab`, `window_close_tab`, `window_open_tool`, `window_notify`.
 A fully encrypted connection list is read with the master password in `AC_MASTER`, a list kept in
 KeePass with `AC_KEEPASS`.
 
-**Control the open window** (Settings » AI agents): `admincraft cli window tabs | read [n] | type <n> <text> |
+**Control the open window** (Settings » AI agents): `admincraft cli window tabs | read [n] | screenshot [n] [file.png] | type <n> <text> |
 switch <n> | close <n> | tool <tool> [target]`. The window listens on 127.0.0.1 only, with a token in
-the data folder; typing into terminals has to be allowed separately.
+the data folder; typing has to be allowed separately. `read` gives a tab's text; where there is
+none — a PuTTY, Remote Desktop or VNC window embedded in the tab — `screenshot` gives a picture
+(MCP: an image). Typing works in terminal tabs and in embedded PuTTY windows.
 
 ## Keyboard
 

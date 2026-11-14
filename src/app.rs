@@ -257,6 +257,8 @@ pub struct AdminApp {
     help_request: Option<crate::help::Topic>,
     /// The channel agents use to control this window (None when switched off).
     control: Option<crate::control::Server>,
+    /// A picture of a tab an agent asked for; answered a few frames later, once the tab is drawn.
+    agent_shot: Option<app_control::AgentShot>,
     /// Result of "Check for updates" (None inside while it runs).
     update_result: Option<UpdateSlot>,
     releases_url: String,
@@ -362,6 +364,7 @@ impl AdminApp {
             show_keys: false,
             help_request: None,
             control: None,
+            agent_shot: None,
             update_result: None,
             releases_url: crate::update::releases_page(),
             focus_search: false,
@@ -499,8 +502,10 @@ impl AdminApp {
                 "embedtest" => {
                     // check of the window embedding with a harmless program (Character Map)
                     let e = Entry { name: tr("Embedding (test)").into(), protocol: Protocol::Vnc, ..Default::default() };
-                    let prog = if host.is_empty() { "charmap.exe".to_string() } else { host.clone() };
-                    match std::process::Command::new(&prog).spawn() {
+                    // a program with arguments works too: embedtest:"C:\Tools\putty.exe" -raw -P 5599 127.0.0.1
+                    let mut words = launch::split_words(&host).into_iter();
+                    let prog = words.next().unwrap_or_else(|| "charmap.exe".to_string());
+                    match std::process::Command::new(&prog).args(words).spawn() {
                         Ok(child) => {
                             let pid = child.id();
                             app.add_tab(
@@ -3662,7 +3667,8 @@ impl AdminApp {
             .on_hover_text(tr("Only programs on this computer that can read the data folder. Passwords are never given out."))
             .changed();
         ui.add_enabled_ui(self.store.data.settings.agent_control, |ui| {
-            changed |= ui.checkbox(&mut self.store.data.settings.agent_typing, tr("… and may type into terminal tabs")).changed();
+            changed |=
+                ui.checkbox(&mut self.store.data.settings.agent_typing, tr("… and may type into terminal tabs and embedded PuTTY windows")).changed();
             if self.store.data.settings.agent_typing {
                 ui.colored_label(
                     Color32::from_rgb(255, 183, 77),
@@ -4294,6 +4300,7 @@ impl eframe::App for AdminApp {
         }
         embed::set_active(active_embed);
         self.tab_screenshot(&ctx, now);
+        self.agent_shot_step(&ctx);
 
         // background jobs: tunnels, monitoring, changes by colleagues, dialogs
         extra::poll_tunnels(&mut self.tunnels);
