@@ -552,13 +552,13 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
     }
     let note = |old: bool| if old { tr(" – old PuTTY: the password is on its command line, please update PuTTY") } else { "" };
     if chain_mode {
-        let dir = std::env::temp_dir().join("admincraft");
-        std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-        let file = dir.join(format!("putty-chain-{}.txt", e.id));
-        std::fs::write(&file, chain_remote_args(e, c, jumps).join(" ")).map_err(|err| err.to_string())?;
+        // the command PuTTY runs on the jump host names hosts and users: a private file that goes
+        // when PuTTY ends, like the password files
+        let file = crate::secretfile::write(&chain_remote_args(e, c, jumps).join(" "))?;
         args.push("-t".into());
         args.push("-m".into());
-        args.push(file.display().to_string());
+        args.push(file.path().display().to_string());
+        secrets.push(file);
         args.push(first.host.trim().into());
         let child = spawn(&putty, &args)?;
         crate::secretfile::keep_while_running(child.id(), secrets);
