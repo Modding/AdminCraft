@@ -123,8 +123,11 @@ Helper programs AdminCraft can use: OpenSSH (built into Windows 10/11, macOS and
 - **Set a master password** (Settings) when the folder travels on a USB stick or lives on a share.
   With it, saved passwords are encrypted with AES-256-GCM. **Without it they are only obscured:**
   whoever has `connections.json` can read them. The same goes for the saved WebDAV password.
-- Known limits, listed in the [roadmap](ROADMAP.md): PuTTY and FreeRDP get the password as a
-  command-line argument, which other programs of the same user can see while they start.
+- Passwords for PuTTY, plink, psftp and pscp go through a file only you can read (`-pwfile`,
+  PuTTY 0.77 and newer) that is removed afterwards, the Remote Desktop login through the Windows
+  Credential Manager. Known limits, listed in the [roadmap](ROADMAP.md): FreeRDP and a PuTTY
+  older than 0.77 get the password as a command-line argument, which other programs of the same
+  user can see while they start.
 - AdminCraft talks to nothing on the internet by itself; it only connects where you tell it to.
 
 ## Building

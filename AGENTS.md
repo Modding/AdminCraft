@@ -135,6 +135,7 @@ An admin tool that dies takes every open session with it. This outranks feature 
 | `src/help.rs`, `docs/help/*.md` | the user guide: shown in a tab (F1) and the documentation on GitHub |
 | `src/programs.rs` | finding helper programs (settings path, `AdminCraftTools`, PATH) |
 | `src/timefmt.rs` | dates and times as text, through `chrono` |
+| `src/secretfile.rs` | password files for other programs (PuTTY's `-pwfile`), removed when the program is done |
 | `src/wincred.rs` | Windows Credential Manager entry for the Remote Desktop login (written, then removed) |
 | `src/winconsole.rs` | attaches the release build to the terminal it was started from (Windows) |
 
@@ -185,7 +186,8 @@ Same scheme as the other Craft apps:
   (window embedding, `shutdown /m`, mmc tools) degrade to a clear message elsewhere.
 - **Secrets on command lines:** a password given to another program goes through a pipe, a file
   only the user can read, the environment of that one child, or an API — not through its arguments.
-  Still open (work list in `ROADMAP.md`): PuTTY/plink/psftp/pscp (`-pw`) and FreeRDP (`/p:`).
+  PuTTY programs get `-pwfile` (`src/secretfile.rs`). Still open (work list in `ROADMAP.md`):
+  FreeRDP (`/p:`); a PuTTY older than 0.77 falls back to `-pw` and the tab says so.
 - **Time goes through `chrono`** (`src/timefmt.rs`); no hand-written calendar code.
 - **No new C dependencies** without need; `ring` is the exception.
 - **Licences:** a new dependency must fit the allowlist above. Known exceptions already in the

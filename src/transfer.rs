@@ -474,10 +474,8 @@ fn sftp_batch(ep: &Endpoint, script: &str) -> Result<RunOut, String> {
         let file = std::env::temp_dir().join(format!("admincraft-psftp-{}.txt", std::process::id()));
         std::fs::write(&file, script).map_err(|e| e.to_string())?;
         let mut args = vec!["-batch".to_string(), "-P".into(), t.port.to_string()];
-        if !t.password.is_empty() {
-            args.push("-pw".into());
-            args.push(t.password.clone());
-        }
+        let (pw_args, _pw_file) = crate::secretfile::putty_password(&prog, &t.password)?;
+        args.extend(pw_args);
         if !ep.key_file.trim().is_empty() {
             args.push("-i".into());
             args.push(ep.key_file.trim().into());
@@ -612,10 +610,8 @@ fn ssh_command(ep: &Endpoint, command: &str) -> Result<RunOut, String> {
     let use_putty = ep.tool == Tool::Putty || ep.progs.ssh.is_none();
     if use_putty && let Some(plink) = &ep.progs.plink {
         let mut args = vec!["-batch".to_string(), "-ssh".into(), "-P".into(), t.port.to_string()];
-        if !t.password.is_empty() {
-            args.push("-pw".into());
-            args.push(t.password.clone());
-        }
+        let (pw_args, _pw_file) = crate::secretfile::putty_password(plink, &t.password)?;
+        args.extend(pw_args);
         args.push(user_host(t));
         args.push(command.to_string());
         return run(plink, &args, None, &[]);
@@ -634,10 +630,8 @@ fn scp_copy(ep: &Endpoint, recursive: bool, from: &str, to: &str) -> Result<RunO
     let use_putty = ep.tool == Tool::Putty || ep.progs.scp.is_none();
     if use_putty && let Some(pscp) = &ep.progs.pscp {
         let mut args = vec!["-batch".to_string(), "-scp".into(), "-P".into(), t.port.to_string()];
-        if !t.password.is_empty() {
-            args.push("-pw".into());
-            args.push(t.password.clone());
-        }
+        let (pw_args, _pw_file) = crate::secretfile::putty_password(pscp, &t.password)?;
+        args.extend(pw_args);
         if recursive {
             args.push("-r".into());
         }

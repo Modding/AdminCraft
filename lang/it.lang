@@ -846,3 +846,6 @@ New test version available: {0} (from {1}). = Nuova versione di prova disponibil
 New version available: {0} (from {1}). = Nuova versione disponibile: {0} (del {1}).
 AdminCraft {0} is the newest version. = AdminCraft {0} è la versione più recente.
 No. = N.
+No random numbers available: {0} = Nessun numero casuale disponibile: {0}
+the random source repeats itself = la sorgente casuale si ripete
+ – old PuTTY: the password is on its command line, please update PuTTY =  – PuTTY vecchio: la password è sulla sua riga di comando, aggiorna PuTTY

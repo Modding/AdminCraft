@@ -20,6 +20,7 @@ mod nettools;
 mod playback;
 mod programs;
 mod remote;
+mod secretfile;
 mod sharing;
 mod terminal;
 #[cfg(test)]

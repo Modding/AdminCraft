@@ -188,11 +188,39 @@ fn totp_rfc6238_and_passwords() {
     let (k, d, p) = crate::admintools::parse_otp("otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&digits=8&period=30").unwrap();
     assert_eq!((k.len(), d, p), (20, 8, 30));
     let o = crate::admintools::PwOptions { length: 24, ..Default::default() };
-    let pw = crate::admintools::generate_password(&o);
+    let pw = crate::admintools::generate_password(&o).unwrap();
     assert_eq!(pw.chars().count(), 24);
     assert!(pw.chars().any(|c| c.is_ascii_digit()) && pw.chars().any(|c| c.is_ascii_uppercase()));
     assert!(!pw.contains(['0', 'O', 'l', '1', 'I']));
-    assert_ne!(pw, crate::admintools::generate_password(&o));
+    assert_ne!(pw, crate::admintools::generate_password(&o).unwrap());
+}
+
+#[test]
+fn no_password_without_random_numbers() {
+    use crate::admintools::{PwOptions, generate_password_with};
+    let o = PwOptions::default();
+    // a failing random source used to be ignored: the password was then built from zero bytes
+    let failing = generate_password_with(&o, &mut |_| Err("no entropy".into()));
+    assert_eq!(failing, Err("no entropy".into()));
+    // a source that only ever answers with zeros gives an error too, not "AAAA…" and not a hang
+    assert!(
+        generate_password_with(&o, &mut |buf| {
+            buf.fill(0);
+            Ok(())
+        })
+        .is_err()
+    );
+    // a counting source works, and every kind of character appears
+    let mut n = 0u8;
+    let pw = generate_password_with(&o, &mut |buf| {
+        for b in buf.iter_mut() {
+            n = n.wrapping_mul(31).wrapping_add(17);
+            *b = n;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(pw.chars().count(), o.length);
 }
 
 #[test]
@@ -720,4 +748,39 @@ fn dates_through_chrono() {
     assert_eq!(date_time(1_798_761_540), "31.12.2026 23:59");
     assert_eq!(iso_minutes(1_798_761_540), "2026-12-31 23:59 UTC");
     assert_eq!(date(i64::MAX), "", "out of range is empty, not a panic");
+}
+
+#[test]
+fn putty_password_goes_through_a_file() {
+    use crate::secretfile::{mentions_pwfile, putty_password, write};
+    assert!(mentions_pwfile(b"...\0-pw\0-pwfile\0-i\0..."), "PuTTY 0.77 and newer");
+    assert!(!mentions_pwfile(b"...\0-pw\0-i\0..."), "older PuTTY");
+    let dir = std::env::temp_dir().join(format!("admincraft-putty-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (new, old) = (dir.join("putty-new.exe"), dir.join("putty-old.exe"));
+    std::fs::write(&new, b"MZ..-pw..-pwfile..").unwrap();
+    std::fs::write(&old, b"MZ..-pw..").unwrap();
+    // a new PuTTY gets the file's name, never the password
+    let (args, file) = putty_password(&new, "s3cret pw").unwrap();
+    let file = file.expect("a password file");
+    assert_eq!(args[0], "-pwfile");
+    assert!(!args.iter().any(|a| a.contains("s3cret")));
+    assert_eq!(std::fs::read_to_string(file.path()).unwrap(), "s3cret pw");
+    let path = file.path().to_path_buf();
+    drop(file);
+    assert!(!path.exists(), "removed when the program is done");
+    // an old PuTTY still works, with the password as before
+    let (args, file) = putty_password(&old, "s3cret pw").unwrap();
+    assert!(file.is_none());
+    assert_eq!(args, vec!["-pw".to_string(), "s3cret pw".to_string()]);
+    // no password: nothing at all
+    assert!(putty_password(&new, "").unwrap().0.is_empty());
+    // files kept for a running program go when it ends
+    let kept = write("x").unwrap();
+    let kept_path = kept.path().to_path_buf();
+    crate::secretfile::keep_while_running(4_000_000_001, vec![kept]);
+    assert!(kept_path.exists());
+    crate::secretfile::process_ended(4_000_000_001);
+    assert!(!kept_path.exists());
+    let _ = std::fs::remove_dir_all(dir);
 }

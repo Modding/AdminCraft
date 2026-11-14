@@ -330,6 +330,7 @@ impl AdminApp {
         // language: the system's until the saved choice is known (first-run examples use it too)
         let cli_lang = std::env::args().skip_while(|a| a != "--lang").nth(1);
         crate::i18n::set_language(cli_lang.as_deref().unwrap_or(""));
+        crate::secretfile::sweep_stale();
         let store = Store::open(screenshot.is_some());
         crate::i18n::set_language(cli_lang.as_deref().unwrap_or(&store.data.settings.language));
         if !store.read_only {
@@ -2183,6 +2184,7 @@ impl AdminApp {
         let mut open_kp = false;
         let mut kp_save = false;
         let mut open_settings = false;
+        let no_master = !self.store.data.master;
         let default_client = self.store.data.settings.default_ssh_client;
 
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -2297,9 +2299,25 @@ impl AdminApp {
                                     self.pwgen.open = true;
                                     self.pwgen.target = Some(id);
                                     self.pwgen.value.clear();
+                                    self.pwgen.error = None;
                                 }
                             });
                             ui.end_row();
+                            // right where a password is saved: without a master password it is
+                            // only obscured, and one click leads to where that is changed
+                            if no_master && !e.password.is_empty() {
+                                ui.label("");
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        RichText::new(tr("No master password yet: passwords are only obfuscated. Set one for real protection."))
+                                            .color(Color32::from_rgb(230, 160, 40)),
+                                    );
+                                    if ui.small_button(tr("Set a master password in the settings.")).clicked() {
+                                        open_settings = true;
+                                    }
+                                });
+                                ui.end_row();
+                            }
                         }
                         CredSource::KeePass => {
                             if let Some((code, left)) = &kp_otp {
@@ -4228,6 +4246,7 @@ impl eframe::App for AdminApp {
                 if let Some(child) = &mut p.child
                     && let Ok(Some(status)) = child.try_wait()
                 {
+                    crate::secretfile::process_ended(child.id());
                     // mstsc hands over to an already running copy sometimes: keep the tab if its window is ours
                     if !p.embed.as_ref().map(|e| e.attached()).unwrap_or(false) {
                         p.exited = Some(if status.success() {
@@ -4345,6 +4364,8 @@ impl eframe::App for AdminApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // no password file outlives AdminCraft
+        crate::secretfile::remove_all();
         // remember what was open (restored at the next start when switched on)
         let session: Vec<(u64, String)> = self
             .tabs
@@ -4392,6 +4413,7 @@ fn stop_proc(p: &mut ProcTab) {
     if let Some(mut c) = p.child.take() {
         let _ = c.kill();
         let _ = c.wait();
+        crate::secretfile::process_ended(c.id());
     }
     p.embed = None;
 }
