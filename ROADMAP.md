@@ -31,27 +31,23 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
 `cargo test --locked` before pushing, add a test for new logic, and add every new text to all four
 `lang/*.lang` files. Tick an item off here in the pull request that finishes it.
 
-1. **Password generator must not hide a failing random source.** `random_bytes` in
-   `src/admintools.rs` ignores the error of `getrandom::fill` and would then build a password from
-   zero bytes. Return a `Result` and show the error instead of a password (the control channel in
-   `src/control.rs` already does this for its token). Small.
-2. **Say in the window that passwords without a master password are only obscured.** The status
-   bar and the README say it; add a clear hint with a button to *Settings » master password* at
-   the moment the first password is saved without one (`src/app.rs`, the properties panel and
-   `Store::save` in `src/model.rs` show where passwords are stored). Check with
-   `--screenshot`. Small.
-3. **Wipe the passwords of connections from memory.** Only the vault key and the key-derivation
+1. **No password on FreeRDP's command line.** `launch_rdp` in `src/launch.rs` passes
+   `/p:<password>`; other programs of the same user can read that while FreeRDP starts.
+   FreeRDP 3 can read all its arguments from standard input (`/args-from:stdin`, one argument per
+   line, not combinable with other arguments) and has `/from-stdin` for credentials; whether
+   FreeRDP 2 knows `/args-from` is not checked. Needs a Linux machine with FreeRDP 2 and 3 to
+   try; say in the pull request what was tried. Done already: Remote Desktop on Windows
+   (`src/wincred.rs`) and PuTTY, plink, psftp and pscp (`-pwfile`, `src/secretfile.rs`).
+2. **Wipe the passwords of connections from memory.** Only the vault key and the key-derivation
    input are wiped (`Vault` in `src/model.rs`). `Creds.password`, `Entry.password`, the session
    passwords in `src/app.rs` and the auto-typing rules in `src/terminal.rs` are plain `String`s.
    Move them to `zeroize::Zeroizing<String>` (the crate is already a dependency); serde needs
    `zeroize`'s `serde` feature or a small wrapper. Medium; the compiler finds every place.
-4. **No passwords on command lines for PuTTY and FreeRDP.** `launch_putty` in `src/launch.rs`
-   and the psftp/pscp/plink calls in `src/transfer.rs` pass `-pw <password>`; FreeRDP gets
-   `/p:<password>`. Other programs of the same user can read that. Use PuTTY's `-pwfile <file>`
-   (PuTTY 0.77 and newer; a file only the user can read, removed afterwards — keep `-pw` as the
-   fallback for older versions and say so in the tab) and FreeRDP's `/from-stdin`. Needs a real
-   PuTTY and a Linux machine with FreeRDP to try; say in the pull request what was tried.
-   Remote Desktop on Windows is done (`src/wincred.rs`).
+3. **Try the password files with a real PuTTY** (0.77 or newer, and one older): direct login,
+   a jump host through plink (reconnect with *Restart session* too), and file transfer with
+   psftp/pscp. The logic is covered by tests, the programs themselves were not at hand.
+4. **Look at the hint in the properties panel** (password saved without a master password) in
+   all five languages with `--screenshot`; it reuses existing texts and was not looked at yet.
 5. **The saved WebDAV password** (`src/remote.rs`) is encrypted with a key built into the
    program, so it is only obscured. Encrypt it with the store's vault when a master password is set.
 6. **Licences outside the allowlist** (`ATTRIBUTION.md`): `Zlib` and `BSL-1.0` come with egui and

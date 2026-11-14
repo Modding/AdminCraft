@@ -152,13 +152,14 @@ impl Default for PwOptions {
     }
 }
 
-fn random_bytes(n: usize) -> Vec<u8> {
-    let mut v = vec![0u8; n];
-    let _ = getrandom::fill(&mut v);
-    v
+/// A password from the system's random numbers. Without them there is an error and no password
+/// (never one built from predictable bytes).
+pub fn generate_password(o: &PwOptions) -> Result<String, String> {
+    generate_password_with(o, &mut |buf| getrandom::fill(buf).map_err(|e| tf("No random numbers available: {0}", &[&e])))
 }
 
-pub fn generate_password(o: &PwOptions) -> String {
+/// The same with the random source handed in (tests).
+pub fn generate_password_with(o: &PwOptions, random: &mut dyn FnMut(&mut [u8]) -> Result<(), String>) -> Result<String, String> {
     let mut sets: Vec<Vec<char>> = Vec::new();
     let similar = |c: &char| o.no_similar && "0Oo1lI|".contains(*c);
     if o.upper {
@@ -178,15 +179,26 @@ pub fn generate_password(o: &PwOptions) -> String {
     }
     let all: Vec<char> = sets.iter().flatten().copied().collect();
     let len = o.length.clamp(4, 128);
-    let pick = |set: &[char], b: u8| set[(b as usize) % set.len()];
-    loop {
-        let r = random_bytes(len);
-        let pw: Vec<char> = r.iter().map(|&b| pick(&all, b)).collect();
+    // bytes at or above `limit` are thrown away, so every character is equally likely
+    let limit = 256 - 256 % all.len();
+    let mut buf = vec![0u8; len * 2];
+    // a random source that keeps answering with unusable bytes ends in an error, not in a hang
+    for _ in 0..1000 {
+        let mut pw: Vec<char> = Vec::with_capacity(len);
+        for _ in 0..64 {
+            random(&mut buf)?;
+            let missing = len - pw.len();
+            pw.extend(buf.iter().filter(|&&b| (b as usize) < limit).filter_map(|&b| all.get(b as usize % all.len())).take(missing));
+            if pw.len() == len {
+                break;
+            }
+        }
         // every chosen kind of character must appear at least once
-        if sets.iter().all(|s| pw.iter().any(|c| s.contains(c))) || len < sets.len() {
-            return pw.into_iter().collect();
+        if pw.len() == len && (sets.iter().all(|s| pw.iter().any(|c| s.contains(c))) || len < sets.len()) {
+            return Ok(pw.into_iter().collect());
         }
     }
+    Err(tf("No random numbers available: {0}", &[&tr("the random source repeats itself")]))
 }
 
 // ------------------------------------------------------------------ TOTP (two-factor codes)

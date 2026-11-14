@@ -538,14 +538,19 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
         args.push("-l".into());
         args.push(first_c.user.clone());
     }
-    if !first_c.password.is_empty() {
-        args.push("-pw".into());
-        args.push(first_c.password.clone());
-    }
+    // The password goes through a file only the user can read (-pwfile), not through the
+    // command line; only a PuTTY older than 0.77 still gets -pw, and the tab says so.
+    let mut secrets = Vec::new();
+    let mut old_putty = false;
+    let (pw_args, pw_file) = crate::secretfile::putty_password(&putty, &first_c.password)?;
+    old_putty |= !first_c.password.is_empty() && pw_file.is_none();
+    args.extend(pw_args);
+    secrets.extend(pw_file);
     if !first.ssh_key.trim().is_empty() {
         args.push("-i".into());
         args.push(first.ssh_key.trim().into());
     }
+    let note = |old: bool| if old { tr(" – old PuTTY: the password is on its command line, please update PuTTY") } else { "" };
     if chain_mode {
         let dir = std::env::temp_dir().join("admincraft");
         std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
@@ -556,10 +561,11 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
         args.push(file.display().to_string());
         args.push(first.host.trim().into());
         let child = spawn(&putty, &args)?;
+        crate::secretfile::keep_while_running(child.id(), secrets);
         let embed: Option<&'static [&'static str]> = if settings.embed_windows { Some(&["PuTTY"]) } else { None };
         return Ok(Launch::Process {
             child,
-            label: tf("PuTTY: {0} » {1}", &[&(user_host(&first_c.user, &first.host)), &(user_host(&c.user, &e.host))]),
+            label: tf("PuTTY: {0} » {1}", &[&(user_host(&first_c.user, &first.host)), &(user_host(&c.user, &e.host))]) + note(old_putty),
             embed,
         });
     }
@@ -572,8 +578,19 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
             if !j.creds.user.is_empty() {
                 pc.push_str(&format!(" -l {}", j.creds.user));
             }
-            if !j.creds.password.is_empty() {
-                pc.push_str(&format!(" -pw \"{}\"", j.creds.password.replace('"', "\\\"")));
+            // the jump host's password: plink reads its file again on every reconnect, so the
+            // file stays until PuTTY ends
+            let (_, pw_file) = crate::secretfile::putty_password(&plink, &j.creds.password)?;
+            match pw_file {
+                Some(file) => {
+                    pc.push_str(&format!(" -pwfile \"{}\"", file.path().display()));
+                    secrets.push(file);
+                }
+                None if !j.creds.password.is_empty() => {
+                    old_putty = true;
+                    pc.push_str(&format!(" -pw \"{}\"", j.creds.password.replace('"', "\\\"")));
+                }
+                None => {}
             }
             pc.push_str(&format!(" -nc %host:%port {0}", j.entry.host.trim()));
             args.push("-proxycmd".into());
@@ -584,8 +601,9 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
     args.extend(split_words(&e.extra_args));
     args.push(e.host.trim().into());
     let child = spawn(&putty, &args)?;
+    crate::secretfile::keep_while_running(child.id(), secrets);
     let embed: Option<&'static [&'static str]> = if settings.embed_windows { Some(&["PuTTY"]) } else { None };
-    Ok(Launch::Process { child, label: tf("PuTTY: {0}", &[&(user_host(&c.user, &e.host))]), embed })
+    Ok(Launch::Process { child, label: tf("PuTTY: {0}", &[&(user_host(&c.user, &e.host))]) + note(old_putty), embed })
 }
 
 // ------------------------------------------------------------------ RDP

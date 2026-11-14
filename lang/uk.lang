@@ -846,3 +846,6 @@ New test version available: {0} (from {1}). = Доступна нова тест
 New version available: {0} (from {1}). = Доступна нова версія: {0} (від {1}).
 AdminCraft {0} is the newest version. = AdminCraft {0} — найновіша версія.
 No. = №
+No random numbers available: {0} = Немає доступних випадкових чисел: {0}
+the random source repeats itself = джерело випадковості повторюється
+ – old PuTTY: the password is on its command line, please update PuTTY =  – старий PuTTY: пароль у його командному рядку, оновіть PuTTY

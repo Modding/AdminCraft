@@ -415,6 +415,8 @@ pub struct PwGen {
     pub open: bool,
     pub opts: PwOptions,
     pub value: String,
+    /// Why no password could be made (no random numbers).
+    pub error: Option<String>,
     /// Connection whose password field "Apply" fills.
     pub target: Option<u64>,
 }
@@ -424,8 +426,18 @@ pub fn pwgen_window(ctx: &egui::Context, g: &mut PwGen) -> Option<(u64, String)>
     if !g.open {
         return None;
     }
-    if g.value.is_empty() {
-        g.value = admintools::generate_password(&g.opts);
+    let make = |g: &mut PwGen| match admintools::generate_password(&g.opts) {
+        Ok(pw) => {
+            g.value = pw;
+            g.error = None;
+        }
+        Err(e) => {
+            g.value.clear();
+            g.error = Some(e);
+        }
+    };
+    if g.value.is_empty() && g.error.is_none() {
+        make(g);
     }
     let mut apply = None;
     let mut open = true;
@@ -440,17 +452,21 @@ pub fn pwgen_window(ctx: &egui::Context, g: &mut PwGen) -> Option<(u64, String)>
             changed |= ui.checkbox(&mut g.opts.no_similar, tr("no look-alikes (0 O l 1)")).changed();
         });
         if changed {
-            g.value = admintools::generate_password(&g.opts);
+            make(g);
+        }
+        if let Some(e) = &g.error {
+            ui.colored_label(Color32::from_rgb(230, 90, 90), e);
         }
         ui.add(egui::TextEdit::singleline(&mut g.value).font(egui::TextStyle::Monospace).desired_width(360.0));
         ui.horizontal(|ui| {
             if ui.button(tr("New")).clicked() {
-                g.value = admintools::generate_password(&g.opts);
+                make(g);
             }
             if ui.button(tr("Copy")).clicked() {
                 ui.ctx().copy_text(g.value.clone());
             }
             if let Some(id) = g.target
+                && !g.value.is_empty()
                 && ui.add(egui::Button::new(RichText::new(tr("Use for the connection")).color(Color32::WHITE)).fill(ACCENT)).clicked()
             {
                 apply = Some((id, g.value.clone()));
