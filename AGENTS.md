@@ -185,7 +185,7 @@ Same scheme as the other Craft apps:
   (window embedding, `shutdown /m`, mmc tools) degrade to a clear message elsewhere.
 - **Secrets on command lines:** a password given to another program goes through a pipe, a file
   only the user can read, the environment of that one child, or an API — not through its arguments.
-  Still open and listed in `ROADMAP.md`: PuTTY/plink/psftp/pscp (`-pw`) and FreeRDP (`/p:`).
+  Still open (work list in `ROADMAP.md`): PuTTY/plink/psftp/pscp (`-pw`) and FreeRDP (`/p:`).
 - **Time goes through `chrono`** (`src/timefmt.rs`); no hand-written calendar code.
 - **No new C dependencies** without need; `ring` is the exception.
 - **Licences:** a new dependency must fit the allowlist above. Known exceptions already in the
