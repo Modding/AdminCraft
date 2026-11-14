@@ -36,7 +36,6 @@
   connections are not yet.
 - **Licences:** `Zlib`, `BSL-1.0` and `CDLA-Permissive-2.0` crates are not on the Craft allowlist
   (see `ATTRIBUTION.md`); to be cleared with `storytold/craft-contrib`.
-- **Logo:** its licence is not recorded yet (`ATTRIBUTION.md`).
 - **Shared CI:** `ci.yml` and `release.yml` run their own jobs; the shared Craft gate and release
   workflows need a workspace with `cargo xtask ci`. Same step: split the one crate into
   `crates/` (model, network tools, no egui) and `apps/` and bring `src/app.rs` down to size.
