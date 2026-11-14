@@ -324,7 +324,8 @@ admincraft cli window tabs              відкриті вкладки
 admincraft cli window read 2            що показує вкладка 2
 admincraft cli window tool ping web01   відкрити вкладку інструмента
 admincraft cli window switch 2          вивести вкладку наперед
-admincraft cli window type 2 uptime     ввести в термінал + Enter
+admincraft cli window screenshot 2 t.png  зображення вкладки 2 (також вбудовані PuTTY / віддалений робочий стіл)
+admincraft cli window type 2 uptime     ввести в термінал або вбудований PuTTY + Enter
 ```
 
 MCP-сервер пропонує те саме як інструменти `window_…`. Вводити текст у термінали можна лише після дозволу в

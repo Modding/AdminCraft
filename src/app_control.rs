@@ -4,7 +4,106 @@
 use super::*;
 use serde_json::{Value, json};
 
+/// A picture of a tab an agent asked for. The tab is brought to the front first; the picture
+/// is taken a few frames later, when the tab (and a window embedded in it) is drawn.
+pub(super) struct AgentShot {
+    reply: std::sync::mpsc::Sender<Value>,
+    tab: usize,
+    file: PathBuf,
+    frames: u32,
+}
+
+/// Frames to wait after switching to the tab (an embedded window is placed one frame late).
+const SHOT_FRAMES: u32 = 6;
+/// Longest text an agent may type into an embedded window at once.
+const TYPE_LIMIT: usize = 4000;
+
+fn save_png(file: &std::path::Path, w: usize, h: usize, rgba: &[u8]) -> Result<Value, String> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let (w32, h32) = (u32::try_from(w).map_err(|e| e.to_string())?, u32::try_from(h).map_err(|e| e.to_string())?);
+    image::save_buffer(file, rgba, w32, h32, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())?;
+    Ok(json!({ "file": file.display().to_string(), "width": w, "height": h }))
+}
+
 impl AdminApp {
+    /// "screenshot {index?, path?}": remembers the request; `agent_shot_step` answers it.
+    fn start_agent_shot(&mut self, r: crate::control::Request, ctx: &egui::Context) {
+        if self.agent_shot.is_some() {
+            let _ = r.reply.send(json!({ "error": "another screenshot is being taken" }));
+            return;
+        }
+        let i = match self.tab_index(&r.args) {
+            Ok(i) => i,
+            Err(e) => {
+                let _ = r.reply.send(json!({ "error": e }));
+                return;
+            }
+        };
+        let file = match r.args["path"].as_str().map(str::trim).filter(|p| !p.is_empty()) {
+            // only ever a picture file: a control command must not be a way to overwrite other files
+            Some(p) if !p.to_ascii_lowercase().ends_with(".png") => {
+                let _ = r.reply.send(json!({ "error": "the file name must end in .png" }));
+                return;
+            }
+            Some(p) => PathBuf::from(p),
+            None => std::env::temp_dir().join("admincraft").join(format!("tab-{}-{i}.png", std::process::id())),
+        };
+        self.active = i;
+        self.agent_shot = Some(AgentShot { reply: r.reply, tab: i, file, frames: 0 });
+        ctx.request_repaint();
+    }
+
+    /// Takes the picture an agent asked for once the tab has been drawn.
+    pub(super) fn agent_shot_step(&mut self, ctx: &egui::Context) {
+        let Some(shot) = &mut self.agent_shot else { return };
+        shot.frames += 1;
+        if shot.frames < SHOT_FRAMES {
+            ctx.request_repaint();
+            return;
+        }
+        let Some(shot) = self.agent_shot.take() else { return };
+        if shot.tab >= self.tabs.len() || shot.tab != self.active {
+            let _ = shot.reply.send(json!({ "error": "the tab was closed or changed meanwhile" }));
+            return;
+        }
+        let tab = self.tab_json(shot.tab);
+        let r = self.last_content;
+        let ppp = ctx.pixels_per_point();
+        let px = PxRect {
+            x: (r.min.x * ppp).round() as i32,
+            y: (r.min.y * ppp).round() as i32,
+            w: (r.width() * ppp).round() as i32,
+            h: (r.height() * ppp).round() as i32,
+        };
+        // from the window itself where the system can do that (embedded windows included, and
+        // nothing of a window lying on top); elsewhere our own drawing
+        match self.parent_hwnd.and_then(|h| embed::capture_window(h, px)) {
+            Some((w, h, rgba)) => {
+                let mut answer = save_png(&shot.file, w, h, &rgba).unwrap_or_else(|e| json!({ "error": e }));
+                if answer.get("error").is_none() {
+                    answer["tab"] = tab;
+                }
+                let _ = shot.reply.send(answer);
+            }
+            None => {
+                let c2 = ctx.clone();
+                ctx.request_screenshot(move |img| {
+                    let part = img.region(&r, Some(c2.pixels_per_point()));
+                    let [w, h] = part.size;
+                    let rgba: Vec<u8> = part.pixels.iter().flat_map(|p| p.to_array()).collect();
+                    let mut answer = save_png(&shot.file, w, h, &rgba).unwrap_or_else(|e| json!({ "error": e }));
+                    if answer.get("error").is_none() {
+                        answer["tab"] = tab.clone();
+                    }
+                    let _ = shot.reply.send(answer);
+                });
+                ctx.request_repaint();
+            }
+        }
+    }
+
     /// Starts or stops the control channel to match the setting.
     pub(super) fn sync_control(&mut self, ctx: &egui::Context) {
         let want = self.store.data.settings.agent_control && self.shot.is_none();
@@ -31,6 +130,11 @@ impl AdminApp {
             }
         }
         for r in reqs {
+            if r.cmd == "screenshot" {
+                // answered some frames later, when the tab is on the screen
+                self.start_agent_shot(r, ctx);
+                continue;
+            }
             let v = self.control_answer(&r.cmd, &r.args, ctx, now).unwrap_or_else(|e| json!({ "error": e }));
             let _ = r.reply.send(v);
         }
@@ -170,7 +274,25 @@ impl AdminApp {
                         }
                         None => Err("this terminal is not running".to_string()),
                     },
-                    _ => Err("only terminal tabs take typing".to_string()),
+                    // an embedded PuTTY window takes the characters as messages; Remote Desktop
+                    // and VNC viewers don't, they need a real keyboard
+                    TabKind::Proc(p) => match &p.embed {
+                        Some(em) if em.attached() && em.class() == "PuTTY" => {
+                            if text.chars().count() > TYPE_LIMIT {
+                                Err(format!("at most {TYPE_LIMIT} characters at once"))
+                            } else if em.type_text(&text) && (!enter || em.type_text("\r")) {
+                                Ok(json!({ "typed": text.chars().count(), "enter": enter, "window": "PuTTY" }))
+                            } else {
+                                Err("the PuTTY window did not take the text".to_string())
+                            }
+                        }
+                        Some(em) if em.attached() => Err(format!(
+                            "typing works in terminal tabs and embedded PuTTY windows, not in this window ({}); look at it with the screenshot command",
+                            em.class()
+                        )),
+                        _ => Err("this window is not embedded in the tab (its own window, or not started yet)".to_string()),
+                    },
+                    _ => Err("only terminal tabs and embedded PuTTY windows take typing".to_string()),
                 }?;
                 self.note(tf("An agent typed into \"{0}\".", &[&title]), false, now);
                 Ok(typed)

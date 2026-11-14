@@ -320,7 +320,8 @@ admincraft cli window tabs              the open tabs
 admincraft cli window read 2            what tab 2 shows (terminal screen, results)
 admincraft cli window tool ping web01   open a tool tab
 admincraft cli window switch 2          bring a tab to the front
-admincraft cli window type 2 uptime     type into a terminal tab and press Enter
+admincraft cli window screenshot 2 t.png  picture of tab 2 (embedded PuTTY / Remote Desktop too)
+admincraft cli window type 2 uptime     type into a terminal tab or embedded PuTTY and press Enter
 ```
 
 The MCP server offers the same as `window_…` tools. Typing into terminals is only possible after you

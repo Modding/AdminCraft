@@ -784,3 +784,19 @@ fn putty_password_goes_through_a_file() {
     assert!(!kept_path.exists());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn agents_can_look_at_and_type_into_embedded_windows() {
+    // the control channel and the MCP server both offer the picture of a tab
+    assert!(crate::control::COMMANDS.iter().any(|(cmd, _)| *cmd == "screenshot"));
+    let tools = crate::agent::tool_list();
+    assert!(tools.iter().any(|(name, _, _)| *name == "window_screenshot"));
+    let typing = tools.iter().find(|(name, _, _)| *name == "window_type").expect("window_type");
+    assert!(typing.1.contains("PuTTY"), "the description says where typing works");
+    // a window that is not embedded takes no typing and has no class (nothing is sent anywhere)
+    let not_embedded = crate::embed::Embedded::new(0, &[]);
+    assert!(!not_embedded.type_text("x"));
+    assert_eq!(not_embedded.class(), "");
+    // outside our own window there is nothing to take a picture of
+    assert!(crate::embed::capture_window(0, crate::embed::PxRect { x: 0, y: 0, w: 10, h: 10 }).is_none());
+}

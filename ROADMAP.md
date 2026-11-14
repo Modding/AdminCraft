@@ -63,7 +63,14 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
    requests, tests green after each. This is the precondition for the next item.
 9. **Shared CI.** Replace the jobs in `ci.yml` and `release.yml` by calls to the shared gate and
    release workflows in `storytold/craft-common-actions` (they expect `cargo xtask ci`).
-10. **Releases:** add an Intel macOS build; sign the Windows and macOS programs once
+10. **Agents in Remote Desktop and VNC windows.** Agents can look at every tab
+    (`window screenshot`) and type into terminal tabs and embedded PuTTY windows. Remote Desktop
+    and VNC viewers don't take posted characters: they need real key and mouse input
+    (`SendInput`, which needs the keyboard focus and so interrupts the person at the computer).
+    If this is built: its own switch in the settings (it hands the whole remote desktop to the
+    agent), mouse clicks at a position of the screenshot, and special keys (Ctrl+C, arrows,
+    Tab) for PuTTY too. `src/embed.rs` and `src/app_control.rs`.
+11. **Releases:** add an Intel macOS build; sign the Windows and macOS programs once
     certificates exist.
 
 Done and to be tried against real servers: the Remote Desktop login through the Credential
