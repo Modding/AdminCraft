@@ -75,7 +75,7 @@ Clic droit sur un dossier » **Ouvrir toutes les connexions du dossier** les ouv
 | VNC | fenêtre de la visionneuse dans l'onglet | une visionneuse VNC comme TigerVNC ou TightVNC |
 | Telnet | onglet terminal | — |
 | PowerShell | onglet terminal avec `Enter-PSSession` | PowerShell, WinRM sur la cible |
-| HTTP / HTTPS | fenêtre d'application du navigateur dans l'onglet | Edge ou Chrome (sinon le navigateur habituel) |
+| HTTP / HTTPS | fenêtre d'application du navigateur dans l'onglet | Edge, Chrome ou votre propre navigateur (Brave, Vivaldi, Firefox …) ; sinon le navigateur habituel |
 | SFTP / SCP / FTP / FTPS | onglet de transfert de fichiers | OpenSSH ou PuTTY pour SFTP/SCP ; FTP est intégré |
 | Série, TCP brut, rlogin | PuTTY dans l'onglet ou un onglet terminal | PuTTY/plink (Windows) ; picocom, nc … ailleurs |
 | Shell local | onglet terminal sur cet ordinateur | — |
@@ -240,6 +240,11 @@ Ouvrez-les avec le bouton **Paramètres**, **Ctrl+,** ou Outils » Paramètres.
 - **Apparence** — sombre ou clair, taille de la police du terminal.
 - **SSH, bureau à distance et fichiers** — quel client ouvre SSH (terminal intégré, PuTTY, fenêtre séparée),
   quels programmes transfèrent les fichiers, si les fenêtres sont intégrées dans les onglets.
+- **Interfaces web** — quel navigateur ouvre les pages web dans un onglet : vide pour Edge ou Chrome, ou le
+  programme de votre navigateur (p. ex. `brave.exe`, `vivaldi.exe`, `firefox.exe`). Les navigateurs Chromium
+  ouvrent une fenêtre simple, les navigateurs Firefox gardent leur barre d'onglets et d'adresse. Avec un profil
+  propre par connexion, la fenêtre va dans l'onglet et les connexions restent dans le dossier de données ; le
+  profil normal apporte vos mots de passe et extensions, mais s'ouvre hors de l'onglet.
 - **Programmes** — où AdminCraft a trouvé chaque programme d'aide. Indiquez votre propre chemin, ou déposez simplement
   des programmes portables dans le **dossier des programmes** (`AdminCraftTools` à côté d'AdminCraft).
 - **Emplacement de stockage** — où se trouve la liste, mot de passe maître, stockage centralisé.

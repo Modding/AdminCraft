@@ -435,6 +435,36 @@ pub struct Settings {
     pub record_sessions: bool,
     /// The connections live in the KeePass database `keepass_path` (group "AdminCraft").
     pub keepass_db: bool,
+    /// Which kind of browser opens web interfaces in a tab (its program: `programs["browser"]`).
+    pub web_family: BrowserFamily,
+    /// Which browser profile web interfaces use.
+    pub web_profile: WebProfile,
+    /// Extra arguments for the browser, separated by spaces.
+    pub web_args: String,
+}
+
+/// The browser a web interface opens in decides the arguments AdminCraft gives it.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
+pub enum BrowserFamily {
+    /// Told by the program's file name (firefox, librewolf, waterfox … = Firefox, else Chromium).
+    #[default]
+    Auto,
+    /// Edge, Chrome, Brave, Vivaldi, Chromium, Opera: a window without tabs (`--app`).
+    Chromium,
+    /// Firefox and its relatives: a normal window with tabs.
+    Firefox,
+}
+
+/// Where the browser keeps logins and cookies for web interfaces.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
+pub enum WebProfile {
+    /// One profile per connection in the data folder: logins stay, and goes along on the USB stick.
+    #[default]
+    Kept,
+    /// A fresh profile per connection in the temp folder, gone after a restart of the computer.
+    Temporary,
+    /// The browser's normal profile (its passwords and extensions); its window can't be put into a tab.
+    Normal,
 }
 
 impl Default for Settings {
@@ -458,6 +488,9 @@ impl Default for Settings {
             agent_typing: false,
             record_sessions: false,
             keepass_db: false,
+            web_family: BrowserFamily::Auto,
+            web_profile: WebProfile::Kept,
+            web_args: String::new(),
             snippets: default_snippets(),
             restore_session: false,
             session_log: false,

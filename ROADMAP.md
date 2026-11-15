@@ -72,6 +72,15 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
     Tab) for PuTTY too. `src/embed.rs` and `src/app_control.rs`.
 11. **Releases:** add an Intel macOS build; sign the Windows and macOS programs once
     certificates exist.
+12. **Own browser for web interfaces** — started. Settings » *Web interfaces*: the program of any
+    Chromium browser (Brave, Brave Origin, Vivaldi, Chromium, Opera) or Firefox browser (Firefox,
+    LibreWolf, Waterfox, Zen …), the kind recognised from its file name or chosen, the profile (own per
+    connection in the data folder, own temporary, or the browser's normal one, which can't go into a
+    tab) and own arguments (`src/launch.rs` `web_args`, `src/app_web.rs`). Still to do: try it with
+    Brave Origin and a Firefox browser on Windows (window found and placed in the tab, focus, size,
+    logins kept); a browser per connection instead of one for all; on Linux/macOS use the chosen
+    browser too instead of the system one. A built-in webview (WebView2) is not an option: the Rust
+    house rules allow no webview in native Craft apps.
 
 Done and to be tried against real servers: the Remote Desktop login through the Credential
 Manager (`src/wincred.rs`) — log in to a real host with *Pass the login automatically* and check
@@ -82,7 +91,7 @@ that the entry is gone from the Credential Manager about two minutes later.
 | Principle | Status |
 |---|---|
 | Open source | Yes — MIT OR Apache-2.0, everything on GitHub. |
-| Native, not wrapped | Yes — pure Rust + egui, no Electron. Optional extras start the system's own programs (mstsc, PuTTY, Edge app window for web interfaces) and place their windows in a tab. |
+| Native, not wrapped | Yes — pure Rust + egui, no Electron, no webview. Optional extras start the system's own programs (mstsc, PuTTY, your browser for web interfaces) and place their windows in a tab. |
 | Familiar from day one | Yes — the mRemoteNG / Royal TS layout (tree, tabs, properties), right-click menus, tab drag & drop and the usual shortcuts. |
 | Your files, your machine | Yes — local data next to the program; central storage (SMB/WebDAV) only when chosen. |
 | Agent-ready | Yes — `admincraft cli …` (JSON), `admincraft mcp` (MCP server) and a local control channel into the open window (tabs, read, type when allowed, open tools). |

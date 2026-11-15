@@ -75,7 +75,7 @@ Clic destro su una cartella » **Apri tutte le connessioni nella cartella** le a
 | VNC | finestra del viewer dentro la scheda | un VNC viewer come TigerVNC o TightVNC |
 | Telnet | scheda terminale | — |
 | PowerShell | scheda terminale con `Enter-PSSession` | PowerShell, WinRM sulla destinazione |
-| HTTP / HTTPS | finestra app del browser dentro la scheda | Edge o Chrome (altrimenti il browser normale) |
+| HTTP / HTTPS | finestra app del browser dentro la scheda | Edge, Chrome o il tuo browser (Brave, Vivaldi, Firefox …); altrimenti il browser normale |
 | SFTP / SCP / FTP / FTPS | scheda di trasferimento file | OpenSSH o PuTTY per SFTP/SCP; FTP è integrato |
 | Seriale, TCP raw, rlogin | PuTTY nella scheda o una scheda terminale | PuTTY/plink (Windows); picocom, nc … altrove |
 | Shell locale | scheda terminale su questo computer | — |
@@ -239,6 +239,11 @@ Si aprono con il pulsante **Impostazioni**, con **Ctrl+,** o con Strumenti » Im
 - **Aspetto** — scuro o chiaro, dimensione del carattere del terminale.
 - **SSH, desktop remoto e file** — quale client apre SSH (terminale integrato, PuTTY, finestra separata),
   quali programmi trasferiscono i file, se le finestre vengono incorporate nelle schede.
+- **Interfacce web** — quale browser apre le pagine web in una scheda: vuoto per Edge o Chrome, oppure il
+  programma del tuo browser (ad es. `brave.exe`, `vivaldi.exe`, `firefox.exe`). I browser Chromium aprono una
+  finestra semplice, i browser Firefox mantengono la barra delle schede e degli indirizzi. Con un profilo proprio
+  per connessione la finestra va nella scheda e gli accessi restano nella cartella dati; il profilo normale porta
+  le tue password salvate e le estensioni, ma si apre fuori dalla scheda.
 - **Programmi** — dove AdminCraft ha trovato ogni programma di supporto. Indica un percorso personalizzato, oppure metti semplicemente
   i programmi portatili nella **cartella programmi** (`AdminCraftTools` accanto ad AdminCraft).
 - **Posizione di archiviazione** — dove si trova l'elenco, password principale, archiviazione centrale.

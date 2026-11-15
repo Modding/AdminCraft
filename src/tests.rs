@@ -800,3 +800,29 @@ fn agents_can_look_at_and_type_into_embedded_windows() {
     // outside our own window there is nothing to take a picture of
     assert!(crate::embed::capture_window(0, crate::embed::PxRect { x: 0, y: 0, w: 10, h: 10 }).is_none());
 }
+
+#[test]
+fn own_browser_for_web_interfaces() {
+    use crate::launch::{browser_family, web_args, web_profile_dir};
+    use crate::model::{BrowserFamily, WebProfile};
+    use std::path::Path;
+    let fam = |p: &str| browser_family(Path::new(p), BrowserFamily::Auto);
+    assert_eq!(fam(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"), BrowserFamily::Chromium);
+    assert_eq!(fam(r"D:\Portable\LibreWolf\librewolf.exe"), BrowserFamily::Firefox);
+    assert_eq!(fam("/usr/bin/firefox"), BrowserFamily::Firefox);
+    assert_eq!(fam("vivaldi.exe"), BrowserFamily::Chromium);
+    assert_eq!(browser_family(Path::new("mybrowser.exe"), BrowserFamily::Firefox), BrowserFamily::Firefox, "a chosen kind wins");
+    let dir = Path::new("profiles").join("chromium-7");
+    let c = web_args(BrowserFamily::Chromium, "https://10.0.0.1/", Some(&dir), "--incognito  --lang=de");
+    assert_eq!(c[0], "--app=https://10.0.0.1/");
+    assert!(c.contains(&format!("--user-data-dir={}", dir.display())));
+    assert_eq!(&c[c.len() - 2..], ["--incognito", "--lang=de"]);
+    let f = web_args(BrowserFamily::Firefox, "https://10.0.0.1/", Some(&dir), "");
+    assert_eq!(f, vec!["-no-remote", "-profile", &dir.display().to_string(), "-new-window", "https://10.0.0.1/"]);
+    let normal = web_args(BrowserFamily::Firefox, "http://x/", None, "");
+    assert_eq!(normal, vec!["-new-window", "http://x/"], "the normal profile: no own process");
+    assert!(web_profile_dir(BrowserFamily::Chromium, WebProfile::Normal, 3).is_none());
+    let kept = web_profile_dir(BrowserFamily::Firefox, WebProfile::Kept, 3).unwrap();
+    assert!(kept.ends_with(Path::new("browser").join("firefox-3")));
+    assert_ne!(kept, web_profile_dir(BrowserFamily::Chromium, WebProfile::Kept, 3).unwrap(), "the two kinds never share a profile");
+}

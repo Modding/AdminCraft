@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex};
 
 #[path = "app_control.rs"]
 mod app_control;
+#[path = "app_web.rs"]
+mod app_web;
 
 const ACCENT: Color32 = Color32::from_rgb(33, 132, 230);
 const OK_GREEN: Color32 = Color32::from_rgb(76, 175, 80);
@@ -2534,7 +2536,7 @@ impl AdminApp {
                     }
                     Protocol::Http | Protocol::Https => {
                         section(ui, tr("Web"));
-                        ui.add_enabled(cfg!(windows), egui::Checkbox::new(&mut e.web_in_tab, tr("Open in a tab (Edge/Chrome window)")))
+                        ui.add_enabled(cfg!(windows), egui::Checkbox::new(&mut e.web_in_tab, tr("Open in a tab (browser window, see Settings » Web interfaces)")))
                             .on_disabled_hover_text(tr("Only possible on Windows."));
                         if e.protocol == Protocol::Https && ui.button(tr("Check certificate")).clicked() {
                             act = Some(Act::CheckCert(id));
@@ -3733,6 +3735,8 @@ impl AdminApp {
             .on_disabled_hover_text(tr("Only possible on Windows – on Linux/macOS they run in their own windows, the tab shows the status."))
             .changed();
         changed |= ui.checkbox(&mut self.store.data.settings.show_hidden, tr("Show hidden files (.name) in the file transfer")).changed();
+
+        changed |= self.web_settings_ui(ui);
 
         section_help(ui, tr("Programs"), crate::help::Topic::Settings, &mut self.help_request);
         ui.label(tr("AdminCraft looks for each program here: 1. own path below, 2. programs folder next to AdminCraft, 3. system."));

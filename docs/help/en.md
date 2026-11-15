@@ -75,7 +75,7 @@ Right-click a folder » **Open all connections in the folder** opens them all at
 | VNC | viewer window inside the tab | a VNC viewer such as TigerVNC or TightVNC |
 | Telnet | terminal tab | — |
 | PowerShell | terminal tab with `Enter-PSSession` | PowerShell, WinRM on the target |
-| HTTP / HTTPS | browser app window inside the tab | Edge or Chrome (otherwise the normal browser) |
+| HTTP / HTTPS | browser app window inside the tab | Edge, Chrome or your own browser (Brave, Vivaldi, Firefox …); otherwise the normal browser |
 | SFTP / SCP / FTP / FTPS | file transfer tab | OpenSSH or PuTTY for SFTP/SCP; FTP is built in |
 | Serial, raw TCP, rlogin | PuTTY in the tab or a terminal tab | PuTTY/plink (Windows); picocom, nc … elsewhere |
 | Local shell | terminal tab on this computer | — |
@@ -237,6 +237,11 @@ Open with the **Settings** button, **Ctrl+,** or Tools » Settings.
 - **Appearance** — dark or light, size of the terminal font.
 - **SSH, remote desktop and files** — which client opens SSH (built-in terminal, PuTTY, own window),
   which programs transfer files, whether windows are embedded into tabs.
+- **Web interfaces** — which browser opens web pages in a tab: empty for Edge or Chrome, or the program
+  of your own browser (e.g. `brave.exe`, `vivaldi.exe`, `firefox.exe`). Chromium browsers open a plain
+  window, Firefox browsers keep their tab and address bar. With an own profile per connection the window
+  goes into the tab and logins are kept in the data folder; the normal profile brings your saved
+  passwords and extensions, but opens outside the tab.
 - **Programs** — where AdminCraft found each helper program. Give your own path, or simply drop
   portable programs into the **programs folder** (`AdminCraftTools` next to AdminCraft).
 - **Storage location** — where the list lives, master password, central storage.
