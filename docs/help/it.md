@@ -244,6 +244,8 @@ Si aprono con il pulsante **Impostazioni**, con **Ctrl+,** o con Strumenti » Im
   finestra semplice, i browser Firefox mantengono la barra delle schede e degli indirizzi. Con un profilo proprio
   per connessione la finestra va nella scheda e gli accessi restano nella cartella dati; il profilo normale porta
   le tue password salvate e le estensioni, ma si apre fuori dalla scheda.
+  *Apri ogni interfaccia web in una scheda* è attivo per impostazione predefinita; disattivato, solo le connessioni
+  con *Apri in una scheda* spuntato usano la scheda.
 - **Programmi** — dove AdminCraft ha trovato ogni programma di supporto. Indica un percorso personalizzato, oppure metti semplicemente
   i programmi portatili nella **cartella programmi** (`AdminCraftTools` accanto ad AdminCraft).
 - **Posizione di archiviazione** — dove si trova l'elenco, password principale, archiviazione centrale.
@@ -358,3 +360,8 @@ nella scheda* disattiva l'incorporamento.
 **AdminCraft chiede una password KeePass all'avvio** — l'elenco delle connessioni è in KeePass. Inserisci
 la password principale di KeePass, oppure fai clic su *Senza KeePass* per partire con l'elenco proprio
 (vuoto) di AdminCraft.
+
+**Una pagina web si apre in una finestra propria e non nella scheda** — controlla Impostazioni » Interfacce web:
+*Apri ogni interfaccia web in una scheda* attivo, un profilo *per connessione* (il profilo normale resta sempre
+fuori) e come browser il programma stesso (ad es. `brave.exe`), non un collegamento. Lascia alla finestra
+qualche secondo per comparire.

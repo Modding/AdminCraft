@@ -243,6 +243,8 @@ Datei » OpenSSH-Konfiguration importieren (`~/.ssh/config`, einschließlich Pro
   schlichtes Fenster, Firefox-Browser behalten Tab- und Adressleiste. Mit eigenem Profil je Verbindung kommt
   das Fenster in den Tab und Anmeldungen bleiben im Datenordner; das normale Profil bringt Ihre gespeicherten
   Passwörter und Erweiterungen mit, öffnet aber außerhalb des Tabs.
+  *Jede Weboberfläche im Tab öffnen* ist standardmäßig an; ausgeschaltet nutzen nur Verbindungen mit Haken bei
+  *Im Tab öffnen* den Tab.
 - **Programme** – wo AdminCraft die einzelnen Hilfsprogramme gefunden hat. Einen eigenen Pfad angeben oder einfach
   portable Programme in den **Programme-Ordner** legen (`AdminCraftTools` neben AdminCraft).
 - **Speicherort** – wo die Liste liegt, Masterpasswort, zentrale Speicherung.
@@ -356,3 +358,7 @@ schaltet das Einbetten ab.
 
 **AdminCraft fragt beim Start nach einem KeePass-Passwort** – die Verbindungsliste liegt in KeePass. Das
 KeePass-Masterpasswort eingeben oder auf *Ohne KeePass* klicken, um mit der eigenen (leeren) Liste zu starten.
+
+**Eine Webseite öffnet in einem eigenen Fenster statt im Tab** – Einstellungen » Weboberflächen prüfen:
+*Jede Weboberfläche im Tab öffnen* an, ein Profil *je Verbindung* (das normale Profil bleibt immer außerhalb)
+und als Browser das Programm selbst (z. B. `brave.exe`), keine Verknüpfung. Dem Fenster ein paar Sekunden geben.

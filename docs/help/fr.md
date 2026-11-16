@@ -245,6 +245,8 @@ Ouvrez-les avec le bouton **Paramètres**, **Ctrl+,** ou Outils » Paramètres.
   ouvrent une fenêtre simple, les navigateurs Firefox gardent leur barre d'onglets et d'adresse. Avec un profil
   propre par connexion, la fenêtre va dans l'onglet et les connexions restent dans le dossier de données ; le
   profil normal apporte vos mots de passe et extensions, mais s'ouvre hors de l'onglet.
+  *Ouvrir chaque interface web dans un onglet* est activé par défaut ; désactivé, seules les connexions avec
+  *Ouvrir dans un onglet* coché utilisent l'onglet.
 - **Programmes** — où AdminCraft a trouvé chaque programme d'aide. Indiquez votre propre chemin, ou déposez simplement
   des programmes portables dans le **dossier des programmes** (`AdminCraftTools` à côté d'AdminCraft).
 - **Emplacement de stockage** — où se trouve la liste, mot de passe maître, stockage centralisé.
@@ -360,3 +362,8 @@ dans l'onglet* désactive l'intégration.
 **AdminCraft demande un mot de passe KeePass au démarrage** — la liste des connexions est dans KeePass.
 Saisissez le mot de passe maître KeePass, ou cliquez sur *Sans KeePass* pour démarrer avec la liste propre
 (vide) d'AdminCraft.
+
+**Une page web s'ouvre dans sa propre fenêtre et pas dans l'onglet** — vérifiez Paramètres » Interfaces web :
+*Ouvrir chaque interface web dans un onglet* activé, un profil *par connexion* (le profil normal reste toujours
+dehors) et comme navigateur le programme lui-même (p. ex. `brave.exe`), pas un raccourci. Laissez quelques
+secondes à la fenêtre pour apparaître.

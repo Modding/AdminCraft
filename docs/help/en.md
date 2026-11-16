@@ -242,6 +242,8 @@ Open with the **Settings** button, **Ctrl+,** or Tools » Settings.
   window, Firefox browsers keep their tab and address bar. With an own profile per connection the window
   goes into the tab and logins are kept in the data folder; the normal profile brings your saved
   passwords and extensions, but opens outside the tab.
+  *Open every web interface in a tab* is on by default; switched off, only connections with *Open in a tab*
+  ticked use the tab.
 - **Programs** — where AdminCraft found each helper program. Give your own path, or simply drop
   portable programs into the **programs folder** (`AdminCraftTools` next to AdminCraft).
 - **Storage location** — where the list lives, master password, central storage.
@@ -352,3 +354,7 @@ KeePass master password, or press *Without KeePass* to start with AdminCraft's o
 (move the file in `AdminCraftData` away) and import an export.
 
 **Where is my data?** — File » Open data folder.
+
+**A web page opens in its own window, not in the tab** — check Settings » Web interfaces: *Open every web
+interface in a tab* on, a profile *per connection* (the normal profile always stays outside), and as
+browser the program itself (e.g. `brave.exe`), not a shortcut. Give the window a few seconds to appear.
