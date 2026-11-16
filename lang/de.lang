@@ -853,3 +853,6 @@ Uses: {0} ({1}) = Verwendet: {0} ({1})
 Firefox browsers show their tab and address bar in the tab; Chromium browsers open a plain window. = Firefox-Browser zeigen im Tab ihre Tab- und Adressleiste; Chromium-Browser öffnen ein schlichtes Fenster.
 No browser found – web interfaces open in the system's browser. = Kein Browser gefunden – Weboberflächen öffnen im Browser des Systems.
 Open in a tab (browser window, see Settings » Web interfaces) = Im Tab öffnen (Browserfenster, siehe Einstellungen » Weboberflächen)
+Open every web interface in a tab = Jede Weboberfläche im Tab öffnen
+Off: only connections with "Open in a tab" ticked; the others open in the system's browser. = Aus: nur Verbindungen mit Haken bei „Im Tab öffnen“; die anderen öffnen im Browser des Systems.
+Web interface (test) = Weboberfläche (Test)

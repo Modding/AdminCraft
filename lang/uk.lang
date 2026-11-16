@@ -871,3 +871,6 @@ Uses: {0} ({1}) = Використовується: {0} ({1})
 Firefox browsers show their tab and address bar in the tab; Chromium browsers open a plain window. = Браузери Firefox показують у вкладці свою панель вкладок і адресний рядок; браузери Chromium відкривають просте вікно.
 No browser found – web interfaces open in the system's browser. = Браузер не знайдено – вебінтерфейси відкриваються в системному браузері.
 Open in a tab (browser window, see Settings » Web interfaces) = Відкривати у вкладці (вікно браузера, див. Налаштування » Вебінтерфейси)
+Open every web interface in a tab = Відкривати кожен вебінтерфейс у вкладці
+Off: only connections with "Open in a tab" ticked; the others open in the system's browser. = Вимкнено: лише підключення з позначкою «Відкривати у вкладці»; інші відкриваються в системному браузері.
+Web interface (test) = Вебінтерфейс (тест)

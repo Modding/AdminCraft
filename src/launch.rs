@@ -352,7 +352,7 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
             } else {
                 format!("{scheme}://{host}:{}", e.port)
             };
-            if e.web_in_tab
+            if (e.web_in_tab || settings.web_all_in_tab)
                 && cfg!(windows)
                 && let Some(browser) = programs::find("browser", settings)
             {

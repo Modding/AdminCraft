@@ -871,3 +871,6 @@ Uses: {0} ({1}) = Utilise : {0} ({1})
 Firefox browsers show their tab and address bar in the tab; Chromium browsers open a plain window. = Les navigateurs Firefox montrent leur barre d'onglets et d'adresse dans l'onglet ; les navigateurs Chromium ouvrent une fenêtre simple.
 No browser found – web interfaces open in the system's browser. = Aucun navigateur trouvé – les interfaces web s'ouvrent dans le navigateur du système.
 Open in a tab (browser window, see Settings » Web interfaces) = Ouvrir dans un onglet (fenêtre de navigateur, voir Paramètres » Interfaces web)
+Open every web interface in a tab = Ouvrir chaque interface web dans un onglet
+Off: only connections with "Open in a tab" ticked; the others open in the system's browser. = Désactivé : seules les connexions avec « Ouvrir dans un onglet » coché ; les autres s'ouvrent dans le navigateur du système.
+Web interface (test) = Interface web (test)

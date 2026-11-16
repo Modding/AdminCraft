@@ -871,3 +871,6 @@ Uses: {0} ({1}) = Usa: {0} ({1})
 Firefox browsers show their tab and address bar in the tab; Chromium browsers open a plain window. = I browser Firefox mostrano nella scheda la loro barra delle schede e degli indirizzi; i browser Chromium aprono una finestra semplice.
 No browser found – web interfaces open in the system's browser. = Nessun browser trovato – le interfacce web si aprono nel browser del sistema.
 Open in a tab (browser window, see Settings » Web interfaces) = Apri in una scheda (finestra del browser, vedi Impostazioni » Interfacce web)
+Open every web interface in a tab = Apri ogni interfaccia web in una scheda
+Off: only connections with "Open in a tab" ticked; the others open in the system's browser. = Disattivato: solo le connessioni con "Apri in una scheda" spuntato; le altre si aprono nel browser del sistema.
+Web interface (test) = Interfaccia web (test)

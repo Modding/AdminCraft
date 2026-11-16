@@ -72,7 +72,7 @@ target/debug/admincraft --screenshot shots/now.png --lang en --data shots/demo
 ```
 
 `--screenshot` draws about 120 frames (longer while an embedded window or a scan is pending), saves
-the window as PNG and exits; the window opens without focus. `--open help[:CHAPTER]|settings|recordings[:FILE]|whois:Q|http:URL|snmp:HOST|netscan:RANGE|cert:HOST|
+the window as PNG and exits; the window opens without focus. `--open help[:CHAPTER]|settings|web:URL|recordings[:FILE]|whois:Q|http:URL|snmp:HOST|netscan:RANGE|cert:HOST|
 subnet:CIDR|tunnels|export|transfer|shell` opens a tab at start (for checks and screenshots).
 `--data <dir>` uses another data folder — use a fresh one for screenshots, so no personal
 connections, hosts or paths end up in pictures or commits.

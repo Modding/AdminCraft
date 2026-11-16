@@ -76,9 +76,11 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
     Chromium browser (Brave, Brave Origin, Vivaldi, Chromium, Opera) or Firefox browser (Firefox,
     LibreWolf, Waterfox, Zen …), the kind recognised from its file name or chosen, the profile (own per
     connection in the data folder, own temporary, or the browser's normal one, which can't go into a
-    tab) and own arguments (`src/launch.rs` `web_args`, `src/app_web.rs`). Still to do: try it with
-    Brave Origin and a Firefox browser on Windows (window found and placed in the tab, focus, size,
-    logins kept); a browser per connection instead of one for all; on Linux/macOS use the chosen
+    tab) and own arguments (`src/launch.rs` `web_args`, `src/app_web.rs`); every web interface opens
+    in a tab unless switched off. The window is also found when it belongs to a process the started
+    one launched (launchers, browsers that hand over), `embed::descendants`. Tried live: Edge in the
+    tab. Still to do: try it with Brave Origin and a Firefox browser on Windows (window found and
+    placed in the tab, focus, size, logins kept); hide the browser's own title bar inside the tab; a browser per connection instead of one for all; on Linux/macOS use the chosen
     browser too instead of the system one. A built-in webview (WebView2) is not an option: the Rust
     house rules allow no webview in native Craft apps.
 

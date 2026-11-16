@@ -441,6 +441,8 @@ pub struct Settings {
     pub web_profile: WebProfile,
     /// Extra arguments for the browser, separated by spaces.
     pub web_args: String,
+    /// Every HTTP/HTTPS connection opens in a tab (Windows), not only those with "Open in a tab".
+    pub web_all_in_tab: bool,
 }
 
 /// The browser a web interface opens in decides the arguments AdminCraft gives it.
@@ -491,6 +493,7 @@ impl Default for Settings {
             web_family: BrowserFamily::Auto,
             web_profile: WebProfile::Kept,
             web_args: String::new(),
+            web_all_in_tab: true,
             snippets: default_snippets(),
             restore_session: false,
             session_log: false,

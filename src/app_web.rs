@@ -10,6 +10,10 @@ impl AdminApp {
         let mut changed = false;
         section_help(ui, tr("Web interfaces"), crate::help::Topic::Settings, &mut self.help_request);
         ui.weak(tr("HTTP/HTTPS connections with \"Open in a tab\" start this browser in a window of its own and put it into the tab (Windows)."));
+        changed |= ui
+            .add_enabled(cfg!(windows), egui::Checkbox::new(&mut self.store.data.settings.web_all_in_tab, tr("Open every web interface in a tab")))
+            .on_hover_text(tr("Off: only connections with \"Open in a tab\" ticked; the others open in the system's browser."))
+            .changed();
         let s = &mut self.store.data.settings;
         egui::Grid::new("web_settings").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Browser"));

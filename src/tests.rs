@@ -826,3 +826,18 @@ fn own_browser_for_web_interfaces() {
     assert!(kept.ends_with(Path::new("browser").join("firefox-3")));
     assert_ne!(kept, web_profile_dir(BrowserFamily::Chromium, WebProfile::Kept, 3).unwrap(), "the two kinds never share a profile");
 }
+
+#[test]
+fn embedding_finds_windows_of_child_processes() {
+    use crate::embed::descendants;
+    // launcher 10 starts the browser 11, which starts helpers 12 and 13; 20 is someone else's
+    let pairs = [(11, 10), (12, 11), (13, 11), (20, 4), (10, 4)];
+    let mut t = descendants(10, &pairs);
+    t.sort_unstable();
+    assert_eq!(t, vec![10, 11, 12, 13]);
+    // a loop in a broken snapshot doesn't hang
+    assert_eq!(descendants(1, &[(2, 1), (1, 2)]).len(), 2);
+    // never more than 256
+    let many: Vec<(u32, u32)> = (2..2000).map(|i| (i, 1)).collect();
+    assert_eq!(descendants(1, &many).len(), 256);
+}

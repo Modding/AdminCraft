@@ -186,7 +186,9 @@ mod imp {
     unsafe impl Send for Embedded {}
 
     struct Search {
-        pid: u32,
+        /// The program started and every process it started in turn (browsers and launchers
+        /// often open their window from a child process and end the first one).
+        pids: Vec<u32>,
         hints: &'static [&'static str],
         best: HWND,
         best_score: i64,
@@ -203,7 +205,7 @@ mod imp {
             let s = &mut *(lp as *mut Search);
             let mut pid = 0u32;
             GetWindowThreadProcessId(h, &mut pid);
-            if pid != s.pid || IsWindowVisible(h) == 0 {
+            if !s.pids.contains(&pid) || IsWindowVisible(h) == 0 {
                 return 1;
             }
             let class = class_name(h);
@@ -230,6 +232,35 @@ mod imp {
             }
             1
         }
+    }
+
+    /// `root` and its descendants, from a snapshot of all processes (at most 256).
+    fn process_tree(root: u32) -> Vec<u32> {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+        };
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        // SAFETY: the snapshot handle is checked before use and closed once; the entry is a
+        // plain struct with its size set as the API requires.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+                return vec![root];
+            }
+            let mut e: PROCESSENTRY32W = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            if Process32FirstW(snap, &mut e) != 0 {
+                loop {
+                    pairs.push((e.th32ProcessID, e.th32ParentProcessID));
+                    if Process32NextW(snap, &mut e) == 0 || pairs.len() > 100_000 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snap);
+        }
+        super::descendants(root, &pairs)
     }
 
     impl Embedded {
@@ -263,7 +294,7 @@ mod imp {
             if self.attached {
                 return true;
             }
-            let mut s = Search { pid: self.pid, hints: self.class_hint, best: std::ptr::null_mut(), best_score: 0 };
+            let mut s = Search { pids: process_tree(self.pid), hints: self.class_hint, best: std::ptr::null_mut(), best_score: 0 };
             unsafe {
                 EnumWindows(Some(enum_cb), &mut s as *mut Search as LPARAM);
             }
@@ -454,6 +485,26 @@ pub use imp::{Embedded, capture, capture_window, install_focus_hook, set_active}
 
 /// Can this system put other programs' windows into tabs?
 pub const SUPPORTED: bool = cfg!(windows);
+
+/// `root` and every process below it, from (process, parent) pairs; at most 256, so a broken
+/// snapshot can't grow it without end.
+pub fn descendants(root: u32, pairs: &[(u32, u32)]) -> Vec<u32> {
+    let mut tree = vec![root];
+    let mut i = 0;
+    while i < tree.len() && tree.len() < 256 {
+        let parent = tree[i];
+        for &(child, pp) in pairs {
+            if tree.len() >= 256 {
+                break;
+            }
+            if pp == parent && child != 0 && child != parent && !tree.contains(&child) {
+                tree.push(child);
+            }
+        }
+        i += 1;
+    }
+    tree
+}
 
 /// Our window handle as a number (Windows HWND), when there is one.
 pub fn parent_handle(frame: &eframe::Frame) -> Option<isize> {
