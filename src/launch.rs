@@ -3,10 +3,10 @@
 
 #[allow(unused_imports)]
 use crate::i18n::{t as tr, tf};
-use crate::model::{Entry, JumpMode, Protocol, Settings, SshClient};
+use crate::model::{BrowserFamily, Entry, JumpMode, Protocol, Settings, SshClient, WebProfile};
 use crate::programs;
 use portable_pty::CommandBuilder;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
 #[derive(Clone, Debug, Default)]
@@ -128,6 +128,57 @@ fn hidden(cmd: &mut Command) -> &mut Command {
         cmd.creation_flags(0x0800_0000);
     }
     cmd
+}
+
+/// Main window classes of the two browser families (to find the window to put into the tab).
+const CHROMIUM_WINDOW: &[&str] = &["Chrome_WidgetWin_1"];
+const FIREFOX_WINDOW: &[&str] = &["MozillaWindowClass"];
+
+/// Firefox and its relatives are told by the program's file name; everything else is taken for
+/// a Chromium browser (Edge, Chrome, Brave, Vivaldi, Chromium, Opera).
+pub fn browser_family(program: &Path, chosen: BrowserFamily) -> BrowserFamily {
+    if chosen != BrowserFamily::Auto {
+        return chosen;
+    }
+    let name = program.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    const FIREFOX: &[&str] = &["firefox", "librewolf", "waterfox", "floorp", "zen", "palemoon", "basilisk", "mullvadbrowser", "tor"];
+    if FIREFOX.iter().any(|f| name.contains(f)) { BrowserFamily::Firefox } else { BrowserFamily::Chromium }
+}
+
+/// Where the profile of a web interface lives: None = the browser's normal profile.
+pub fn web_profile_dir(family: BrowserFamily, choice: WebProfile, id: u64) -> Option<PathBuf> {
+    let kind = if family == BrowserFamily::Firefox { "firefox" } else { "chromium" };
+    match choice {
+        WebProfile::Kept => Some(crate::model::data_dir(false).join("browser").join(format!("{kind}-{id}"))),
+        WebProfile::Temporary => Some(std::env::temp_dir().join("admincraft").join(format!("web-{kind}-{id}"))),
+        WebProfile::Normal => None,
+    }
+}
+
+/// The arguments that open `url` in a browser window of its own. Chromium browsers get a window
+/// without tabs and address bar (`--app`); Firefox browsers a normal window. `extra` are the
+/// person's own arguments, separated by spaces.
+pub fn web_args(family: BrowserFamily, url: &str, profile: Option<&Path>, extra: &str) -> Vec<String> {
+    let mut a: Vec<String> = Vec::new();
+    match family {
+        BrowserFamily::Firefox => {
+            if let Some(p) = profile {
+                // its own process, so the window belongs to the program AdminCraft started
+                a.extend(["-no-remote".to_string(), "-profile".to_string(), p.display().to_string()]);
+            }
+            a.extend(extra.split_whitespace().map(str::to_string));
+            a.extend(["-new-window".to_string(), url.to_string()]);
+        }
+        _ => {
+            a.push(format!("--app={url}"));
+            if let Some(p) = profile {
+                a.push(format!("--user-data-dir={}", p.display()));
+            }
+            a.extend(["--no-first-run", "--no-default-browser-check", "--disable-features=Translate"].map(str::to_string));
+            a.extend(extra.split_whitespace().map(str::to_string));
+        }
+    }
+    a
 }
 
 fn spawn(program: &PathBuf, args: &[String]) -> Result<Child, String> {
@@ -301,22 +352,23 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
             } else {
                 format!("{scheme}://{host}:{}", e.port)
             };
-            if e.web_in_tab
-                && settings.embed_windows
+            if (e.web_in_tab || settings.web_all_in_tab)
                 && cfg!(windows)
                 && let Some(browser) = programs::find("browser", settings)
             {
-                // own profile per connection: a new browser process whose window we can take in
-                let profile = std::env::temp_dir().join("admincraft").join(format!("web-{}", e.id));
-                let args = vec![
-                    format!("--app={url}"),
-                    format!("--user-data-dir={}", profile.display()),
-                    "--no-first-run".to_string(),
-                    "--no-default-browser-check".to_string(),
-                    "--disable-features=Translate".to_string(),
-                ];
+                let family = browser_family(&browser, settings.web_family);
+                // an own profile per connection makes a new browser process whose window can be
+                // taken into the tab; the normal profile opens in the browser already running
+                let profile = web_profile_dir(family, settings.web_profile, e.id);
+                if let Some(dir) = &profile {
+                    std::fs::create_dir_all(dir).map_err(|err| tf("Browser profile folder could not be made: {0}", &[&err]))?;
+                }
+                let args = web_args(family, &url, profile.as_deref(), &settings.web_args);
                 let child = spawn(&browser, &args)?;
-                return Ok(Launch::Process { child, label: tf("Web in tab: {0}", &[&url]), embed: Some(&["Chrome_WidgetWin_1"]) });
+                let classes: &'static [&'static str] = if family == BrowserFamily::Firefox { FIREFOX_WINDOW } else { CHROMIUM_WINDOW };
+                let embed = (settings.embed_windows && profile.is_some()).then_some(classes);
+                let label = if embed.is_some() { tf("Web in tab: {0}", &[&url]) } else { tf("Browser opened: {0}", &[&url]) };
+                return Ok(Launch::Process { child, label, embed });
             }
             open_url(&url)?;
             Ok(Launch::Done(tf("Browser opened: {0}", &[&url])))

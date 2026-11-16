@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex};
 
 #[path = "app_control.rs"]
 mod app_control;
+#[path = "app_web.rs"]
+mod app_web;
 
 const ACCENT: Color32 = Color32::from_rgb(33, 132, 230);
 const OK_GREEN: Color32 = Color32::from_rgb(76, 175, 80);
@@ -475,6 +477,19 @@ impl AdminApp {
                 }
                 "tunnels" => app.open_tunnels(),
                 "recordings" => app.open_recordings((!host.is_empty()).then(|| PathBuf::from(&host))),
+                "web" => {
+                    // check of a web interface in a tab with the browser from the settings
+                    let e = Entry {
+                        id: 9_000_001,
+                        name: tr("Web interface (test)").into(),
+                        protocol: Protocol::Https,
+                        host: if host.is_empty() { "https://example.com".into() } else { host.clone() },
+                        port: 443,
+                        web_in_tab: true,
+                        ..Default::default()
+                    };
+                    app.open_session(e, Creds::default(), Vec::new(), &ctx, 0.0);
+                }
                 "whois" => app.open_net_tool(crate::tooltabs::ToolKind::Whois, host.clone(), &ctx),
                 "http" => app.open_net_tool(crate::tooltabs::ToolKind::Http, host.clone(), &ctx),
                 "snmp" => app.open_net_tool(crate::tooltabs::ToolKind::Snmp, host.clone(), &ctx),
@@ -2534,7 +2549,7 @@ impl AdminApp {
                     }
                     Protocol::Http | Protocol::Https => {
                         section(ui, tr("Web"));
-                        ui.add_enabled(cfg!(windows), egui::Checkbox::new(&mut e.web_in_tab, tr("Open in a tab (Edge/Chrome window)")))
+                        ui.add_enabled(cfg!(windows), egui::Checkbox::new(&mut e.web_in_tab, tr("Open in a tab (browser window, see Settings » Web interfaces)")))
                             .on_disabled_hover_text(tr("Only possible on Windows."));
                         if e.protocol == Protocol::Https && ui.button(tr("Check certificate")).clicked() {
                             act = Some(Act::CheckCert(id));
@@ -3734,6 +3749,8 @@ impl AdminApp {
             .changed();
         changed |= ui.checkbox(&mut self.store.data.settings.show_hidden, tr("Show hidden files (.name) in the file transfer")).changed();
 
+        changed |= self.web_settings_ui(ui);
+
         section_help(ui, tr("Programs"), crate::help::Topic::Settings, &mut self.help_request);
         ui.label(tr("AdminCraft looks for each program here: 1. own path below, 2. programs folder next to AdminCraft, 3. system."));
         ui.horizontal(|ui| {
@@ -4253,8 +4270,12 @@ impl eframe::App for AdminApp {
                     && let Ok(Some(status)) = child.try_wait()
                 {
                     crate::secretfile::process_ended(child.id());
-                    // mstsc hands over to an already running copy sometimes: keep the tab if its window is ours
-                    if !p.embed.as_ref().map(|e| e.attached()).unwrap_or(false) {
+                    // mstsc hands over to an already running copy sometimes: keep the tab if its window is ours.
+                    // Browsers and launchers end their first process and show the window from a child: keep
+                    // looking for it a while before calling the session over.
+                    let attached = p.embed.as_ref().map(|e| e.attached()).unwrap_or(false);
+                    let still_looking = p.want_embed && !p.detached && now - p.started < 20.0;
+                    if !attached && !still_looking {
                         p.exited = Some(if status.success() {
                             tr("Session ended.").into()
                         } else {

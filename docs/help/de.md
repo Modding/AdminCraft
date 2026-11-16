@@ -75,7 +75,7 @@ Rechtsklick auf einen Ordner » **Alle Verbindungen im Ordner öffnen** öffnet 
 | VNC | Viewer-Fenster im Tab | einen VNC-Viewer wie TigerVNC oder TightVNC |
 | Telnet | Terminal-Tab | — |
 | PowerShell | Terminal-Tab mit `Enter-PSSession` | PowerShell, WinRM auf dem Ziel |
-| HTTP / HTTPS | Browser-App-Fenster im Tab | Edge oder Chrome (sonst der normale Browser) |
+| HTTP / HTTPS | Browser-App-Fenster im Tab | Edge, Chrome oder Ihr eigener Browser (Brave, Vivaldi, Firefox …); sonst der normale Browser |
 | SFTP / SCP / FTP / FTPS | Dateiübertragungs-Tab | OpenSSH oder PuTTY für SFTP/SCP; FTP ist eingebaut |
 | Seriell, Raw-TCP, rlogin | PuTTY im Tab oder ein Terminal-Tab | PuTTY/plink (Windows); picocom, nc … anderswo |
 | Lokale Shell | Terminal-Tab auf diesem Computer | — |
@@ -238,6 +238,13 @@ Datei » OpenSSH-Konfiguration importieren (`~/.ssh/config`, einschließlich Pro
 - **Darstellung** – dunkel oder hell, Größe der Terminal-Schrift.
 - **SSH, Remotedesktop und Dateien** – welcher Client SSH öffnet (eingebautes Terminal, PuTTY, eigenes Fenster),
   welche Programme Dateien übertragen, ob Fenster in Tabs eingebettet werden.
+- **Weboberflächen** – welcher Browser Webseiten im Tab öffnet: leer für Edge oder Chrome, oder das Programm
+  Ihres eigenen Browsers (z. B. `brave.exe`, `vivaldi.exe`, `firefox.exe`). Chromium-Browser öffnen ein
+  schlichtes Fenster, Firefox-Browser behalten Tab- und Adressleiste. Mit eigenem Profil je Verbindung kommt
+  das Fenster in den Tab und Anmeldungen bleiben im Datenordner; das normale Profil bringt Ihre gespeicherten
+  Passwörter und Erweiterungen mit, öffnet aber außerhalb des Tabs.
+  *Jede Weboberfläche im Tab öffnen* ist standardmäßig an; ausgeschaltet nutzen nur Verbindungen mit Haken bei
+  *Im Tab öffnen* den Tab.
 - **Programme** – wo AdminCraft die einzelnen Hilfsprogramme gefunden hat. Einen eigenen Pfad angeben oder einfach
   portable Programme in den **Programme-Ordner** legen (`AdminCraftTools` neben AdminCraft).
 - **Speicherort** – wo die Liste liegt, Masterpasswort, zentrale Speicherung.
@@ -351,3 +358,7 @@ schaltet das Einbetten ab.
 
 **AdminCraft fragt beim Start nach einem KeePass-Passwort** – die Verbindungsliste liegt in KeePass. Das
 KeePass-Masterpasswort eingeben oder auf *Ohne KeePass* klicken, um mit der eigenen (leeren) Liste zu starten.
+
+**Eine Webseite öffnet in einem eigenen Fenster statt im Tab** – Einstellungen » Weboberflächen prüfen:
+*Jede Weboberfläche im Tab öffnen* an, ein Profil *je Verbindung* (das normale Profil bleibt immer außerhalb)
+und als Browser das Programm selbst (z. B. `brave.exe`), keine Verknüpfung. Dem Fenster ein paar Sekunden geben.

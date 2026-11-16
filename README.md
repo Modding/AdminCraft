@@ -58,7 +58,8 @@
   user / domain / password on to everything inside.
 - **In a tab:** SSH (OpenSSH), Telnet, PowerShell Remoting, local shell, serial console, raw TCP, rlogin.
 - **Window in a tab (Windows):** Remote Desktop (mstsc, automatic login), PuTTY, VNC viewers and web
-  interfaces (Edge/Chrome app window) are embedded into the tab; a click gives them the keyboard.
+  interfaces are embedded into the tab; a click gives them the keyboard. Web interfaces open in Edge,
+  Chrome or **your own browser** (Brave, Vivaldi, Firefox …) with its own profile per connection.
 - **Jump hosts:** log in to a jump host and continue there with `ssh user@target` (the key can live
   on the jump host), or tunnel with `ssh -J`; works in the terminal tab, with PuTTY and in an own window.
 - **SSH tunnels** (port forwarding) per connection, started by hand or together with the connection.

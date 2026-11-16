@@ -44,7 +44,8 @@ Portabler Verbindungs-Manager für Windows, Linux und macOS – ähnlich mRemote
 * **Windows-Verwaltung** per Rechtsklick (Dienste, Ereignisanzeige, Computerverwaltung, C$),
   **Neu starten / Herunterfahren** (Windows per `shutdown /m`, Linux per `sudo reboot` über SSH)
 * Weitere Verbindungsarten: **Seriell** (COM/ttyUSB), **Raw TCP**, **Rlogin** (über PuTTY/plink),
-  **Weboberflächen im Tab** (Edge/Chrome-Fenster, Windows)
+  **Weboberflächen im Tab** (Windows) – in Edge, Chrome oder **Ihrem eigenen Browser** (Brave, Vivaldi,
+  Firefox …), mit eigenem Profil je Verbindung
 * **Subnetz-Rechner**, **Zertifikats-Prüfer** (Ablaufdatum, Aussteller, vertrauenswürdig?),
   **Passwort-Generator**, **2FA-Codes (TOTP)** aus KeePass-Einträgen
 * **Gemeinsame Verbindungsliste** im Team (Ordner auf Netzlaufwerk, Änderungen werden neu geladen)
