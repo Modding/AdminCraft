@@ -488,6 +488,8 @@ pub const SUPPORTED: bool = cfg!(windows);
 
 /// `root` and every process below it, from (process, parent) pairs; at most 256, so a broken
 /// snapshot can't grow it without end.
+// only the Windows embedding uses it; elsewhere the tests keep it honest
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn descendants(root: u32, pairs: &[(u32, u32)]) -> Vec<u32> {
     let mut tree = vec![root];
     let mut i = 0;
