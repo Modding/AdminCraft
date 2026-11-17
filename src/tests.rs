@@ -841,3 +841,17 @@ fn embedding_finds_windows_of_child_processes() {
     let many: Vec<(u32, u32)> = (2..2000).map(|i| (i, 1)).collect();
     assert_eq!(descendants(1, &many).len(), 256);
 }
+
+#[test]
+fn embedded_window_that_frees_itself_is_noticed() {
+    use crate::embed::{child_style, embedding_broken};
+    // a normal Remote Desktop window: visible, title bar, sizing border, buttons
+    let framed: isize = 0x10CF_0000;
+    let inside = child_style(framed);
+    assert!(!embedding_broken(inside, true), "taken in: nothing to repair");
+    assert!(embedding_broken(inside, false), "it left our window");
+    assert!(embedding_broken(framed, true), "it put its frame back");
+    assert!(embedding_broken(inside & !0x4000_0000, true), "it is no child any more");
+    // a single border line is no reason to take it in again (that would flicker every frame)
+    assert!(!embedding_broken(inside | 0x0080_0000, true));
+}

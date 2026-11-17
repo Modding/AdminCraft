@@ -180,6 +180,8 @@ mod imp {
         had_focus: bool,
         last: PxRect,
         original_style: isize,
+        /// Our window the program's window was put into.
+        parent: HWND,
     }
 
     // HWND is a plain handle; the window lives in another process.
@@ -274,6 +276,44 @@ mod imp {
                 had_focus: false,
                 last: PxRect::default(),
                 original_style: 0,
+                parent: std::ptr::null_mut(),
+            }
+        }
+
+        /// Makes `h` a borderless child of `parent`. Also used to take a window back in that
+        /// freed itself (see `place`).
+        fn take_in(&mut self, h: HWND, parent: HWND) {
+            // SAFETY: plain style and parent changes on window handles; a handle that is gone
+            // makes the calls fail without effect.
+            unsafe {
+                // our window must not paint over its children
+                let ps = GetWindowLongPtrW(parent, GWL_STYLE);
+                SetWindowLongPtrW(parent, GWL_STYLE, ps | WS_CLIPCHILDREN as isize);
+                let style = GetWindowLongPtrW(h, GWL_STYLE);
+                SetWindowLongPtrW(h, GWL_STYLE, super::child_style(style));
+                // clicks inside must reach our window as WM_PARENTNOTIFY (focus on click)
+                let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+                SetWindowLongPtrW(h, GWL_EXSTYLE, ex & !(WS_EX_NOPARENTNOTIFY as isize));
+                SetParent(h, parent);
+            }
+            self.hwnd = h;
+            self.parent = parent;
+            // where it is now doesn't count: the next place() moves it
+            self.last = PxRect::default();
+        }
+
+        /// Remote Desktop (mstsc) sometimes frees its window again after being hidden and shown:
+        /// it puts its frame back and leaves our window, and then sits behind AdminCraft. Checks
+        /// that and takes it back in.
+        fn keep_inside(&mut self) {
+            if self.parent.is_null() {
+                return;
+            }
+            // SAFETY: reading the style and parent of a window handle.
+            let (style, parent) = unsafe { (GetWindowLongPtrW(self.hwnd, GWL_STYLE), GetParent(self.hwnd)) };
+            if super::embedding_broken(style, parent == self.parent) {
+                let (h, p) = (self.hwnd, self.parent);
+                self.take_in(h, p);
             }
         }
 
@@ -302,26 +342,13 @@ mod imp {
             if s.best.is_null() || (!self.class_hint.is_empty() && s.best_score < (1 << 40)) {
                 return false;
             }
-            let parent = parent as HWND;
-            unsafe {
-                // our window must not paint over its children
-                let ps = GetWindowLongPtrW(parent, GWL_STYLE);
-                SetWindowLongPtrW(parent, GWL_STYLE, ps | WS_CLIPCHILDREN as isize);
-                let h = s.best;
-                let style = GetWindowLongPtrW(h, GWL_STYLE);
-                self.original_style = style;
-                let remove = (WS_CAPTION | WS_THICKFRAME | WS_POPUP | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU) as isize;
-                SetWindowLongPtrW(h, GWL_STYLE, (style & !remove) | WS_CHILD as isize);
-                // clicks inside must reach our window as WM_PARENTNOTIFY (focus on click)
-                let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-                SetWindowLongPtrW(h, GWL_EXSTYLE, ex & !(WS_EX_NOPARENTNOTIFY as isize));
-                SetParent(h, parent);
-                self.hwnd = h;
-            }
+            let h = s.best;
+            // SAFETY: reading the style of a window handle.
+            self.original_style = unsafe { GetWindowLongPtrW(h, GWL_STYLE) };
+            self.take_in(h, parent as HWND);
             self.attached = true;
             // it is still showing where the program put it: the next place() moves or hides it
             self.visible = true;
-            self.last = PxRect::default();
             true
         }
 
@@ -329,6 +356,9 @@ mod imp {
         pub fn place(&mut self, rect: Option<PxRect>) {
             if !self.attached() {
                 return;
+            }
+            if matches!(rect, Some(r) if r.w > 20 && r.h > 20) {
+                self.keep_inside();
             }
             unsafe {
                 match rect {
@@ -488,6 +518,30 @@ pub const SUPPORTED: bool = cfg!(windows);
 
 /// `root` and every process below it, from (process, parent) pairs; at most 256, so a broken
 /// snapshot can't grow it without end.
+/// Window style bits (the values of the Windows API) for the two checks below, so they can be
+/// tested on every system.
+const WS_CHILD: isize = 0x4000_0000;
+const WS_POPUP: isize = 0x8000_0000;
+const WS_CAPTION: isize = 0x00C0_0000;
+const WS_THICKFRAME: isize = 0x0004_0000;
+const WS_SYSMENU: isize = 0x0008_0000;
+const WS_MINIMIZEBOX: isize = 0x0002_0000;
+const WS_MAXIMIZEBOX: isize = 0x0001_0000;
+
+/// The style of a window put into a tab: no frame, title or buttons, a child of our window.
+// only the Windows embedding uses these; elsewhere the tests keep them honest
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn child_style(style: isize) -> isize {
+    (style & !(WS_CAPTION | WS_THICKFRAME | WS_POPUP | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)) | WS_CHILD
+}
+
+/// Whether a window put into a tab freed itself again: it left our window, or put its frame
+/// back (a whole title bar, a sizing border, or the pop-up style).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn embedding_broken(style: isize, still_our_child: bool) -> bool {
+    !still_our_child || style & WS_CHILD == 0 || style & WS_CAPTION == WS_CAPTION || style & (WS_THICKFRAME | WS_POPUP) != 0
+}
+
 // only the Windows embedding uses it; elsewhere the tests keep it honest
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn descendants(root: u32, pairs: &[(u32, u32)]) -> Vec<u32> {

@@ -88,6 +88,11 @@ Done and to be tried against real servers: the Remote Desktop login through the 
 Manager (`src/wincred.rs`) — log in to a real host with *Pass the login automatically* and check
 that the entry is gone from the Credential Manager about two minutes later.
 
+Done and to be tried against a real server: a Remote Desktop window that frees itself from the tab
+after switching tabs (it then sat behind AdminCraft) is taken back in when its tab shows again
+(`Embedded::keep_inside` in `src/embed.rs`). Connect, switch to another tab and back a few times,
+also after minimising AdminCraft.
+
 ## Craft principles
 
 | Principle | Status |
