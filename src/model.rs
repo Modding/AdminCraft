@@ -1518,6 +1518,25 @@ impl Store {
         take_free_id(&self.data.entries, &mut self.data.next_id)
     }
 
+    /// AdminCraft closes: gives a WebDAV upload still on its way up to `max` to finish, so the last
+    /// save reaches the server. Returns whether nothing is left to send.
+    pub fn wait_for_upload(&self, max: std::time::Duration) -> bool {
+        let until = std::time::Instant::now() + max;
+        loop {
+            let busy = {
+                let st = self.remote_state.lock().unwrap_or_else(|e| e.into_inner());
+                st.uploading || st.pending_upload.is_some()
+            };
+            if !busy {
+                return true;
+            }
+            if std::time::Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
     pub fn index_of(&self, id: u64) -> Option<usize> {
         self.data.entries.iter().position(|e| e.id == id)
     }
@@ -1663,7 +1682,7 @@ impl Store {
 
     pub fn folders(&self) -> Vec<(u64, String)> {
         let mut v: Vec<(u64, String)> = self.data.entries.iter().filter(|e| e.folder).map(|e| (e.id, self.path_of(e.id))).collect();
-        v.sort_by_key(|a| a.1.to_lowercase());
+        v.sort_by_cached_key(|a| a.1.to_lowercase());
         v
     }
 

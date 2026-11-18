@@ -2584,3 +2584,22 @@ fn keepass_key_never_shows_its_password() {
     let shown = format!("{k:?}");
     assert!(!shown.contains("s3cret-pw") && shown.contains("key.keyx"), "{shown}");
 }
+
+#[test]
+fn exit_waits_for_the_last_webdav_upload_but_not_forever() {
+    use std::time::{Duration, Instant};
+    let s = temp_store("upload-wait");
+    assert!(s.wait_for_upload(Duration::from_secs(1)), "nothing to send: no wait");
+    s.remote_state.lock().unwrap().uploading = true;
+    let state = s.remote_state.clone();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        state.lock().unwrap().uploading = false;
+    });
+    assert!(s.wait_for_upload(Duration::from_secs(5)), "the upload finished in time");
+    t.join().unwrap();
+    s.remote_state.lock().unwrap().pending_upload = Some("text".into());
+    let started = Instant::now();
+    assert!(!s.wait_for_upload(Duration::from_millis(200)), "a stuck upload doesn't keep the program open");
+    assert!(started.elapsed() < Duration::from_secs(2));
+}

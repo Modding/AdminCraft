@@ -3834,7 +3834,7 @@ impl AdminApp {
                         Err(e) => (false, tf("File not readable: {0}", &[&e])),
                         Ok(text) => {
                             let folder_id = self.store.next_id();
-                            let entries = crate::import::import_ssh_config(&text, folder_id + 1, Some(folder_id));
+                            let entries = crate::import::import_ssh_config(&text, folder_id.saturating_add(1), Some(folder_id));
                             if entries.is_empty() {
                                 (false, tr("No hosts found.").into())
                             } else {
@@ -3848,7 +3848,7 @@ impl AdminApp {
                                     ..Default::default()
                                 });
                                 self.store.data.entries.extend(entries);
-                                self.store.data.next_id = max + 1;
+                                self.store.data.next_id = max.saturating_add(1);
                                 self.selected = Some(folder_id);
                                 self.mark_dirty(now);
                                 (true, tf("{0} hosts imported.", &[&n]))
@@ -3877,7 +3877,7 @@ impl AdminApp {
                         Err(e) => (false, tf("File not readable: {0}", &[&e])),
                         Ok(xml) => {
                             let folder_id = self.store.next_id();
-                            let first = folder_id + 1;
+                            let first = folder_id.saturating_add(1);
                             match crate::import::import_mremoteng(&xml, &self.import_pw, first, Some(folder_id)) {
                                 Err(e) => (false, e),
                                 Ok(imp) => {
@@ -3891,7 +3891,7 @@ impl AdminApp {
                                         ..Default::default()
                                     });
                                     self.store.data.entries.extend(imp.entries);
-                                    self.store.data.next_id = max + 1;
+                                    self.store.data.next_id = max.saturating_add(1);
                                     self.selected = Some(folder_id);
                                     self.mark_dirty(now);
                                     let mut msg = tf("{0} connections imported.", &[&n]);
@@ -4894,6 +4894,8 @@ impl eframe::App for AdminApp {
         if self.dirty_since.is_some() || self.view_dirty {
             self.store.save();
         }
+        // WebDAV: the upload of the last save runs in a thread that ends with the program
+        self.store.wait_for_upload(std::time::Duration::from_secs(5));
         for t in &mut self.tabs {
             if let TabKind::Term(t) = &mut t.kind
                 && let Some(term) = &mut t.term
