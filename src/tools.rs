@@ -139,7 +139,20 @@ pub fn ping_args(host: &str, count: Option<u32>) -> Vec<String> {
 }
 
 pub fn traceroute_cmd(host: &str) -> (String, Vec<String>) {
-    if cfg!(windows) { ("tracert".into(), vec!["-d".into(), host.into()]) } else { ("traceroute".into(), vec!["-n".into(), host.into()]) }
+    let tracepath_only = !cfg!(windows) && crate::launch::which("traceroute").is_none() && crate::launch::which("tracepath").is_some();
+    trace_cmd(host, cfg!(windows), tracepath_only)
+}
+
+/// `tracert` on Windows, else `traceroute`; many Linux installs only have `tracepath`.
+pub fn trace_cmd(host: &str, windows: bool, tracepath_only: bool) -> (String, Vec<String>) {
+    let prog = if windows {
+        ("tracert", "-d")
+    } else if tracepath_only {
+        ("tracepath", "-n")
+    } else {
+        ("traceroute", "-n")
+    };
+    (prog.0.into(), vec![prog.1.into(), host.into()])
 }
 
 pub fn well_known(port: u16) -> &'static str {

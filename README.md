@@ -105,6 +105,9 @@
 1. Download the archive for your system from the [releases](../../releases) (or [build it](#building))
    and unpack it.
 2. Put it into any folder — a USB stick is fine — and start it.
+   **macOS:** the program is not signed yet, so macOS blocks it after the download. Allow it once
+   in the folder you unpacked it to: `xattr -d com.apple.quarantine admincraft` (or right-click »
+   *Open*, then *System Settings » Privacy & Security » Open Anyway*).
 3. Double-click an example connection, or create your own with **+ Connection**.
 4. Press **F1** for the user guide.
 

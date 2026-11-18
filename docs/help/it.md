@@ -74,7 +74,7 @@ Clic destro su una cartella » **Apri tutte le connessioni nella cartella** le a
 | RDP | finestra di Desktop remoto dentro la scheda (Windows) | `mstsc` (Windows), FreeRDP o Remmina (Linux), Windows App (macOS) |
 | VNC | finestra del viewer dentro la scheda | un VNC viewer come TigerVNC o TightVNC |
 | Telnet | scheda terminale | — |
-| PowerShell | scheda terminale con `Enter-PSSession` | PowerShell, WinRM sulla destinazione |
+| PowerShell | scheda terminale con `Enter-PSSession` | PowerShell; WinRM sulla destinazione. Linux e macOS: PowerShell remoting tramite SSH (`-HostName`) |
 | HTTP / HTTPS | finestra app del browser dentro la scheda | Edge, Chrome o il tuo browser (Brave, Vivaldi, Firefox …); altrimenti il browser normale |
 | SFTP / SCP / FTP / FTPS | scheda di trasferimento file | OpenSSH o PuTTY per SFTP/SCP; FTP è integrato |
 | Seriale, TCP raw, rlogin | PuTTY nella scheda o una scheda terminale | PuTTY/plink (Windows); picocom, nc … altrove |
@@ -173,7 +173,7 @@ Tutti gli strumenti sono nel menu **Strumenti**, nei pulsanti in alto e nel menu
   avviati a mano o insieme alla connessione.
 - **Verifica stato** (pulsante sopra l'albero) — testa la porta di ogni connessione e colora i pallini nell'albero.
 - **Strumenti Windows** (clic destro su un server Windows) — servizi, visualizzatore eventi, gestione computer,
-  la condivisione `C$`, **Riavvia** e **Arresta** (con conferma). I server Linux si possono riavviare tramite SSH.
+  la condivisione `C$`, **Riavvia** e **Arresta** (con conferma). I server Linux si possono riavviare tramite SSH. Riavviare computer Windows richiede AdminCraft su Windows.
 - **Input multiplo** — scrivi la stessa cosa in più schede SSH contemporaneamente (Strumenti » Input multiplo).
 - **Comandi salvati** — nella scheda terminale sotto *Comandi*; segnaposto `{host}` `{user}` `{name}`.
 

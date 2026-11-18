@@ -874,3 +874,6 @@ Open in a tab (browser window, see Settings » Web interfaces) = Відкрив�
 Open every web interface in a tab = Відкривати кожен вебінтерфейс у вкладці
 Off: only connections with "Open in a tab" ticked; the others open in the system's browser. = Вимкнено: лише підключення з позначкою «Відкривати у вкладці»; інші відкриваються в системному браузері.
 Web interface (test) = Вебінтерфейс (тест)
+SSH / Files = SSH / Файли
+Restart and shut down over the network need Windows; elsewhere only SSH connections can do it. = Перезапуск і вимкнення через мережу потребують Windows; деінде це можуть лише SSH-підключення.
+The folder for password files belongs to someone else: {0} = Тека для файлів паролів належить комусь іншому: {0}

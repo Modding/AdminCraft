@@ -856,3 +856,6 @@ Open in a tab (browser window, see Settings » Web interfaces) = Im Tab öffnen 
 Open every web interface in a tab = Jede Weboberfläche im Tab öffnen
 Off: only connections with "Open in a tab" ticked; the others open in the system's browser. = Aus: nur Verbindungen mit Haken bei „Im Tab öffnen“; die anderen öffnen im Browser des Systems.
 Web interface (test) = Weboberfläche (Test)
+SSH / Files = SSH / Dateien
+Restart and shut down over the network need Windows; elsewhere only SSH connections can do it. = Neustart und Herunterfahren über das Netz brauchen Windows; anderswo geht das nur mit SSH-Verbindungen.
+The folder for password files belongs to someone else: {0} = Der Ordner für Passwortdateien gehört jemand anderem: {0}

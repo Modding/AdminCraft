@@ -874,3 +874,6 @@ Open in a tab (browser window, see Settings » Web interfaces) = Ouvrir dans un 
 Open every web interface in a tab = Ouvrir chaque interface web dans un onglet
 Off: only connections with "Open in a tab" ticked; the others open in the system's browser. = Désactivé : seules les connexions avec « Ouvrir dans un onglet » coché ; les autres s'ouvrent dans le navigateur du système.
 Web interface (test) = Interface web (test)
+SSH / Files = SSH / Fichiers
+Restart and shut down over the network need Windows; elsewhere only SSH connections can do it. = Redémarrer et éteindre par le réseau nécessitent Windows ; ailleurs, seules les connexions SSH le peuvent.
+The folder for password files belongs to someone else: {0} = Le dossier des fichiers de mots de passe appartient à quelqu’un d’autre : {0}

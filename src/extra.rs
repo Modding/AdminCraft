@@ -638,8 +638,19 @@ pub fn open_windows_tool(tool: WinTool, host: &str) -> Result<String, String> {
     Command::new(prog).args(&args).spawn().map(|_| tf("{0} opened: {1}", &[&prog, &host])).map_err(|e| e.to_string())
 }
 
+/// Whether the Power menu (restart / shut down) is offered for a connection: SSH everywhere
+/// (`sudo reboot` in a session), Windows computers only from Windows (`shutdown /m`).
+pub fn power_possible(p: Protocol) -> bool {
+    p == Protocol::Ssh || (cfg!(windows) && matches!(p, Protocol::Rdp | Protocol::PowerShell | Protocol::Vnc))
+}
+
 /// Windows computers: shutdown /r or /s on the remote machine (needs admin rights there).
 pub fn windows_power(host: &str, reboot: bool) -> Result<String, String> {
+    // Outside Windows `shutdown` is this computer's own program: never start it with a remote
+    // computer in mind.
+    if !cfg!(windows) {
+        return Err(tr("Restart and shut down over the network need Windows; elsewhere only SSH connections can do it.").into());
+    }
     let mut cmd = Command::new("shutdown");
     cmd.args([if reboot { "/r" } else { "/s" }, "/f", "/t", "0", "/m", &format!("\\\\{}", host.trim())]);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());

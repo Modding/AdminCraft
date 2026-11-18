@@ -2058,7 +2058,7 @@ impl AdminApp {
                             }
                         });
                     }
-                    if e.protocol.needs_host() && matches!(e.protocol, Protocol::Rdp | Protocol::PowerShell | Protocol::Vnc | Protocol::Ssh) {
+                    if e.protocol.needs_host() && extra::power_possible(e.protocol) {
                         ui.menu_button(tr("Power"), |ui| {
                             if ui.button(tr("Restart …")).clicked() {
                                 acts.push(Act::Power(id, true));
@@ -2448,7 +2448,7 @@ impl AdminApp {
                         ui.checkbox(&mut e.rdp.redirect_drives, tr("Connect local drives"));
                     }
                     Protocol::Ssh | Protocol::Sftp | Protocol::Scp => {
-                        section(ui, if e.protocol == Protocol::Ssh { "SSH" } else { "SSH / Dateien" });
+                        section(ui, if e.protocol == Protocol::Ssh { "SSH" } else { tr("SSH / Files") });
                         egui::Grid::new("props_ssh").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                             if e.protocol == Protocol::Ssh {
                                 ui.label(tr("Open with"));
