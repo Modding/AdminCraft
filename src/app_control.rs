@@ -22,6 +22,10 @@ fn save_png(file: &std::path::Path, w: usize, h: usize, rgba: &[u8]) -> Result<V
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
+    // the encoder panics on a buffer that doesn't fit the size
+    if !rgba_fits(w, h, rgba.len()) {
+        return Err("the picture is empty or damaged".into());
+    }
     let (w32, h32) = (u32::try_from(w).map_err(|e| e.to_string())?, u32::try_from(h).map_err(|e| e.to_string())?);
     image::save_buffer(file, rgba, w32, h32, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())?;
     Ok(json!({ "file": file.display().to_string(), "width": w, "height": h }))
@@ -90,7 +94,11 @@ impl AdminApp {
             None => {
                 let c2 = ctx.clone();
                 ctx.request_screenshot(move |img| {
-                    let part = img.region(&r, Some(c2.pixels_per_point()));
+                    // the area is from an earlier frame: cut to the picture, never past it
+                    let Some(part) = crop_image(&img, r, c2.pixels_per_point()) else {
+                        let _ = shot.reply.send(json!({ "error": "the tab's area is outside the window" }));
+                        return;
+                    };
                     let [w, h] = part.size;
                     let rgba: Vec<u8> = part.pixels.iter().flat_map(|p| p.to_array()).collect();
                     let mut answer = save_png(&shot.file, w, h, &rgba).unwrap_or_else(|e| json!({ "error": e }));
@@ -248,7 +256,12 @@ impl AdminApp {
                 if i == 0 {
                     return Err("the home tab can't be closed".into());
                 }
-                self.close_request = Some(i);
+                // by id and queued: several closes in one frame all apply, and moving tabs in
+                // the same frame can't turn this into closing another tab
+                let id = self.tabs.get(i).map(|t| t.id).ok_or_else(|| format!("no tab {i}"))?;
+                if !self.close_ids.contains(&id) {
+                    self.close_ids.push(id);
+                }
                 Ok(json!({ "closing": i }))
             }
             "read_tab" => {

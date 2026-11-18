@@ -327,6 +327,13 @@ pub struct AdminApp {
     shared_edit: String,
     #[allow(dead_code)]
     shared_msg: Option<(bool, String)>,
+    /// Tabs to close at the next tab strip, by tab id (control channel; a move of tabs in the
+    /// same frame can't make it close another one).
+    close_ids: Vec<u64>,
+    /// Languages and the programs folder for the settings page, read when the page is opened.
+    settings_cache: Option<SettingsCache>,
+    /// WebDAV "Test connection" / "Apply" running in the background (None inside while it runs).
+    dav_job: Option<DavSlot>,
 }
 
 impl AdminApp {
@@ -427,6 +434,9 @@ impl AdminApp {
             restored: false,
             shared_edit: crate::model::shared_location(),
             shared_msg: None,
+            close_ids: Vec::new(),
+            settings_cache: None,
+            dav_job: None,
         };
         app.refresh_programs();
         if let Some(r) = app.store.remote.clone() {
@@ -2628,7 +2638,14 @@ impl AdminApp {
     }
 
     fn tab_strip(&mut self, ui: &mut egui::Ui) {
-        let mut close: Option<usize> = self.close_request.take().filter(|&i| i > 0 && i < self.tabs.len());
+        // Ctrl+Shift+W asked by position: turn it into the tab's id before anything moves
+        if let Some(i) = self.close_request.take()
+            && i > 0
+            && let Some(t) = self.tabs.get(i)
+        {
+            self.close_ids.push(t.id);
+        }
+        let mut close: Vec<u64> = std::mem::take(&mut self.close_ids);
         let mut swap: Option<(usize, usize)> = None;
         let mut rename_start: Option<(u64, String)> = None;
         let mut rename_done: Option<(u64, Option<String>)> = None;
@@ -2680,7 +2697,7 @@ impl AdminApp {
                                         rename_start = Some((tab.id, tab.title.clone()));
                                     }
                                     if r.middle_clicked() && i != 0 {
-                                        close = Some(i);
+                                        close.push(tab.id);
                                     }
                                     if r.drag_started() && i != 0 {
                                         drag_from = Some(i);
@@ -2704,14 +2721,14 @@ impl AdminApp {
                                             }
                                             ui.separator();
                                             if ui.button(tr("Close tab")).clicked() {
-                                                close = Some(i);
+                                                close.push(tab.id);
                                                 ui.close();
                                             }
                                         });
                                     }
                                 }
                                 if i != 0 && ui.add(egui::Button::new("×").frame(false).small()).on_hover_text(tr("Close tab")).clicked() {
-                                    close = Some(i);
+                                    close.push(tab.id);
                                 }
                             });
                         });
@@ -2751,34 +2768,28 @@ impl AdminApp {
             }
             self.rename_tab = None;
         }
-        if let Some(i) = close {
-            if let TabKind::Term(t) = &mut self.tabs[i].kind
-                && let Some(term) = &mut t.term
-            {
-                term.kill();
-            }
-            if let TabKind::Ping(p) = &mut self.tabs[i].kind {
-                p.runner.stop();
-            }
-            if let TabKind::Proc(p) = &mut self.tabs[i].kind {
-                stop_proc(p);
-            }
-            if let TabKind::NetScan(n) = &self.tabs[i].kind
-                && let Some(s) = &n.scan
-            {
-                s.cancel();
-            }
-            if let TabKind::Scan(s) = &self.tabs[i].kind
-                && let Some(sc) = &s.scan
-            {
-                sc.cancel();
-            }
-            self.tabs.remove(i);
-            if self.active >= i && self.active > 0 {
-                self.active -= 1;
-            }
-        }
+        // closed after any move, by id: every request of this frame applies, to the tab it meant
+        self.close_tabs(&close);
         self.active = self.active.min(self.tabs.len().saturating_sub(1));
+    }
+
+    /// Closes the tabs with these ids (never the start page) and stops what runs in them.
+    fn close_tabs(&mut self, ids: &[u64]) {
+        let order: Vec<u64> = self.tabs.iter().map(|t| t.id).collect();
+        let (remove, active) = plan_closes(&order, self.active, ids);
+        if remove.is_empty() {
+            return;
+        }
+        for i in remove {
+            if i == 0 || i >= self.tabs.len() {
+                continue;
+            }
+            let mut tab = self.tabs.remove(i);
+            stop_tab(&mut tab.kind);
+        }
+        self.active = active;
+        // indexes of a drag in progress no longer fit
+        self.drag_tab = None;
     }
 
     fn tab_content(&mut self, ui: &mut egui::Ui, now: f64) {
@@ -2798,6 +2809,21 @@ impl AdminApp {
         let mut netscan_acts: Vec<NetScanAct> = Vec::new();
         let mut scan_range: Option<String> = None;
         let mut tunnel_acts: Vec<TunnelAct> = Vec::new();
+        // every terminal reads its output, types its passwords and notices its end, also when
+        // its tab is not the one shown; only the shown one is drawn below
+        for tab in &mut self.tabs {
+            if let TabKind::Term(t) = &mut tab.kind
+                && let Some(term) = &mut t.term
+            {
+                term.pump(auto_pw);
+            }
+        }
+        // the settings page reads languages and the programs folder again each time it is opened
+        if !matches!(self.tabs.get(active).map(|t| &t.kind), Some(TabKind::Settings)) {
+            self.settings_cache = None;
+        }
+        // a saved command sent to all "Multi" tabs: each fills in its own host, user and name
+        let mut broadcast_snippet: Option<String> = None;
         if matches!(self.tabs[active].kind, TabKind::Start) {
             self.start_page(ui, &mut start_acts);
         } else if matches!(self.tabs[active].kind, TabKind::Tunnels) {
@@ -2823,28 +2849,30 @@ impl AdminApp {
                 TabKind::Playback(p) => crate::playback::playback_ui(ui, p, settings_font, dark),
                 TabKind::Tool(x) => crate::tooltabs::tool_ui(ui, x),
                 TabKind::Term(t) => {
+                    // the saved command picked (not filled in yet: each tab fills in its own)
                     let mut snippet_cmd: Option<String> = None;
+                    // borrowed, not copied: entry and login (with the password) are only cloned
+                    // when "Reconnect" is pressed
+                    let TermTab { entry, creds, jumps, term, error, preview, broadcast: multi } = &mut **t;
                     ui.horizontal(|ui| {
-                        badge(ui, t.entry.protocol);
-                        ui.label(RichText::new(&t.preview).monospace().weak());
+                        badge(ui, entry.protocol);
+                        ui.label(RichText::new(preview.as_str()).monospace().weak());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if t.term.as_ref().is_some_and(|x| x.recording()) {
+                            if term.as_ref().is_some_and(|x| x.recording()) {
                                 ui.colored_label(Color32::from_rgb(229, 57, 53), tr("• recording"))
                                     .on_hover_text(tr("This session is recorded and can be played back (Tools » Recordings)."));
                             }
                             if ui.button(tr("Reconnect")).clicked() {
-                                if let Some(term) = &mut t.term {
+                                if let Some(term) = term.as_mut() {
                                     term.kill();
                                 }
-                                reconnect = Some((t.entry.clone(), t.creds.clone(), t.jumps.clone()));
+                                reconnect = Some((entry.clone(), creds.clone(), jumps.clone()));
                             }
-                            ui.checkbox(&mut t.broadcast, tr("Multi"))
-                                .on_hover_text(tr("What you type here also goes to all other tabs with \"Multi\"."));
-                            let (entry, creds) = (t.entry.clone(), t.creds.clone());
+                            ui.checkbox(multi, tr("Multi")).on_hover_text(tr("What you type here also goes to all other tabs with \"Multi\"."));
                             ui.menu_button(tr("Commands"), |ui| {
                                 for sn in &snippets {
                                     if ui.button(&sn.name).on_hover_text(&sn.command).clicked() {
-                                        snippet_cmd = Some(fill_snippet(&sn.command, &entry, &creds));
+                                        snippet_cmd = Some(sn.command.clone());
                                         ui.close();
                                     }
                                 }
@@ -2857,7 +2885,7 @@ impl AdminApp {
                                     ui.close();
                                 }
                             });
-                            if let Some(term) = &mut t.term {
+                            if let Some(term) = term.as_mut() {
                                 if ui.button(tr("Copy text")).on_hover_text(tr("Screen content to the clipboard")).clicked() {
                                     ui.ctx().copy_text(term.screen_text());
                                 }
@@ -2872,12 +2900,12 @@ impl AdminApp {
                             }
                         });
                     });
-                    if let Some(err) = &t.error {
+                    if let Some(err) = error.as_ref() {
                         ui.add_space(20.0);
                         ui.label(RichText::new(err).color(BAD_RED).size(15.0));
                     }
-                    if let Some(term) = &mut t.term {
-                        term.pump(auto_pw);
+                    if let Some(term) = term.as_mut() {
+                        // read already above, with all the other terminal tabs
                         if let Some(msg) = &term.exited {
                             ui.label(RichText::new(msg).color(WARN));
                         } else if term.chain_left() > 0 {
@@ -2887,16 +2915,14 @@ impl AdminApp {
                             );
                         }
                         if let Some(cmd) = snippet_cmd.take() {
-                            let mut b = cmd.into_bytes();
-                            b.push(b'\r');
-                            term.send(&b);
+                            term.send(&snippet_bytes(&cmd, entry, creds));
                             term.focus_next = true;
-                            if t.broadcast {
-                                broadcast = Some(b);
+                            if *multi {
+                                broadcast_snippet = Some(cmd);
                             }
                         }
                         let typed = term.ui(ui, settings_font, dark);
-                        if t.broadcast && !typed.is_empty() {
+                        if *multi && !typed.is_empty() {
                             broadcast = Some(typed);
                         }
                     }
@@ -2969,7 +2995,7 @@ impl AdminApp {
                 _ => {}
             }
         }
-        if let Some(bytes) = broadcast {
+        if broadcast.is_some() || broadcast_snippet.is_some() {
             for (i, tab) in self.tabs.iter_mut().enumerate() {
                 if i == active {
                     continue;
@@ -2978,7 +3004,12 @@ impl AdminApp {
                     && x.broadcast
                     && let Some(term) = &mut x.term
                 {
-                    term.send(&bytes);
+                    if let Some(bytes) = &broadcast {
+                        term.send(bytes);
+                    }
+                    if let Some(cmd) = &broadcast_snippet {
+                        term.send(&snippet_bytes(cmd, &x.entry, &x.creds));
+                    }
                 }
             }
         }
@@ -3591,8 +3622,11 @@ impl AdminApp {
     fn settings_ui(&mut self, ui: &mut egui::Ui, now: f64) {
         let mut changed = false;
         section_help(ui, tr("Language"), crate::help::Topic::Languages, &mut self.help_request);
-        let langs = crate::i18n::available();
-        let sys = crate::i18n::system_code();
+        // read from disk when the page opens, not every frame; again when asked below
+        let cache = self.settings_cache.take().unwrap_or_else(SettingsCache::read);
+        let mut reread = false;
+        let langs = &cache.langs;
+        let sys = &cache.system_lang;
         let shown = if self.store.data.settings.language.is_empty() {
             tf("System language ({0})", &[&crate::i18n::current()])
         } else {
@@ -3604,11 +3638,11 @@ impl AdminApp {
         };
         ui.horizontal(|ui| {
             let mut pick: Option<String> = None;
-            egui::ComboBox::from_id_salt("lang").selected_text(shown).width(220.0).show_ui(ui, |ui| {
-                if ui.selectable_label(self.store.data.settings.language.is_empty(), tf("System language ({0})", &[&sys])).clicked() {
+            let combo = egui::ComboBox::from_id_salt("lang").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+                if ui.selectable_label(self.store.data.settings.language.is_empty(), tf("System language ({0})", &[sys])).clicked() {
                     pick = Some(String::new());
                 }
-                for l in &langs {
+                for l in langs {
                     if ui
                         .selectable_label(self.store.data.settings.language == l.code, format!("{} ({})", l.name, l.code))
                         .on_hover_text(if l.source == "built in" { tr("built in") } else { l.source.as_str() })
@@ -3618,6 +3652,10 @@ impl AdminApp {
                     }
                 }
             });
+            // opening the list looks for new language files (shown from the next frame on)
+            if combo.response.clicked() {
+                reread = true;
+            }
             if let Some(code) = pick {
                 self.store.data.settings.language = code.clone();
                 crate::i18n::set_language(&code);
@@ -3625,6 +3663,7 @@ impl AdminApp {
             }
             if ui.button(tr("Open language folder")).on_hover_text(tr("Put your own language files (.lang) here")).clicked() {
                 launch::open_folder(&crate::i18n::ensure_lang_dir());
+                reread = true;
             }
         });
         ui.weak(tr("More languages: copy de.lang.example in the language folder to xx.lang and translate the right side."));
@@ -3756,8 +3795,9 @@ impl AdminApp {
         ui.horizontal(|ui| {
             if ui.button(tr("Open programs folder")).clicked() {
                 launch::open_folder(&programs::ensure_tools_dir());
+                reread = true;
             }
-            ui.weak(programs::tools_dir().display().to_string());
+            ui.weak(cache.tools_dir.as_str());
         });
         ui.add_space(4.0);
         let mut recheck = false;
@@ -3923,6 +3963,13 @@ impl AdminApp {
             ui.radio_value(&mut self.storage_kind, 1, tr("Network folder (SMB)"));
             ui.radio_value(&mut self.storage_kind, 2, tr("WebDAV server"));
         });
+        // a test or apply running in the background: its answer, once there
+        let finished = self.dav_job.as_ref().and_then(|s| s.lock().unwrap_or_else(|e| e.into_inner()).take());
+        if let Some(r) = finished {
+            self.dav_msg = Some(r);
+            self.dav_job = None;
+        }
+        let dav_busy = self.dav_job.is_some();
         match self.storage_kind {
             1 => {
                 ui.horizontal(|ui| {
@@ -3947,45 +3994,57 @@ impl AdminApp {
                     ui.end_row();
                 });
                 ui.weak(tr("Nextcloud/ownCloud: best create an app password. If the address ends with \"/\", connections.json inside it is used."));
-                if ui.button(tr("Test connection")).clicked() {
-                    let mut c = crate::remote::RemoteConfig { url: self.dav_url.clone(), user: self.dav_user.clone(), password_enc: String::new() };
-                    c.set_password(&self.dav_pw);
-                    self.dav_msg = Some(match crate::remote::test(&c) {
-                        Ok(m) => (true, m),
-                        Err(e) => (false, e),
+                // the server may be slow or not answer: asked in the background, the window goes on
+                if ui.add_enabled(!dav_busy, egui::Button::new(tr("Test connection"))).clicked() {
+                    let (url, user, pw) = (self.dav_url.clone(), self.dav_user.clone(), self.dav_pw.clone());
+                    self.start_dav_job(ui.ctx(), move || {
+                        let mut c = crate::remote::RemoteConfig { url, user, password_enc: String::new() };
+                        c.set_password(&pw);
+                        match crate::remote::test(&c) {
+                            Ok(m) => (true, m),
+                            Err(e) => (false, e),
+                        }
                     });
                 }
             }
             _ => {}
         }
-        if ui.button(tr("Apply")).clicked() {
-            self.store.save();
-            let result = match self.storage_kind {
-                1 => crate::model::set_shared_location(&self.shared_edit, &self.store.path)
-                    .and_then(|_| crate::remote::save_config(&Default::default())),
-                2 => {
-                    let mut c = crate::remote::RemoteConfig {
-                        url: self.dav_url.trim().to_string(),
-                        user: self.dav_user.clone(),
-                        password_enc: String::new(),
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!dav_busy, egui::Button::new(tr("Apply"))).clicked() {
+                self.store.save();
+                let kind = self.storage_kind;
+                let shared = self.shared_edit.clone();
+                let path = self.store.path.clone();
+                let (url, user, pw) = (self.dav_url.trim().to_string(), self.dav_user.clone(), self.dav_pw.clone());
+                let saved = tr("Saved – please restart AdminCraft.").to_string();
+                self.start_dav_job(ui.ctx(), move || {
+                    let result = match kind {
+                        1 => crate::model::set_shared_location(&shared, &path).and_then(|_| crate::remote::save_config(&Default::default())),
+                        2 => {
+                            let mut c = crate::remote::RemoteConfig { url, user, password_enc: String::new() };
+                            c.set_password(&pw);
+                            // first time: put the current list on the server unless one is there already
+                            match crate::remote::fetch(&c) {
+                                Ok(None) => std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| crate::remote::upload(&c, &t)),
+                                Ok(Some(_)) => Ok(()),
+                                Err(e) => Err(e),
+                            }
+                            .and_then(|_| crate::model::set_shared_location("", &path))
+                            .and_then(|_| crate::remote::save_config(&c))
+                        }
+                        _ => crate::model::set_shared_location("", &path).and_then(|_| crate::remote::save_config(&Default::default())),
                     };
-                    c.set_password(&self.dav_pw);
-                    // first time: put the current list on the server unless one is there already
-                    match crate::remote::fetch(&c) {
-                        Ok(None) => std::fs::read_to_string(&self.store.path).map_err(|e| e.to_string()).and_then(|t| crate::remote::upload(&c, &t)),
-                        Ok(Some(_)) => Ok(()),
-                        Err(e) => Err(e),
+                    match result {
+                        Ok(()) => (true, saved),
+                        Err(e) => (false, e),
                     }
-                    .and_then(|_| crate::model::set_shared_location("", &self.store.path))
-                    .and_then(|_| crate::remote::save_config(&c))
-                }
-                _ => crate::model::set_shared_location("", &self.store.path).and_then(|_| crate::remote::save_config(&Default::default())),
-            };
-            self.dav_msg = Some(match result {
-                Ok(()) => (true, tr("Saved – please restart AdminCraft.").to_string()),
-                Err(e) => (false, e),
-            });
-        }
+                });
+            }
+            if dav_busy {
+                ui.spinner();
+                ui.label(tr("Connecting …"));
+            }
+        });
         if let Some((ok, m)) = &self.dav_msg {
             ui.label(RichText::new(m).color(if *ok { OK_GREEN } else { BAD_RED }));
         }
@@ -4017,7 +4076,7 @@ impl AdminApp {
             ui.end_row();
         });
         ui.horizontal(|ui| {
-            if ui.button(if self.store.data.master { "Change" } else { "Set" }).clicked() {
+            if ui.button(tr(if self.store.data.master { "Change" } else { "Set" })).clicked() {
                 if self.new_master.is_empty() {
                     self.settings_msg = Some(tr("Please enter a password.").into());
                 } else if self.new_master != self.new_master2 {
@@ -4066,6 +4125,27 @@ impl AdminApp {
         if changed {
             self.mark_dirty(now);
         }
+        // kept for the next frame, or read again then
+        self.settings_cache = if reread { None } else { Some(cache) };
+    }
+
+    /// Runs a WebDAV test or "Apply" in its own thread; the settings page shows the answer.
+    fn start_dav_job(&mut self, ctx: &egui::Context, work: impl FnOnce() -> (bool, String) + Send + 'static) {
+        let slot: DavSlot = Arc::new(Mutex::new(None));
+        let s2 = slot.clone();
+        let c2 = ctx.clone();
+        let spawned = std::thread::Builder::new().name("webdav-settings".into()).spawn(move || {
+            let r = work();
+            *s2.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+            c2.request_repaint();
+        });
+        match spawned {
+            Ok(_) => {
+                self.dav_job = Some(slot);
+                self.dav_msg = None;
+            }
+            Err(e) => self.dav_msg = Some((false, e.to_string())),
+        }
     }
 
     /// "Screenshot": the active tab's area as a picture in the clipboard. Taken one frame
@@ -4080,7 +4160,8 @@ impl AdminApp {
                 h: (r.height() * ppp).round() as i32,
             };
             let screen = self.parent_hwnd.and_then(|h| embed::capture(h, px));
-            match screen {
+            // a picture whose size doesn't fit its pixels is dropped (egui would panic on it)
+            match screen.filter(|(w, h, rgba)| rgba_fits(*w, *h, rgba.len())) {
                 Some((w, h, rgba)) => {
                     ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba));
                     self.note(tf("Screenshot ({0} × {1}) copied to the clipboard.", &[&w, &h]), false, now);
@@ -4090,8 +4171,10 @@ impl AdminApp {
                     let slot = self.shot_wait.clone();
                     let c2 = ctx.clone();
                     ctx.request_screenshot(move |img| {
-                        let part = img.region(&r, Some(c2.pixels_per_point()));
-                        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(part));
+                        // the area is from an earlier frame: the window may be smaller by now
+                        if let Some(part) = crop_image(&img, r, c2.pixels_per_point()) {
+                            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(part));
+                        }
                         c2.request_repaint();
                     });
                 }
@@ -4166,6 +4249,27 @@ impl AdminApp {
         }
     }
 }
+
+/// What the settings page shows that needs a look at the disk (language files, a write test
+/// next to the program): read when the page is opened, not every frame.
+struct SettingsCache {
+    langs: Vec<crate::i18n::LangInfo>,
+    system_lang: String,
+    tools_dir: String,
+}
+
+impl SettingsCache {
+    fn read() -> Self {
+        SettingsCache {
+            langs: crate::i18n::available(),
+            system_lang: crate::i18n::system_code(),
+            tools_dir: programs::tools_dir().display().to_string(),
+        }
+    }
+}
+
+/// Where the WebDAV test or "Apply" (running in its own thread) puts its answer.
+type DavSlot = Arc<Mutex<Option<(bool, String)>>>;
 
 #[allow(dead_code)]
 enum StartAct {
@@ -4360,7 +4464,15 @@ impl eframe::App for AdminApp {
             }
         }
 
-        // keep terminals and tools alive while running
+        // Keep terminals and tools alive while running. Their output asks for a frame by itself;
+        // this only notices ends and progress without output. Quick only while an outside
+        // program's window is still being looked for, to put it into its tab.
+        let waiting_embed = self.tabs.iter().any(|t| match &t.kind {
+            TabKind::Proc(p) => {
+                p.want_embed && !p.detached && p.exited.is_none() && now - p.started < 180.0 && p.embed.as_ref().is_some_and(|e| !e.attached())
+            }
+            _ => false,
+        });
         let busy = self.tabs.iter().any(|t| match &t.kind {
             TabKind::Term(t) => t.term.as_ref().map(|x| x.exited.is_none()).unwrap_or(false),
             TabKind::Ping(p) => p.runner.is_running(),
@@ -4371,8 +4483,8 @@ impl eframe::App for AdminApp {
             TabKind::Cert(c) => *c.busy.lock().unwrap_or_else(|e| e.into_inner()),
             _ => false,
         });
-        if busy {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        if let Some(after) = keep_alive_interval(waiting_embed, busy) {
+            ctx.request_repaint_after(after);
         }
         if let Some(t) = &self.toast
             && t.until > now
@@ -4446,9 +4558,108 @@ fn stop_proc(p: &mut ProcTab) {
     p.embed = None;
 }
 
+/// The part of a picture of the window under `r` (in points). The area is cut to the picture
+/// (it may come from an earlier frame of a larger window); None when nothing of it is left.
+pub(crate) fn crop_image(img: &egui::ColorImage, r: Rect, ppp: f32) -> Option<egui::ColorImage> {
+    let [w, h] = img.size;
+    if img.pixels.len() != w.checked_mul(h)? {
+        return None;
+    }
+    // to whole pixels inside the picture; NaN and negative values become 0
+    let px = |v: f32, max: usize| -> usize {
+        let v = (v * ppp).round();
+        if v.is_nan() || v <= 0.0 {
+            0
+        } else if v >= max as f32 {
+            max
+        } else {
+            v as usize
+        }
+    };
+    let (x0, x1) = (px(r.min.x, w), px(r.max.x, w));
+    let (y0, y1) = (px(r.min.y, h), px(r.max.y, h));
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (cw, ch) = (x1 - x0, y1 - y0);
+    let mut pixels = Vec::with_capacity(cw * ch);
+    for y in y0..y1 {
+        let start = y * w + x0;
+        pixels.extend_from_slice(img.pixels.get(start..start + cw)?);
+    }
+    Some(egui::ColorImage::new([cw, ch], pixels))
+}
+
+/// How soon the window draws again by itself: every 250 ms while an outside program's window
+/// is still being looked for (to put it into its tab), once a second while anything else runs
+/// (to notice ends; output asks for a frame by itself), otherwise not at all.
+pub(crate) fn keep_alive_interval(waiting_embed: bool, busy: bool) -> Option<std::time::Duration> {
+    if waiting_embed {
+        Some(std::time::Duration::from_millis(250))
+    } else if busy {
+        Some(std::time::Duration::from_secs(1))
+    } else {
+        None
+    }
+}
+
+/// True when `len` bytes are exactly a w × h RGBA picture (and it isn't empty).
+pub(crate) fn rgba_fits(w: usize, h: usize, len: usize) -> bool {
+    w > 0 && h > 0 && w.checked_mul(h).and_then(|n| n.checked_mul(4)) == Some(len)
+}
+
+/// Stops what runs in a tab that is being closed.
+fn stop_tab(kind: &mut TabKind) {
+    match kind {
+        TabKind::Term(t) => {
+            if let Some(term) = &mut t.term {
+                term.kill();
+            }
+        }
+        TabKind::Ping(p) => p.runner.stop(),
+        TabKind::Proc(p) => stop_proc(p),
+        TabKind::NetScan(n) => {
+            if let Some(s) = &n.scan {
+                s.cancel();
+            }
+        }
+        TabKind::Scan(s) => {
+            if let Some(sc) = &s.scan {
+                sc.cancel();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Close requests by tab id: the positions to remove (highest first, never the start page at 0,
+/// each once) and where the active tab ends up. Closing the active tab moves to its left
+/// neighbour; a tab further right keeps being the active one.
+pub(crate) fn plan_closes(order: &[u64], active: usize, close: &[u64]) -> (Vec<usize>, usize) {
+    let mut remove: Vec<usize> = close.iter().filter_map(|id| order.iter().position(|t| t == id)).filter(|&i| i > 0).collect();
+    remove.sort_unstable_by(|a, b| b.cmp(a));
+    remove.dedup();
+    let mut active = active.min(order.len().saturating_sub(1));
+    for &i in &remove {
+        if active >= i && active > 0 {
+            active -= 1;
+        }
+    }
+    let left = order.len().saturating_sub(remove.len());
+    (remove, active.min(left.saturating_sub(1)))
+}
+
 /// A saved command with {host} {user} {name} filled in.
 fn fill_snippet(cmd: &str, e: &Entry, c: &Creds) -> String {
     cmd.replace("{host}", e.host.trim()).replace("{user}", &c.user).replace("{name}", &e.name)
+}
+
+/// What a terminal tab gets for a saved command: filled in with that tab's own connection and
+/// login, then Enter.
+pub(crate) fn snippet_bytes(cmd: &str, e: &Entry, c: &Creds) -> Vec<u8> {
+    let mut b = fill_snippet(cmd, e, c).into_bytes();
+    b.push(b'\r');
+    b
 }
 
 fn url_enc(s: &str) -> String {
@@ -4588,15 +4799,37 @@ fn file_row(ui: &mut egui::Ui, selected: bool, is_dir: bool, name: &str, size: &
         painter.text(Pos2::new(rect.right() - 4.0, rect.center().y), egui::Align2::RIGHT_CENTER, date, small, weak);
     }
     let resp = resp.on_hover_text(name);
+    // the lists only draw the rows in view: a row reached with the keyboard is scrolled into
+    // view, so the next one gets drawn and Tab goes on through the whole list
+    if resp.gained_focus() {
+        resp.scroll_to_me(None);
+    }
     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
     (resp.clicked(), resp.double_clicked(), ctrl)
 }
 
+/// Positions of the remote entries the list shows (names starting with "." only when hidden
+/// files are switched on).
+pub(crate) fn visible_rows(items: &[transfer::RemoteItem], show_hidden: bool) -> Vec<usize> {
+    items.iter().enumerate().filter(|(_, i)| show_hidden || !i.name.starts_with('.')).map(|(n, _)| n).collect()
+}
+
+/// Height of a row in the file lists (see `file_row`).
+const FILE_ROW_H: f32 = 22.0;
+
 fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
-    let (cwd, items, busy, queued, log, connected, local_changed) = {
+    // The listing and the log stay in the shared state: copied are only the few rows in view,
+    // under a short lock, and the entries a button acts on when it is pressed.
+    let (cwd, remote_rows, busy, queued, log_len, connected, local_changed) = {
         let mut s = t.xfer.shared.lock().unwrap_or_else(|e| e.into_inner());
         let lc = std::mem::take(&mut s.local_changed);
-        (s.cwd.clone(), s.items.clone(), s.busy.clone(), s.queued, s.log.clone(), s.connected, lc)
+        (s.cwd.clone(), visible_rows(&s.items, show_hidden), s.busy.clone(), s.queued, s.log.len(), s.connected, lc)
+    };
+    let shared = t.xfer.shared.clone();
+    // the remote entries selected right now (name, is_dir, is_link), read when a button needs them
+    let selected_remote = |sel: &BTreeSet<String>| -> Vec<(String, bool, bool)> {
+        let s = shared.lock().unwrap_or_else(|e| e.into_inner());
+        s.items.iter().filter(|i| sel.contains(&i.name)).map(|i| (i.name.clone(), i.is_dir, i.is_link)).collect()
     };
     if local_changed {
         refresh_local(t, show_hidden);
@@ -4645,13 +4878,26 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                 nav_local = Some(p.to_path_buf());
             }
             if cfg!(windows) {
-                egui::ComboBox::from_id_salt("drives").selected_text(tr("Drive")).width(70.0).show_ui(ui, |ui| {
-                    for d in transfer::drives() {
+                // drive letters are probed once each time the list opens, not every frame
+                let cache_id = egui::Id::new("admincraft-drives");
+                let open = egui::ComboBox::from_id_salt("drives").selected_text(tr("Drive")).width(70.0).show_ui(ui, |ui| {
+                    let drives = match ui.data(|d| d.get_temp::<Arc<Vec<PathBuf>>>(cache_id)) {
+                        Some(v) => v,
+                        None => {
+                            let v = Arc::new(transfer::drives());
+                            ui.data_mut(|d| d.insert_temp(cache_id, v.clone()));
+                            v
+                        }
+                    };
+                    for d in drives.iter() {
                         if ui.selectable_label(false, d.display().to_string()).clicked() {
-                            nav_local = Some(d);
+                            nav_local = Some(d.clone());
                         }
                     }
                 });
+                if open.inner.is_none() {
+                    ui.data_mut(|d| d.remove::<Arc<Vec<PathBuf>>>(cache_id));
+                }
             }
             let r = ui.add(egui::TextEdit::singleline(&mut t.local_edit).desired_width(f32::INFINITY));
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -4659,16 +4905,17 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
             }
         });
         egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(4).show(ui, |ui| {
+            if let Some(e) = &t.local_err {
+                ui.label(RichText::new(e).color(BAD_RED));
+            }
+            // only the rows in view are drawn
             egui::ScrollArea::vertical()
                 .id_salt("local_list")
                 .max_height(pane_h - 70.0)
                 .min_scrolled_height(pane_h - 70.0)
                 .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if let Some(e) = &t.local_err {
-                        ui.label(RichText::new(e).color(BAD_RED));
-                    }
-                    for it in &t.local_items {
+                .show_rows(ui, FILE_ROW_H, t.local_items.len(), |ui, range| {
+                    for it in t.local_items.get(range).unwrap_or_default() {
                         let sel = t.local_sel.contains(&it.name);
                         let size = if it.is_dir { String::new() } else { transfer::human_size(it.size) };
                         let (c, dc, ctrl) = file_row(ui, sel, it.is_dir, &it.name, &size, &it.modified);
@@ -4732,23 +4979,28 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
             }
         });
         egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(4).show(ui, |ui| {
+            if !connected {
+                if busy.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(tr("Connecting …"));
+                    });
+                } else {
+                    ui.label(RichText::new(tr("Not connected – see message below. \"Refresh\" tries again.")).color(WARN));
+                }
+            }
+            // only the rows in view are drawn, and only they are copied out of the listing
             egui::ScrollArea::vertical()
                 .id_salt("remote_list")
                 .max_height(pane_h - 70.0)
                 .min_scrolled_height(pane_h - 70.0)
                 .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if !connected {
-                        if busy.is_some() {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label(tr("Connecting …"));
-                            });
-                        } else {
-                            ui.label(RichText::new(tr("Not connected – see message below. \"Refresh\" tries again.")).color(WARN));
-                        }
-                    }
-                    for it in items.iter().filter(|i| show_hidden || !i.name.starts_with('.')) {
+                .show_rows(ui, FILE_ROW_H, remote_rows.len(), |ui, range| {
+                    let shown: Vec<transfer::RemoteItem> = {
+                        let s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                        remote_rows.get(range).unwrap_or_default().iter().filter_map(|&i| s.items.get(i).cloned()).collect()
+                    };
+                    for it in &shown {
                         let sel = t.remote_sel.contains(&it.name);
                         let size = if it.is_dir { String::new() } else { transfer::human_size(it.size) };
                         let (c, dc, ctrl) = file_row(ui, sel, it.is_dir, &it.name, &size, &it.modified);
@@ -4774,8 +5026,9 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                 .on_hover_text(tr("Download the selection into the left folder"))
                 .clicked()
             {
-                for it in items.iter().filter(|i| t.remote_sel.contains(&i.name)) {
-                    t.xfer.send(Job::Download { remote: transfer::join(&cwd, &it.name), is_dir: it.is_dir, local_dir: t.local_dir.clone() });
+                // read under the lock, sent after it (sending takes the lock too)
+                for (name, is_dir, _) in selected_remote(&t.remote_sel) {
+                    t.xfer.send(Job::Download { remote: transfer::join(&cwd, &name), is_dir, local_dir: t.local_dir.clone() });
                 }
                 t.remote_sel.clear();
             }
@@ -4787,7 +5040,7 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
                 t.dialog = Some(XferDialog::Rename { remote: true, to: from.clone(), from });
             }
             if ui.add_enabled(n > 0, egui::Button::new(tr("Delete"))).clicked() {
-                let names = items.iter().filter(|i| t.remote_sel.contains(&i.name)).map(|i| (i.name.clone(), i.is_dir && !i.is_link)).collect();
+                let names = selected_remote(&t.remote_sel).into_iter().map(|(name, is_dir, is_link)| (name, is_dir && !is_link)).collect();
                 t.dialog = Some(XferDialog::Delete { remote: true, names });
             }
             if ui.button(tr("Refresh")).on_hover_text(tr("Refresh folder / reconnect")).clicked() {
@@ -4798,16 +5051,31 @@ fn transfer_ui(ui: &mut egui::Ui, t: &mut TransferTab, show_hidden: bool) {
 
     // log
     egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(6).show(ui, |ui| {
-        egui::ScrollArea::vertical().id_salt("xfer_log").max_height(log_h - 12.0).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
-            if log.is_empty() {
+        if log_len == 0 {
+            egui::ScrollArea::vertical().id_salt("xfer_log").max_height(log_h - 12.0).auto_shrink([false, false]).show(ui, |ui| {
                 ui.weak(tr(
                     "Double-click opens folders. Select several entries with Ctrl+click. Drag files from the explorer into the window = upload.",
                 ));
-            }
-            for (ok, l) in &log {
-                ui.label(RichText::new(l).small().color(if *ok { OK_GREEN } else { BAD_RED }));
-            }
-        });
+            });
+            return;
+        }
+        // only the lines in view, one row each (long ones scroll sideways)
+        let row_h = ui.text_style_height(&egui::TextStyle::Small);
+        egui::ScrollArea::both().id_salt("xfer_log").max_height(log_h - 12.0).auto_shrink([false, false]).stick_to_bottom(true).show_rows(
+            ui,
+            row_h,
+            log_len,
+            |ui, range| {
+                let shown: Vec<(bool, String)> = {
+                    let s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    s.log.iter().skip(range.start).take(range.len()).cloned().collect()
+                };
+                for (ok, l) in shown {
+                    let line = RichText::new(l).small().color(if ok { OK_GREEN } else { BAD_RED });
+                    ui.add(egui::Label::new(line).wrap_mode(egui::TextWrapMode::Extend));
+                }
+            },
+        );
     });
 
     if let Some(p) = nav_local {
@@ -4946,25 +5214,52 @@ fn ping_ui(ui: &mut egui::Ui, p: &mut PingTab, ctx: &egui::Context) {
         }
     });
     ui.separator();
-    output_box(ui, &p.runner.lines.lock().unwrap_or_else(|e| e.into_inner()));
+    output_box(ui, &p.runner.lines);
 }
 
-fn output_box(ui: &mut egui::Ui, lines: &[String]) {
+/// How a line of ping, traceroute or DNS output is coloured.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum LineTone {
+    Normal,
+    Good,
+    Bad,
+}
+
+/// Answers are green, timeouts and unreachable hosts red. The German texts match the output of
+/// a German Windows `ping`.
+pub(crate) fn line_tone(l: &str) -> LineTone {
+    if l.contains("TTL=") || l.contains("ttl=") || l.contains("bytes from") || l.contains("Antwort von") {
+        LineTone::Good
+    } else if l.contains("timed out") || l.contains("unreachable") || l.contains("Zeitüberschreitung") || l.contains("nicht erreichbar") {
+        LineTone::Bad
+    } else {
+        LineTone::Normal
+    }
+}
+
+/// The output of ping, traceroute or nslookup. Only the lines in view are laid out, and the
+/// lines are locked just long enough to count them and to copy those few.
+fn output_box(ui: &mut egui::Ui, lines: &Mutex<Vec<String>>) {
+    let total = lines.lock().unwrap_or_else(|e| e.into_inner()).len();
     egui::Frame::new().fill(ui.visuals().extreme_bg_color).corner_radius(4.0).inner_margin(8).show(ui, |ui| {
-        egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
-            if lines.is_empty() {
-                ui.weak(tr("Enter a host and press Start."));
-            }
-            for l in lines {
-                let color = if l.contains("TTL=") || l.contains("ttl=") || l.contains("Antwort von") || l.contains("bytes from") {
-                    OK_GREEN
-                } else if l.contains("Zeitüberschreitung") || l.contains("timed out") || l.contains("nicht erreichbar") || l.contains("unreachable")
-                {
-                    BAD_RED
-                } else {
-                    ui.visuals().text_color()
+        if total == 0 {
+            ui.weak(tr("Enter a host and press Start."));
+            return;
+        }
+        let row_h = ui.text_style_height(&egui::TextStyle::Monospace);
+        egui::ScrollArea::both().auto_shrink([false, false]).stick_to_bottom(true).show_rows(ui, row_h, total, |ui, range| {
+            let shown: Vec<String> = {
+                let g = lines.lock().unwrap_or_else(|e| e.into_inner());
+                g.iter().skip(range.start).take(range.len()).cloned().collect()
+            };
+            for l in shown {
+                let color = match line_tone(&l) {
+                    LineTone::Good => OK_GREEN,
+                    LineTone::Bad => BAD_RED,
+                    LineTone::Normal => ui.visuals().text_color(),
                 };
-                ui.label(RichText::new(l).monospace().color(color));
+                // one line per row (no wrapping), so every row has the same height
+                ui.add(egui::Label::new(RichText::new(l).monospace().color(color)).wrap_mode(egui::TextWrapMode::Extend));
             }
         });
     });
@@ -5059,15 +5354,22 @@ const DNS_TYPES: [(&str, &str); 11] = [
     ("ANY", "Everything (many servers refuse)"),
 ];
 
+/// Gives the DNS tab an empty result slot of its own for a new query and returns it for the
+/// lookup. The slot of an older query is no longer shown, so its late answer changes nothing.
+pub(crate) fn fresh_dns_slot(current: &mut DnsResult) -> DnsResult {
+    *current = Arc::new(Mutex::new(None));
+    current.clone()
+}
+
 fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
     let host = d.host.trim().to_string();
     if host.is_empty() {
         return;
     }
     let server = d.server.trim().to_string();
+    // a new slot for every query: a late answer to an older one lands in its own, unseen slot
+    let slot = fresh_dns_slot(&mut d.result);
     if d.rtype == "A" || d.rtype == "AAAA" {
-        let slot = d.result.clone();
-        *slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let c2 = ctx.clone();
         let h2 = host.clone();
         let want_v6 = d.rtype == "AAAA";
@@ -5080,8 +5382,6 @@ fn dns_query(d: &mut DnsTab, ctx: &egui::Context) {
             *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
             c2.request_repaint();
         });
-    } else {
-        *d.result.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
     // reverse lookups need the PTR name; nslookup does that by itself for an IP
     let rtype = if d.rtype == "PTR" { "PTR".to_string() } else { d.rtype.clone() };
@@ -5157,7 +5457,7 @@ fn dns_ui(ui: &mut egui::Ui, d: &mut DnsTab, ctx: &egui::Context) {
         ui.add_space(8.0);
     }
     ui.label(RichText::new(tf("Answer ({0} records)", &[&d.rtype])).strong());
-    output_box(ui, &d.runner.lines.lock().unwrap_or_else(|e| e.into_inner()));
+    output_box(ui, &d.runner.lines);
 }
 
 fn wol_ui(ui: &mut egui::Ui, w: &mut WolTab) {

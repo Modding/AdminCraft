@@ -1281,3 +1281,144 @@ fn tools_folder_is_worked_out_once() {
     let a = crate::programs::tools_dir();
     assert_eq!(a, crate::programs::tools_dir());
 }
+
+// ---- window: tab strip, tab contents, screenshots (code review 2026-11-18)
+
+#[test]
+fn tab_screenshot_area_is_cut_to_the_picture() {
+    // C7: the area comes from an earlier frame; ColorImage::region panicked when it reached
+    // past the picture or was turned around
+    use crate::app::{crop_image, rgba_fits};
+    use eframe::egui::{Color32, ColorImage, Pos2, Rect};
+    let (w, h) = (4usize, 3usize);
+    let pixels: Vec<Color32> = (0..w * h).map(|i| Color32::from_rgb(i as u8, 0, 0)).collect();
+    let img = ColorImage::new([w, h], pixels);
+    let red = |c: &ColorImage| c.pixels.iter().map(|p| p.r()).collect::<Vec<u8>>();
+    let r = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1, y1));
+    // inside
+    let part = crop_image(&img, r(1.0, 1.0, 3.0, 3.0), 1.0).unwrap();
+    assert_eq!(part.size, [2, 2]);
+    assert_eq!(red(&part), vec![5, 6, 9, 10]);
+    // half outside (window got smaller): cut to the picture
+    let part = crop_image(&img, r(2.0, 1.0, 40.0, 30.0), 1.0).unwrap();
+    assert_eq!(part.size, [2, 2]);
+    assert_eq!(red(&part), vec![6, 7, 10, 11]);
+    // negative start, scaled by pixels per point
+    let part = crop_image(&img, r(-5.0, -5.0, 1.0, 0.5), 2.0).unwrap();
+    assert_eq!(part.size, [2, 1]);
+    assert_eq!(red(&part), vec![0, 1]);
+    // nothing left: None instead of a panic
+    assert!(crop_image(&img, r(10.0, 10.0, 20.0, 20.0), 1.0).is_none(), "outside");
+    assert!(crop_image(&img, Rect { min: Pos2::new(3.0, 2.0), max: Pos2::new(1.0, 1.0) }, 1.0).is_none(), "turned around");
+    assert!(crop_image(&img, r(1.0, 1.0, 1.0, 3.0), 1.0).is_none(), "no width");
+    assert!(crop_image(&img, r(f32::NAN, 0.0, f32::NAN, 2.0), 1.0).is_none(), "NaN");
+    assert!(crop_image(&img, r(0.0, 0.0, 4.0, 3.0), f32::NAN).is_none(), "NaN scale");
+    // a whole-window area at a large scale is the whole picture
+    assert_eq!(crop_image(&img, r(0.0, 0.0, 100.0, 100.0), 3.0).unwrap().size, [4, 3]);
+    // a picture whose pixels don't fit its size is not cut at all
+    let mut broken = ColorImage::new([2, 2], vec![Color32::BLACK; 4]);
+    broken.pixels.pop();
+    assert!(crop_image(&broken, r(0.0, 0.0, 2.0, 2.0), 1.0).is_none());
+    // RGBA buffers from the system capture: size and length must agree
+    assert!(rgba_fits(2, 3, 24));
+    assert!(!rgba_fits(2, 3, 23));
+    assert!(!rgba_fits(0, 3, 0));
+    assert!(!rgba_fits(usize::MAX, 2, 0), "overflow");
+}
+
+#[test]
+fn close_requests_by_tab_id() {
+    use crate::app::plan_closes;
+    // B5: two requests in one frame (control channel and Ctrl+Shift+W) both apply
+    let order = [0, 10, 11, 12, 13];
+    let (remove, active) = plan_closes(&order, 4, &[11, 13]);
+    assert_eq!(remove, vec![4, 2], "highest first");
+    assert_eq!(active, 2, "the active tab was closed: its left neighbour (id 12, now at 2)");
+    // a request made before two tabs swapped places still closes the tab it meant
+    let swapped = [0, 10, 12, 11, 13];
+    let (remove, active) = plan_closes(&swapped, 1, &[11]);
+    assert_eq!(remove, vec![3]);
+    assert_eq!(active, 1, "a tab to the left stays active");
+    // the active tab right of a closed one stays the active tab
+    let (_, active) = plan_closes(&order, 3, &[10]);
+    assert_eq!(active, 2, "id 12 moved from 3 to 2");
+    // never the start page, every tab once, unknown ids ignored
+    let (remove, active) = plan_closes(&order, 0, &[0, 12, 12, 99]);
+    assert_eq!(remove, vec![3]);
+    assert_eq!(active, 0);
+    // everything but the start page
+    let (remove, active) = plan_closes(&order, 4, &[10, 11, 12, 13]);
+    assert_eq!(remove, vec![4, 3, 2, 1]);
+    assert_eq!(active, 0);
+    assert_eq!(plan_closes(&order, 2, &[]), (vec![], 2));
+}
+
+#[test]
+fn snippet_for_multi_tabs_uses_each_tabs_connection() {
+    // B1: a saved command sent to all "Multi" tabs fills in each tab's own host, user and name
+    use crate::app::snippet_bytes;
+    use crate::launch::Creds;
+    use crate::model::Entry;
+    let cmd = "ping -c1 {host} # {user}@{name}";
+    let a = Entry { name: "web01".into(), host: " 10.0.0.1 ".into(), ..Default::default() };
+    let b = Entry { name: "db01".into(), host: "10.0.0.2".into(), ..Default::default() };
+    let ca = Creds { user: "alice".into(), password: "secret-a".into(), ..Default::default() };
+    let cb = Creds { user: "bob".into(), password: "secret-b".into(), ..Default::default() };
+    assert_eq!(snippet_bytes(cmd, &a, &ca), b"ping -c1 10.0.0.1 # alice@web01\r".to_vec());
+    assert_eq!(snippet_bytes(cmd, &b, &cb), b"ping -c1 10.0.0.2 # bob@db01\r".to_vec());
+    // the password is never a placeholder
+    assert!(!String::from_utf8_lossy(&snippet_bytes("{password}", &a, &ca)).contains("secret"));
+}
+
+#[test]
+fn dns_late_answer_does_not_overwrite_a_newer_query() {
+    // B2: every query gets its own result slot
+    use crate::app::fresh_dns_slot;
+    use std::sync::{Arc, Mutex};
+    type Slot = Arc<Mutex<Option<Result<Vec<String>, String>>>>;
+    let mut shown: Slot = Default::default();
+    let first = fresh_dns_slot(&mut shown);
+    let second = fresh_dns_slot(&mut shown);
+    *second.lock().unwrap() = Some(Ok(vec!["2001:db8::1".into()]));
+    // the first lookup answers late
+    *first.lock().unwrap() = Some(Ok(vec!["192.0.2.1".into()]));
+    assert_eq!(shown.lock().unwrap().clone(), Some(Ok(vec!["2001:db8::1".to_string()])));
+    // a new query starts empty, even while an older lookup still runs
+    let _third = fresh_dns_slot(&mut shown);
+    assert!(shown.lock().unwrap().is_none());
+}
+
+#[test]
+fn output_lines_and_transfer_rows() {
+    // P7: the colour of a ping line; P8: which remote rows the list shows
+    use crate::app::{LineTone, line_tone, visible_rows};
+    assert_eq!(line_tone("64 bytes from 10.0.0.1: icmp_seq=1 ttl=64 time=0.3 ms"), LineTone::Good);
+    assert_eq!(line_tone("Reply from 10.0.0.1: bytes=32 time<1ms TTL=128"), LineTone::Good);
+    assert_eq!(line_tone("Antwort von 10.0.0.1: Bytes=32 Zeit<1ms TTL=128"), LineTone::Good);
+    assert_eq!(line_tone("Request timed out."), LineTone::Bad);
+    assert_eq!(line_tone("Destination host unreachable."), LineTone::Bad);
+    assert_eq!(line_tone("Zeitüberschreitung der Anforderung."), LineTone::Bad);
+    assert_eq!(line_tone("Pinging 10.0.0.1 with 32 bytes of data:"), LineTone::Normal);
+    let item = |name: &str| crate::transfer::RemoteItem {
+        name: name.into(),
+        is_dir: false,
+        is_link: false,
+        size: 0,
+        modified: String::new(),
+        perms: String::new(),
+    };
+    let items = vec![item(".ssh"), item("a.txt"), item(".bashrc"), item("b")];
+    assert_eq!(visible_rows(&items, false), vec![1, 3]);
+    assert_eq!(visible_rows(&items, true), vec![0, 1, 2, 3]);
+    assert!(visible_rows(&[], false).is_empty());
+}
+
+#[test]
+fn repaint_only_as_often_as_needed() {
+    // P10: no four frames a second for as long as something runs
+    use crate::app::keep_alive_interval;
+    use std::time::Duration;
+    assert_eq!(keep_alive_interval(true, true), Some(Duration::from_millis(250)), "a window to put into its tab");
+    assert_eq!(keep_alive_interval(false, true), Some(Duration::from_secs(1)));
+    assert_eq!(keep_alive_interval(false, false), None);
+}
