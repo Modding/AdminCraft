@@ -1946,3 +1946,174 @@ fn mcp_initialize_answers_a_supported_version() {
     assert!(e.contains("65535"), "{e}");
     assert!(crate::agent::call("check_certificate", &serde_json::json!({"host": "example.invalid", "port": 0})).is_err());
 }
+
+// ---------------------------------------------------------------- code review 2026-11-18, app part 1
+
+#[test]
+fn file_app_url_has_no_password_and_brackets_ipv6() {
+    // S4: the function has no password parameter, so nothing secret can reach the command line
+    use crate::app::file_app_url;
+    assert_eq!(file_app_url("sftp", "root", "10.0.0.5", 0, ""), "sftp://root@10.0.0.5");
+    assert_eq!(file_app_url("sftp", "a b@c", " srv ", 2222, "/var/www"), "sftp://a%20b%40c@srv:2222/var/www");
+    assert_eq!(file_app_url("ftp", "", "fe80::1", 21, ""), "ftp://[fe80::1]:21");
+    assert_eq!(file_app_url("sftp", "", "fe80::1%eth0", 0, ""), "sftp://[fe80::1%25eth0]");
+    assert_eq!(file_app_url("scp", "u", "[::1]", 22, ""), "scp://u@[::1]:22", "already bracketed");
+}
+
+#[test]
+fn duplicate_is_not_tied_to_the_keepass_entry() {
+    // D4
+    let e = crate::model::Entry { id: 7, name: "web".into(), kp_id: "abc-uuid".into(), host: "h".into(), ..Default::default() };
+    let copy = crate::app::duplicate_entry(&e, 8);
+    assert_eq!(copy.id, 8);
+    assert!(copy.kp_id.is_empty());
+    assert_eq!(copy.host, "h");
+    assert_eq!(copy.name, "web (copy)");
+}
+
+#[test]
+fn showing_a_port_does_not_change_it() {
+    // D11: port 0 (= default) and odd tunnel ports from a data file stay as they are when drawn
+    let ctx = eframe::egui::Context::default();
+    let (mut port, mut tport, mut tport2) = (0u16, 0u16, 65535u16);
+    for _ in 0..2 {
+        ctx.run_ui(Default::default(), |ui| {
+            ui.add(crate::app::port_edit(&mut port));
+            ui.add(crate::app::tunnel_port_edit(&mut tport));
+            ui.add(crate::app::tunnel_port_edit(&mut tport2));
+        })
+        .drop_without_applying_deltas();
+    }
+    assert_eq!(port, 0);
+    assert_eq!(tport, 0);
+    assert_eq!(tport2, 65535);
+}
+
+#[test]
+fn power_command_only_goes_to_the_new_tab() {
+    // D12: tabs are (id, terminal running); the id counter was 5 before the session was started
+    use crate::app::power_tab;
+    assert_eq!(power_tab(5, &[(0, false), (3, true), (4, true)]), None, "no new tab: never the last old one");
+    assert_eq!(power_tab(5, &[(0, false), (3, true), (5, false)]), None, "new tab, session failed");
+    assert_eq!(power_tab(5, &[(0, false), (3, true), (5, true)]), Some(2));
+    assert_eq!(power_tab(5, &[(0, false), (5, true), (3, true)]), Some(1), "found by id, not position");
+}
+
+#[test]
+fn tunnel_runs_follow_their_tunnel() {
+    // D17
+    use crate::app::{TunnelSpec, tunnel_moves};
+    let spec = |l: u16, h: &str, r: u16| TunnelSpec { local_port: l, remote_host: h.into(), remote_port: r };
+    let a = spec(8080, "localhost", 80);
+    let b = spec(8443, "10.0.0.1", 443);
+    let runs = vec![((1, 0), a.clone()), ((1, 1), b.clone()), ((2, 0), a.clone())];
+    // connection 1: the first tunnel was removed, b is now at 0; connection 2 is gone
+    let mut moves = tunnel_moves(&runs, |id| if id == 1 { Some(vec![b.clone()]) } else { None });
+    moves.sort();
+    assert_eq!(moves, vec![((1, 0), None), ((1, 1), Some((1, 0))), ((2, 0), None)]);
+    // unchanged list: everything stays
+    let moves = tunnel_moves(&runs[..2], |_| Some(vec![a.clone(), b.clone()]));
+    assert!(moves.iter().all(|(f, t)| Some(*f) == *t));
+    // an edited port: the old run doesn't belong to the row any more
+    let moves = tunnel_moves(&runs[..1], |_| Some(vec![spec(9090, "localhost", 80)]));
+    assert_eq!(moves, vec![((1, 0), None)]);
+    // two equal tunnels: each run keeps its own row
+    let moves = tunnel_moves(&[((1, 0), a.clone()), ((1, 1), a.clone())], |_| Some(vec![a.clone(), a.clone()]));
+    assert_eq!(moves.len(), 2);
+    assert!(moves.iter().all(|(f, t)| Some(*f) == *t));
+}
+
+#[test]
+fn tree_with_repeated_ids_stays_small() {
+    // C3 / P4: 30 nested folders, each twice under the same id, used to draw 2^30 rows
+    use crate::model::Entry;
+    let mut entries = Vec::new();
+    for level in 0..30u64 {
+        for _ in 0..2 {
+            entries.push(Entry {
+                id: level + 1,
+                parent: if level == 0 { None } else { Some(level) },
+                folder: true,
+                expanded: true,
+                ..Default::default()
+            });
+        }
+    }
+    let rows = crate::app::tree_rows(&entries);
+    assert_eq!(rows.len(), 30);
+    assert_eq!(rows.iter().map(|r| r.1).max(), Some(29));
+    // an entry that is its own parent, and a loop, are never reached from the top
+    entries.push(Entry { id: 100, parent: Some(100), folder: true, ..Default::default() });
+    entries.push(Entry { id: 101, parent: Some(102), folder: true, ..Default::default() });
+    entries.push(Entry { id: 102, parent: Some(101), folder: true, ..Default::default() });
+    assert_eq!(crate::app::tree_rows(&entries).len(), 30);
+}
+
+#[test]
+fn tree_rows_keep_order_depth_and_collapsed_folders() {
+    use crate::model::Entry;
+    let f = |id, parent, expanded| Entry { id, parent, folder: true, expanded, ..Default::default() };
+    let c = |id, parent| Entry { id, parent, ..Default::default() };
+    let entries = vec![f(1, None, true), c(2, Some(1)), f(3, Some(1), false), c(4, Some(3)), c(5, None), c(6, Some(1))];
+    let ids: Vec<(u64, usize)> = crate::app::tree_rows(&entries).into_iter().map(|(i, d)| (entries[i].id, d)).collect();
+    assert_eq!(ids, vec![(1, 0), (2, 1), (3, 1), (6, 1), (5, 0)]);
+    // depth is limited as before (32 levels below the top)
+    let deep: Vec<Entry> = (0..40u64).map(|i| f(i + 1, if i == 0 { None } else { Some(i) }, true)).collect();
+    assert_eq!(crate::app::tree_rows(&deep).len(), 33);
+}
+
+#[test]
+fn search_finds_connections_only() {
+    // P6
+    use crate::model::Entry;
+    let entries = vec![
+        Entry { id: 1, folder: true, name: "Web".into(), ..Default::default() },
+        Entry { id: 2, name: "web01".into(), ..Default::default() },
+        Entry { id: 3, name: "db".into(), host: "WEB-db.lan".into(), ..Default::default() },
+        Entry { id: 4, name: "x".into(), description: "nothing".into(), ..Default::default() },
+    ];
+    assert_eq!(crate::app::search_hits(&entries, "web"), vec![2, 3]);
+    assert!(crate::app::search_hits(&entries, "zzz").is_empty());
+}
+
+#[test]
+fn monitoring_reports_only_changes() {
+    // P19
+    use std::collections::HashMap;
+    let mut prev = HashMap::new();
+    let mut cur: HashMap<u64, Option<bool>> = HashMap::from([(1, Some(true)), (2, None)]);
+    assert!(crate::app::status_changes(&cur, &mut prev).is_empty(), "first look: nothing to compare");
+    cur.insert(1, Some(false));
+    cur.insert(2, Some(true));
+    assert_eq!(crate::app::status_changes(&cur, &mut prev), vec![(1, false)]);
+    assert!(crate::app::status_changes(&cur, &mut prev).is_empty(), "told once");
+    cur.insert(1, None); // a check running again keeps the last known state
+    assert!(crate::app::status_changes(&cur, &mut prev).is_empty());
+    assert_eq!(prev.get(&1), Some(&Some(false)));
+}
+
+#[test]
+fn shortcuts_off_while_locked_or_in_a_dialog() {
+    // C14
+    use crate::app::shortcut_allowed;
+    assert!(shortcut_allowed(false, false, false));
+    assert!(!shortcut_allowed(true, false, false));
+    assert!(!shortcut_allowed(false, true, false));
+    assert!(shortcut_allowed(true, true, true), "F1 always");
+}
+
+#[test]
+fn open_connect_picks_a_connection_not_a_folder() {
+    // B14
+    use crate::model::Entry;
+    let entries = vec![
+        Entry { id: 1, folder: true, name: "Servers".into(), ..Default::default() },
+        Entry { id: 2, name: "web servers proxy".into(), ..Default::default() },
+        Entry { id: 3, name: "servers".into(), ..Default::default() },
+    ];
+    assert_eq!(crate::app::find_connection(&entries, "Servers"), Some(3), "exact name first, never the folder");
+    assert_eq!(crate::app::find_connection(&entries, "proxy"), Some(2));
+    assert_eq!(crate::app::find_connection(&entries, ""), None);
+    assert_eq!(crate::app::find_connection(&entries, "  "), None);
+    assert_eq!(crate::app::find_connection(&entries[..1], "serv"), None);
+}

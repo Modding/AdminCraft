@@ -888,3 +888,9 @@ Old PuTTY (before 0.77): the password is on its command line, please update PuTT
 Referral to {0} was not followed (not a public WHOIS server). = Renvoi vers {0} non suivi (pas un serveur WHOIS public).
 The recording is too large to play (more than {0} MiB). = L’enregistrement est trop volumineux pour être lu (plus de {0} Mio).
 No thread could be started: {0} = Impossible de démarrer un thread : {0}
+{0} opened: {1} – it asks for the password itself. = {0} ouvert : {1} – le programme demande lui-même le mot de passe.
+The SSH session to {0} could not start – nothing was sent. = La session SSH vers {0} n’a pas pu démarrer – rien n’a été envoyé.
+Sending the command to {0} … = Envoi de la commande à {0} …
+(default port {0}) = (port par défaut {0})
+{0} more connections are waiting for their password. = {0} autres connexions attendent leur mot de passe.
+Cancel all = Tout annuler

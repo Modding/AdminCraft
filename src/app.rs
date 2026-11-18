@@ -6,13 +6,13 @@ use crate::extra::{self, NetScanAct, TunnelAct};
 use crate::i18n::{t as tr, tf};
 use crate::keepass_vault::KeePassVault;
 use crate::launch::{self, Creds, JumpHop, Launch};
-use crate::model::{CredSource, Entry, JumpMode, Protocol, SshClient, Store, TransferTool};
+use crate::model::{CredSource, Entry, JumpMode, Protocol, SshClient, Store, TransferTool, Tunnel};
 use crate::programs;
 use crate::terminal::Terminal;
 use crate::tools::{self, CmdRunner, PortScan, StatusMap};
 use crate::transfer::{self, Job, Kind, LocalItem, Transfer};
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
@@ -231,6 +231,204 @@ struct Shot {
 /// Where the update check (running in its own thread) puts what it found.
 type UpdateSlot = std::sync::Arc<std::sync::Mutex<Option<Result<crate::update::Outcome, String>>>>;
 
+/// Results of "restart / shut down" sent with `shutdown /m` in a background thread.
+type PowerResults = Arc<Mutex<Vec<Result<String, String>>>>;
+
+/// A tunnel run's place: (connection id, position in its tunnel list).
+pub(crate) type TunnelKey = (u64, usize);
+
+/// What a running SSH tunnel was started with, so it is found again (or stopped) after the
+/// connection's tunnels were edited, reordered or removed.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) struct TunnelSpec {
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+impl TunnelSpec {
+    pub(crate) fn of(t: &Tunnel) -> Self {
+        TunnelSpec { local_port: t.local_port, remote_host: t.remote_host.trim().to_string(), remote_port: t.remote_port }
+    }
+}
+
+/// Where each running tunnel belongs now: `(old key, new key)`, None = its tunnel or connection is
+/// gone (stop it). `tunnels_of` gives the current tunnels of a connection (None = no such entry).
+pub(crate) fn tunnel_moves(
+    runs: &[(TunnelKey, TunnelSpec)],
+    tunnels_of: impl Fn(u64) -> Option<Vec<TunnelSpec>>,
+) -> Vec<(TunnelKey, Option<TunnelKey>)> {
+    let mut taken: HashSet<TunnelKey> = HashSet::new();
+    let mut out = Vec::new();
+    // runs still at their place keep it first, so a moved one can't take it
+    let mut rest = Vec::new();
+    for (key, spec) in runs {
+        let now = tunnels_of(key.0);
+        if now.as_ref().and_then(|v| v.get(key.1)) == Some(spec) {
+            taken.insert(*key);
+            out.push((*key, Some(*key)));
+        } else {
+            rest.push((*key, spec, now));
+        }
+    }
+    for (key, spec, now) in rest {
+        let to = now.and_then(|v| v.iter().enumerate().find(|(i, t)| *t == spec && !taken.contains(&(key.0, *i))).map(|(i, _)| (key.0, i)));
+        if let Some(t) = to {
+            taken.insert(t);
+        }
+        out.push((key, to));
+    }
+    out
+}
+
+/// The address WinSCP / FileZilla get. Never the password: the program asks for it itself (a
+/// command line can be read by other programs). IPv6 literals go in brackets.
+pub(crate) fn file_app_url(scheme: &str, user: &str, host: &str, port: u16, start_path: &str) -> String {
+    let mut url = format!("{scheme}://");
+    if !user.is_empty() {
+        url.push_str(&url_enc(user));
+        url.push('@');
+    }
+    let host = host.trim();
+    if host.contains(':') && !host.starts_with('[') {
+        url.push('[');
+        url.push_str(&host.replace('%', "%25"));
+        url.push(']');
+    } else {
+        url.push_str(host);
+    }
+    if port != 0 {
+        url.push_str(&format!(":{port}"));
+    }
+    if !start_path.trim().is_empty() {
+        url.push_str(&format!("/{}", start_path.trim().trim_start_matches('/')));
+    }
+    url
+}
+
+/// The tab "restart / shut down over SSH" may type into: one opened after `first_new` (the tab
+/// id counter before the session was started) whose terminal is running. Never an older tab.
+pub(crate) fn power_tab(first_new: u64, tabs: &[(u64, bool)]) -> Option<usize> {
+    tabs.iter().position(|&(id, running)| id >= first_new && running)
+}
+
+/// `--open connect:NAME`: a connection (never a folder) with that name, else the first whose
+/// name contains it. An empty name picks nothing.
+pub(crate) fn find_connection(entries: &[Entry], name: &str) -> Option<u64> {
+    let want = name.trim().to_lowercase();
+    if want.is_empty() {
+        return None;
+    }
+    let conns = || entries.iter().filter(|e| !e.folder);
+    conns().find(|e| e.name.trim().to_lowercase() == want).or_else(|| conns().find(|e| e.name.to_lowercase().contains(&want))).map(|e| e.id)
+}
+
+/// A copy of a connection under a new id. It is not tied to the original's KeePass entry, or
+/// saving it would overwrite that entry (KeePass as connection list).
+pub(crate) fn duplicate_entry(e: &Entry, id: u64) -> Entry {
+    let mut copy = e.clone();
+    copy.id = id;
+    copy.kp_id.clear();
+    copy.name = tf("{0} (copy)", &[&e.name]);
+    copy
+}
+
+/// The rows of the connection tree in drawing order: (index into `entries`, depth). Each id is
+/// drawn once, so repeated ids or parent loops in a data file can't make the tree grow; the
+/// child lists are built once instead of a search per row.
+pub(crate) fn tree_rows(entries: &[Entry]) -> Vec<(usize, usize)> {
+    let mut kids: HashMap<Option<u64>, Vec<usize>> = HashMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        kids.entry(e.parent).or_default().push(i);
+    }
+    let mut seen: HashSet<u64> = HashSet::new();
+    let mut rows = Vec::new();
+    let mut stack: Vec<(usize, usize)> = kids.get(&None).map(|k| k.iter().rev().map(|&i| (i, 0)).collect()).unwrap_or_default();
+    while let Some((i, depth)) = stack.pop() {
+        let Some(e) = entries.get(i) else { continue };
+        if !seen.insert(e.id) {
+            continue;
+        }
+        rows.push((i, depth));
+        if e.folder
+            && e.expanded
+            && depth < 32
+            && let Some(k) = kids.get(&Some(e.id))
+        {
+            stack.extend(k.iter().rev().map(|&c| (c, depth + 1)));
+        }
+    }
+    rows
+}
+
+/// Connections matching the search text (already trimmed and lowercased).
+pub(crate) fn search_hits(entries: &[Entry], filter: &str) -> Vec<u64> {
+    entries
+        .iter()
+        .filter(|e| !e.folder)
+        .filter(|e| {
+            e.name.to_lowercase().contains(filter)
+                || e.host.to_lowercase().contains(filter)
+                || e.username.to_lowercase().contains(filter)
+                || e.description.to_lowercase().contains(filter)
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
+/// The search result of the last frames: valid while the search text and the list are the same.
+struct SearchCache {
+    filter: String,
+    stamp: (u64, usize, usize),
+    /// Connection id and the path of its folder.
+    hits: Vec<(u64, Option<String>)>,
+}
+
+/// Hosts whose reachability changed since the last look (`prev` is updated): (id, reachable).
+pub(crate) fn status_changes(cur: &HashMap<u64, Option<bool>>, prev: &mut HashMap<u64, Option<bool>>) -> Vec<(u64, bool)> {
+    let mut changes = Vec::new();
+    for (id, st) in cur {
+        let Some(new) = st else { continue };
+        if let Some(Some(old)) = prev.get(id)
+            && new != old
+        {
+            changes.push((*id, *new));
+        }
+        prev.insert(*id, Some(*new));
+    }
+    changes
+}
+
+/// Keyboard shortcuts are off while the list is locked or a modal dialog is open, except F1.
+pub(crate) fn shortcut_allowed(locked: bool, modal_open: bool, is_help_key: bool) -> bool {
+    is_help_key || !(locked || modal_open)
+}
+
+/// Folders an entry can be put into (not itself or one below it), sorted by path. Only built
+/// while the list or menu showing them is open.
+fn folder_choices(store: &Store, id: u64) -> Vec<(u64, String)> {
+    store.folders().into_iter().filter(|(f, _)| *f != id && !store.is_descendant(*f, id)).collect()
+}
+
+/// Whether `j` can be the jump host of `id`: an SSH connection that doesn't lead back to `id`.
+fn jump_ok(store: &Store, id: u64, j: &Entry) -> bool {
+    !j.folder && j.protocol == Protocol::Ssh && j.id != id && !store.jump_chain(j.id).contains(&id)
+}
+
+fn jump_label(j: &Entry) -> String {
+    format!("{} ({})", j.name, j.host)
+}
+
+/// The port field: 0 means the protocol's default port and stays 0 when the entry is only shown.
+pub(crate) fn port_edit(port: &mut u16) -> egui::DragValue<'_> {
+    egui::DragValue::new(port).range(0..=65535)
+}
+
+/// A tunnel port: a value from the data file outside 1..=65535 is left alone until edited.
+pub(crate) fn tunnel_port_edit(port: &mut u16) -> egui::DragValue<'_> {
+    egui::DragValue::new(port).range(1..=65535).clamp_existing_to_range(false)
+}
+
 pub struct AdminApp {
     store: Store,
     selected: Option<u64>,
@@ -281,7 +479,9 @@ pub struct AdminApp {
     kp_pw: String,
     kp_msg: Option<(bool, String)>,
     kp_pending: Vec<Pending>,
+    /// The password question shown now; more wait in `ask_queue` ("Open all").
     ask: Option<AskState>,
+    ask_queue: VecDeque<AskState>,
     session_pw: HashMap<u64, String>,
     /// Where the active tab's content is drawn (points), for placing embedded windows.
     embed_rect: Option<Rect>,
@@ -319,9 +519,20 @@ pub struct AdminApp {
     shot_pending: Option<Rect>,
     pwgen: extra::PwGen,
     tunnels: HashMap<(u64, usize), extra::TunnelRun>,
+    /// What each run in `tunnels` was started with (to follow edits of the connection's tunnels).
+    tunnel_specs: HashMap<(u64, usize), TunnelSpec>,
     confirm_power: Option<(u64, bool)>,
+    power_results: PowerResults,
     next_monitor: f64,
+    /// When the reachability results are compared next (not every frame).
+    monitor_diff_at: f64,
     monitor_prev: HashMap<u64, Option<bool>>,
+    /// Only folders were opened or closed: saved with the next real save or at exit, so the
+    /// (shared, KeePass) list isn't rewritten for every click in the tree.
+    view_dirty: bool,
+    /// Counts the changes made to the list here (for `search_cache`).
+    data_gen: u64,
+    search_cache: Option<SearchCache>,
     last_reload_check: f64,
     restored: bool,
     shared_edit: String,
@@ -393,6 +604,7 @@ impl AdminApp {
             kp_msg: None,
             kp_pending: Vec::new(),
             ask: None,
+            ask_queue: VecDeque::new(),
             session_pw: HashMap::new(),
             embed_rect: None,
             last_content: Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 640.0)),
@@ -427,9 +639,15 @@ impl AdminApp {
             shot_pending: None,
             pwgen: extra::PwGen::default(),
             tunnels: HashMap::new(),
+            tunnel_specs: HashMap::new(),
             confirm_power: None,
+            power_results: Default::default(),
             next_monitor: 0.0,
+            monitor_diff_at: 0.0,
             monitor_prev: HashMap::new(),
+            view_dirty: false,
+            data_gen: 0,
+            search_cache: None,
             last_reload_check: 0.0,
             restored: false,
             shared_edit: crate::model::shared_location(),
@@ -555,7 +773,7 @@ impl AdminApp {
                     }
                 }
                 "connect" => {
-                    if let Some(id) = app.store.data.entries.iter().find(|e| e.name.to_lowercase().contains(&host.to_lowercase())).map(|e| e.id) {
+                    if let Some(id) = find_connection(&app.store.data.entries, &host) {
                         app.selected = Some(id);
                         app.start(id, How::Default, &ctx, 0.0);
                     }
@@ -572,6 +790,45 @@ impl AdminApp {
 
     fn mark_dirty(&mut self, now: f64) {
         self.dirty_since = Some(now);
+        self.data_gen = self.data_gen.wrapping_add(1);
+        // the save that follows carries the folders' open/closed state along
+        self.view_dirty = false;
+    }
+
+    /// A password question; when one is already shown, it waits its turn.
+    fn ask_push(&mut self, a: AskState) {
+        let same = |x: &AskState| x.key == a.key && x.pending.entry.id == a.pending.entry.id && x.pending.how == a.pending.how && a.key != 0;
+        if self.ask.as_ref().is_some_and(same) || self.ask_queue.iter().any(same) {
+            return;
+        }
+        if self.ask.is_none() {
+            self.ask = Some(a);
+        } else {
+            self.ask_queue.push_back(a);
+        }
+    }
+
+    /// The next waiting password question, once the shown one is answered or cancelled. One whose
+    /// password was given meanwhile (a shared jump host) is not asked again.
+    fn ask_next(&mut self, ctx: &egui::Context, now: f64) {
+        while self.ask.is_none() {
+            let Some(a) = self.ask_queue.pop_front() else { break };
+            if a.key != 0 && self.session_pw.contains_key(&a.key) {
+                self.start(a.pending.entry.id, a.pending.how, ctx, now);
+            } else {
+                self.ask = Some(a);
+            }
+        }
+    }
+
+    /// A modal dialog is open (shortcuts stay off then).
+    fn modal_open(&self) -> bool {
+        self.confirm_delete.is_some()
+            || self.confirm_power.is_some()
+            || self.kp_dialog
+            || self.kp_save.is_some()
+            || self.ask.is_some()
+            || self.tabs.iter().any(|t| matches!(&t.kind, TabKind::Transfer(x) if x.dialog.is_some()))
     }
 
     fn note(&mut self, text: impl Into<String>, error: bool, now: f64) {
@@ -770,7 +1027,13 @@ impl AdminApp {
     fn shortcuts(&mut self, ctx: &egui::Context, now: f64) {
         use egui::{Key, KeyboardShortcut, Modifiers};
         let cs = |k| KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, k);
-        let hit = |sc: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&sc));
+        // while the list is locked or a dialog asks something, only F1 works (no tab closes or new
+        // entry behind the dialog)
+        let (locked, modal) = (self.store.locked(), self.modal_open());
+        let hit = |sc: KeyboardShortcut| {
+            shortcut_allowed(locked, modal, sc.logical_key == Key::F1 && sc.modifiers == Modifiers::NONE)
+                && ctx.input_mut(|i| i.consume_shortcut(&sc))
+        };
         let n = self.tabs.len().max(1);
         if hit(cs(Key::Tab)) {
             self.active = (self.active + n - 1) % n;
@@ -861,24 +1124,88 @@ impl AdminApp {
     }
 
     fn tunnel_running(&mut self, id: u64, idx: usize) -> bool {
+        self.sync_tunnels();
         self.tunnels.get_mut(&(id, idx)).and_then(|r| r.child.as_mut()).map(|c| matches!(c.try_wait(), Ok(None))).unwrap_or(false)
     }
 
+    /// Ends a tunnel's ssh and forgets the run.
+    fn stop_tunnel(&mut self, key: (u64, usize)) {
+        self.tunnel_specs.remove(&key);
+        if let Some(mut r) = self.tunnels.remove(&key)
+            && let Some(mut c) = r.child.take()
+        {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+
+    /// Runs are kept by (connection, position): after the connection's tunnels were edited,
+    /// reordered or removed (or the connection deleted), move each run to where its tunnel is now,
+    /// or stop it, so no ssh keeps running unseen and no row shows another tunnel's state.
+    fn sync_tunnels(&mut self) {
+        if self.tunnels.is_empty() && self.tunnel_specs.is_empty() {
+            return;
+        }
+        // a run without a known spec (should not happen) can't be followed: stop it
+        let orphans: Vec<(u64, usize)> = self.tunnels.keys().filter(|k| !self.tunnel_specs.contains_key(k)).copied().collect();
+        for k in orphans {
+            self.stop_tunnel(k);
+        }
+        let runs: Vec<((u64, usize), TunnelSpec)> = self.tunnel_specs.iter().map(|(k, s)| (*k, s.clone())).collect();
+        let store = &self.store;
+        let moves = tunnel_moves(&runs, |id| store.get(id).map(|e| e.tunnels.iter().map(TunnelSpec::of).collect()));
+        if moves.iter().all(|(from, to)| Some(*from) == *to) {
+            return;
+        }
+        let mut runs_now = HashMap::new();
+        let mut specs_now = HashMap::new();
+        for (from, to) in moves {
+            let run = self.tunnels.remove(&from);
+            let spec = self.tunnel_specs.remove(&from);
+            match (to, run, spec) {
+                (Some(to), Some(run), Some(spec)) => {
+                    runs_now.insert(to, run);
+                    specs_now.insert(to, spec);
+                }
+                (_, run, _) => {
+                    if let Some(mut c) = run.and_then(|mut r| r.child.take()) {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                }
+            }
+        }
+        // anything left over had no spec (handled above); stop it to be safe
+        let left: Vec<(u64, usize)> = self.tunnels.keys().copied().collect();
+        for k in left {
+            self.stop_tunnel(k);
+        }
+        self.tunnels = runs_now;
+        self.tunnel_specs = specs_now;
+    }
+
     fn start_tunnel(&mut self, id: u64, idx: usize, now: f64) {
+        self.sync_tunnels();
         let Some(e) = self.store.get(id).cloned() else { return };
         let Some(t) = e.tunnels.get(idx).cloned() else { return };
         let label = format!("{} :{} » {}:{}", e.name, t.local_port, t.remote_host, t.remote_port);
         match self.resolve(id) {
-            Ok((c, jumps, _)) => match extra::start_tunnel(&e, &c, &jumps, &t, &self.store.data.settings) {
-                Ok(child) => {
-                    self.tunnels.insert((id, idx), extra::TunnelRun { child: Some(child), label: label.clone(), error: None });
-                    self.note(tf("Tunnel started: {0}", &[&label]), false, now);
+            Ok((c, jumps, _)) => {
+                // an old run in this place ends before the new one takes it
+                self.stop_tunnel((id, idx));
+                match extra::start_tunnel(&e, &c, &jumps, &t, &self.store.data.settings) {
+                    Ok(child) => {
+                        self.tunnels.insert((id, idx), extra::TunnelRun { child: Some(child), label: label.clone(), error: None });
+                        self.tunnel_specs.insert((id, idx), TunnelSpec::of(&t));
+                        self.note(tf("Tunnel started: {0}", &[&label]), false, now);
+                    }
+                    Err(err) => {
+                        self.tunnels.insert((id, idx), extra::TunnelRun { child: None, label, error: Some(err.clone()) });
+                        self.tunnel_specs.insert((id, idx), TunnelSpec::of(&t));
+                        self.note(err, true, now);
+                    }
                 }
-                Err(err) => {
-                    self.tunnels.insert((id, idx), extra::TunnelRun { child: None, label, error: Some(err.clone()) });
-                    self.note(err, true, now);
-                }
-            },
+            }
             Err(Need::KeePass) => self.note(tr("Unlock KeePass first for the tunnel."), true, now),
             Err(Need::Ask(_)) => self.note(tr("Connect once first for the tunnel (the password is asked)."), true, now),
         }
@@ -895,22 +1222,17 @@ impl AdminApp {
             self.check_status(ctx);
         }
         ctx.request_repaint_after(std::time::Duration::from_secs(5));
-        let cur = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let mut changes = Vec::new();
-        for (id, st) in &cur {
-            if let (Some(new), Some(Some(old))) = (st, self.monitor_prev.get(id))
-                && new != old
-            {
-                let name = self.store.get(*id).map(|e| e.name.clone()).unwrap_or_default();
-                changes.push((name, *new));
-            }
+        // the checks take seconds: compare now and then, not on every frame, and without a copy
+        if now < self.monitor_diff_at {
+            return;
         }
-        for (k, v) in cur {
-            if v.is_some() {
-                self.monitor_prev.insert(k, v);
-            }
-        }
-        for (name, up) in changes {
+        self.monitor_diff_at = now + 2.0;
+        let changes = {
+            let cur = self.status.lock().unwrap_or_else(|e| e.into_inner());
+            status_changes(&cur, &mut self.monitor_prev)
+        };
+        for (id, up) in changes {
+            let name = self.store.get(id).map(|e| e.name.clone()).unwrap_or_default();
             if up {
                 self.note(tf("Reachable again: {0}", &[&name]), false, now);
             } else {
@@ -920,6 +1242,14 @@ impl AdminApp {
     }
 
     fn power_dialog(&mut self, ctx: &egui::Context, now: f64) {
+        // answers of `shutdown /m` sent earlier (it runs in the background, it can take long)
+        let done: Vec<Result<String, String>> = std::mem::take(&mut *self.power_results.lock().unwrap_or_else(|e| e.into_inner()));
+        for r in done {
+            match r {
+                Ok(m) => self.note(m, false, now),
+                Err(err) => self.note(err, true, now),
+            }
+        }
         let Some((id, reboot)) = self.confirm_power else { return };
         let Some(e) = self.store.get(id).cloned() else {
             self.confirm_power = None;
@@ -953,19 +1283,32 @@ impl AdminApp {
                         Ok((c, jumps, _)) => {
                             let mut se = e.clone();
                             se.ssh_client = crate::model::SshClient::Builtin;
+                            // only the tab opened right now gets the command, never an older one
+                            let first_new = self.next_tab;
                             self.open_session(se, c, jumps, ctx, now);
-                            if let Some(Tab { kind: TabKind::Term(t), .. }) = self.tabs.last_mut()
-                                && let Some(term) = &mut t.term
-                            {
-                                term.queue_command(if reboot { "sudo reboot".into() } else { "sudo poweroff".into() });
+                            let tabs: Vec<(u64, bool)> =
+                                self.tabs.iter().map(|t| (t.id, matches!(&t.kind, TabKind::Term(x) if x.term.is_some()))).collect();
+                            match power_tab(first_new, &tabs).and_then(|i| self.tabs.get_mut(i)) {
+                                Some(Tab { kind: TabKind::Term(t), .. }) if t.term.is_some() => {
+                                    if let Some(term) = &mut t.term {
+                                        term.queue_command(if reboot { "sudo reboot".into() } else { "sudo poweroff".into() });
+                                    }
+                                }
+                                _ => self.note(tf("The SSH session to {0} could not start – nothing was sent.", &[&e.name]), true, now),
                             }
                         }
                         Err(_) => self.note(tr("Connect once first (unlock KeePass / enter password)."), true, now),
                     }
                 } else {
-                    match extra::windows_power(&e.host, reboot) {
-                        Ok(m) => self.note(m, false, now),
-                        Err(err) => self.note(err, true, now),
+                    let (slot, ctx2, host) = (self.power_results.clone(), ctx.clone(), e.host.clone());
+                    let started = std::thread::Builder::new().name("power".into()).spawn(move || {
+                        let r = extra::windows_power(&host, reboot);
+                        slot.lock().unwrap_or_else(|e| e.into_inner()).push(r);
+                        ctx2.request_repaint();
+                    });
+                    match started {
+                        Ok(_) => self.log.push(tf("Sending the command to {0} …", &[&e.host.trim()])),
+                        Err(err) => self.note(err.to_string(), true, now),
                     }
                 }
             }
@@ -1201,7 +1544,7 @@ impl AdminApp {
             Err(Need::Ask(key)) => {
                 let name = self.store.get(key).map(|x| x.name.clone()).unwrap_or_default();
                 let user = self.store.credential_info(key).user;
-                self.ask = Some(AskState { pending: Pending { entry: e, how }, key, name, user, pw: String::new(), focus: true });
+                self.ask_push(AskState { pending: Pending { entry: e, how }, key, name, user, pw: String::new(), focus: true });
             }
             Ok((c, jumps, warns)) => {
                 for w in warns {
@@ -1242,28 +1585,22 @@ impl AdminApp {
                     Protocol::Scp => "scp",
                     _ => "sftp",
                 };
-                let mut url = format!("{scheme}://");
-                if !c.user.is_empty() {
-                    url.push_str(&url_enc(&c.user));
-                    if !c.password.is_empty() {
-                        url.push(':');
-                        url.push_str(&url_enc(&c.password));
-                    }
-                    url.push('@');
-                }
-                url.push_str(e.host.trim());
-                if e.port != 0 {
-                    url.push_str(&format!(":{}", e.port));
-                }
-                if !e.start_path.trim().is_empty() {
-                    url.push_str(&format!("/{}", e.start_path.trim().trim_start_matches('/')));
-                }
+                // no password on the command line: WinSCP / FileZilla ask for it themselves
+                let url = file_app_url(scheme, &c.user, &e.host, e.port, &e.start_path);
                 match std::process::Command::new(&prog).arg(&url).spawn() {
-                    Ok(_) => self.note(
-                        tf("{0} opened: {1}", &[&(prog.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()), &(e.host.trim())]),
-                        false,
-                        now,
-                    ),
+                    Ok(mut child) => {
+                        // reap it when it ends (no zombie on Linux / macOS)
+                        let _ = std::thread::Builder::new().name("file-app".into()).spawn(move || {
+                            let _ = child.wait();
+                        });
+                        let name = prog.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                        let text = if c.password.is_empty() {
+                            tf("{0} opened: {1}", &[&name, &(e.host.trim())])
+                        } else {
+                            tf("{0} opened: {1} – it asks for the password itself.", &[&name, &(e.host.trim())])
+                        };
+                        self.note(text, false, now);
+                    }
                     Err(err) => self.note(tf("{0}: {1}", &[&(prog.display()), &err]), true, now),
                 }
             }
@@ -1316,7 +1653,7 @@ impl AdminApp {
         if e.protocol.transfer() {
             // no stored login: ask for the password first (empty = SSH key)
             let name = e.name.clone();
-            self.ask = Some(AskState { pending: Pending { entry: e, how: How::Default }, key: 0, name, user, pw: String::new(), focus: true });
+            self.ask_push(AskState { pending: Pending { entry: e, how: How::Default }, key: 0, name, user, pw: String::new(), focus: true });
             return;
         }
         self.open_session(e, Creds { user, ..Default::default() }, Vec::new(), ctx, now);
@@ -1333,10 +1670,13 @@ impl AdminApp {
             Act::Select(id) => self.selected = Some(id),
             Act::Connect(id) => self.connect_id(id, ctx, now),
             Act::Toggle(id) => {
-                if let Some(i) = self.store.index_of(id) {
-                    let e = &mut self.store.data.entries[i];
+                // only a view change: no save of the (shared, KeePass) list for it now; it goes
+                // along with the next real save or at exit
+                if let Some(e) = self.store.index_of(id).and_then(|i| self.store.data.entries.get_mut(i)) {
                     e.expanded = !e.expanded;
-                    self.mark_dirty(now);
+                    if self.dirty_since.is_none() {
+                        self.view_dirty = true;
+                    }
                 }
             }
             Act::NewConn(parent) => {
@@ -1368,9 +1708,7 @@ impl AdminApp {
                         return;
                     }
                     let nid = self.store.next_id();
-                    let mut copy = e;
-                    copy.id = nid;
-                    copy.name = tf("{0} (copy)", &[&copy.name]);
+                    let copy = duplicate_entry(&e, nid);
                     let pos = self.store.index_of(id).map(|i| i + 1).unwrap_or(self.store.data.entries.len());
                     self.store.data.entries.insert(pos, copy);
                     self.selected = Some(nid);
@@ -1403,7 +1741,7 @@ impl AdminApp {
                 }
             }
             Act::ConnectAll(folder) => {
-                let ids: Vec<u64> = self.store.data.entries.iter().filter(|e| !e.folder && (e.parent == Some(folder))).map(|e| e.id).collect();
+                let ids: Vec<u64> = self.store.children(Some(folder)).into_iter().filter(|&c| self.store.get(c).is_some_and(|e| !e.folder)).collect();
                 self.pending_connect.extend(ids);
             }
             Act::Ping(id) => {
@@ -1598,6 +1936,7 @@ impl AdminApp {
                 if ui.button(tr("Save now")).clicked() {
                     self.store.save();
                     self.dirty_since = None;
+                    self.view_dirty = false;
                 }
                 ui.separator();
                 if ui.button(tr("Quit")).clicked() {
@@ -1838,30 +2177,39 @@ impl AdminApp {
             }
         });
         ui.separator();
+        // the search result is kept while the search text and the list stay the same; the list
+        // counts as changed when it was edited here, or replaced or resized (reload, import)
+        let entries = &self.store.data.entries;
+        let stamp = (self.data_gen, entries.len(), entries.as_ptr() as usize);
+        let filter = self.filter.trim().to_lowercase();
+        if filter.is_empty() {
+            self.search_cache = None;
+        } else if self.search_cache.as_ref().is_none_or(|c| c.filter != filter || c.stamp != stamp) {
+            let parent: HashMap<u64, Option<u64>> = entries.iter().rev().map(|e| (e.id, e.parent)).collect();
+            let hits =
+                search_hits(entries, &filter).into_iter().map(|id| (id, parent.get(&id).copied().flatten().map(|p| self.store.path_of(p)))).collect();
+            self.search_cache = Some(SearchCache { filter: filter.clone(), stamp, hits });
+        }
+        // one lock of the status map for the whole tree, one index of the list per frame
+        let status_map = self.status.clone();
+        let status = status_map.lock().unwrap_or_else(|e| e.into_inner());
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let filter = self.filter.trim().to_lowercase();
+            let entries = &self.store.data.entries;
             if filter.is_empty() {
-                self.tree_level(ui, None, 0, &mut acts);
-            } else {
-                let hits: Vec<u64> = self
-                    .store
-                    .data
-                    .entries
-                    .iter()
-                    .filter(|e| !e.folder)
-                    .filter(|e| {
-                        e.name.to_lowercase().contains(&filter)
-                            || e.host.to_lowercase().contains(&filter)
-                            || e.username.to_lowercase().contains(&filter)
-                            || e.description.to_lowercase().contains(&filter)
-                    })
-                    .map(|e| e.id)
-                    .collect();
-                if hits.is_empty() {
+                for (i, depth) in tree_rows(entries) {
+                    if let Some(e) = entries.get(i) {
+                        self.tree_row(ui, e, None, depth, &status, &mut acts, false);
+                    }
+                }
+            } else if let Some(cache) = &self.search_cache {
+                if cache.hits.is_empty() {
                     ui.weak(tr("Nothing found."));
                 }
-                for id in hits {
-                    self.tree_row(ui, id, 0, &mut acts, true);
+                let index: HashMap<u64, usize> = entries.iter().enumerate().rev().map(|(i, e)| (e.id, i)).collect();
+                for (id, path) in &cache.hits {
+                    if let Some(e) = index.get(id).and_then(|&i| entries.get(i)) {
+                        self.tree_row(ui, e, path.as_deref(), 0, &status, &mut acts, true);
+                    }
                 }
             }
             // empty space: right-click to add
@@ -1886,28 +2234,28 @@ impl AdminApp {
                 }
             });
         });
+        // the actions below may start a status check, which takes this lock
+        drop(status);
         for a in acts {
             self.apply(a, &ctx, now);
         }
     }
 
-    fn tree_level(&self, ui: &mut egui::Ui, parent: Option<u64>, depth: usize, acts: &mut Vec<Act>) {
-        for id in self.store.children(parent) {
-            self.tree_row(ui, id, depth, acts, false);
-            if let Some(e) = self.store.get(id)
-                && e.folder
-                && e.expanded
-                && depth < 32
-            {
-                self.tree_level(ui, Some(id), depth + 1, acts);
-            }
-        }
-    }
-
-    fn tree_row(&self, ui: &mut egui::Ui, id: u64, depth: usize, acts: &mut Vec<Act>, flat: bool) {
-        let Some(e) = self.store.get(id) else { return };
+    /// One row of the tree; `path` is the folder path shown next to a search hit (`flat`).
+    #[allow(clippy::too_many_arguments)]
+    fn tree_row(
+        &self,
+        ui: &mut egui::Ui,
+        e: &Entry,
+        path: Option<&str>,
+        depth: usize,
+        status: &HashMap<u64, Option<bool>>,
+        acts: &mut Vec<Act>,
+        flat: bool,
+    ) {
+        let id = e.id;
         let selected = self.selected == Some(id);
-        let status = self.status.lock().unwrap_or_else(|e| e.into_inner()).get(&id).copied();
+        let status = status.get(&id).copied();
         let row = ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.add_space(depth as f32 * 16.0);
@@ -1945,8 +2293,8 @@ impl AdminApp {
             if resp.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             }
-            if flat && let Some(p) = e.parent {
-                ui.weak(self.store.path_of(p));
+            if flat && let Some(p) = path {
+                ui.weak(p);
             }
             if !e.folder
                 && let Some(s) = status
@@ -1962,8 +2310,11 @@ impl AdminApp {
             let resp = if e.folder {
                 resp
             } else {
-                let host = if e.protocol.needs_host() { format!("{}:{}", e.host, e.port) } else { tr("local").into() };
-                resp.on_hover_text(format!("{} · {}\n{}", e.protocol.label(), host, e.description))
+                // the text is only put together while the row is hovered
+                resp.on_hover_ui(|ui| {
+                    let host = if e.protocol.needs_host() { format!("{}:{}", e.host, e.port) } else { tr("local").into() };
+                    ui.label(format!("{} · {}\n{}", e.protocol.label(), host, e.description));
+                })
             };
             if resp.clicked() {
                 acts.push(Act::Select(id));
@@ -2091,10 +2442,7 @@ impl AdminApp {
                         acts.push(Act::MoveTo(id, None));
                         ui.close();
                     }
-                    for (fid, path) in self.store.folders() {
-                        if fid == id || self.store.is_descendant(fid, id) {
-                            continue;
-                        }
+                    for (fid, path) in folder_choices(&self.store, id) {
                         if ui.button(path).clicked() {
                             acts.push(Act::MoveTo(id, Some(fid)));
                             ui.close();
@@ -2177,24 +2525,23 @@ impl AdminApp {
             self.selected = None;
             return;
         };
-        let folders: Vec<(u64, String)> =
-            self.store.folders().into_iter().filter(|(fid, _)| *fid != id && !self.store.is_descendant(*fid, id)).collect();
+        // the folder and jump host lists are only built while their list is open (not every frame)
         let path = self.store.path_of(id);
         let inherited = self.store.data.entries[idx].parent.map(|p| self.store.credentials(p));
         let mut e = self.store.data.entries[idx].clone();
         let mut act: Option<Act> = None;
-        let jump_opts: Vec<(u64, String)> = self
-            .store
-            .data
-            .entries
-            .iter()
-            .filter(|x| !x.folder && x.protocol == Protocol::Ssh && x.id != id && !self.store.jump_chain(x.id).contains(&id))
-            .map(|x| (x.id, format!("{} ({})", x.name, x.host)))
-            .collect();
+        let parent_label = |store: &Store, parent: Option<u64>| {
+            parent
+                .filter(|&p| p != id && !store.is_descendant(p, id) && store.get(p).is_some_and(|f| f.folder))
+                .map(|p| store.path_of(p))
+                .unwrap_or_else(|| tr("(top level)").into())
+        };
+        let jump_text = |store: &Store, j: Option<u64>| {
+            j.and_then(|j| store.get(j)).filter(|x| jump_ok(store, id, x)).map(jump_label).unwrap_or_else(|| tr("(none – connect directly)").into())
+        };
         let kp_unlocked = self.keepass.unlocked;
-        let kp_paths: Vec<String> = self.keepass.entries.iter().map(|k| k.path.clone()).collect();
         let kp_configured = !self.store.data.settings.keepass_path.trim().is_empty();
-        let kp_otp: Option<(String, u64)> = if self.keepass.unlocked {
+        let kp_otp: Option<(String, u64)> = if self.keepass.unlocked && e.cred_source == CredSource::KeePass {
             self.store
                 .credential_info(id)
                 .keepass
@@ -2257,14 +2604,11 @@ impl AdminApp {
                 ui.add(egui::TextEdit::singleline(&mut e.name).desired_width(f32::INFINITY));
                 ui.end_row();
                 ui.label(tr("Folder"));
-                let current = e
-                    .parent
-                    .and_then(|p| folders.iter().find(|(f, _)| *f == p).map(|(_, n)| n.clone()))
-                    .unwrap_or_else(|| tr("(top level)").into());
+                let current = parent_label(&self.store, e.parent);
                 egui::ComboBox::from_id_salt("parent_combo").selected_text(current).width(200.0).show_ui(ui, |ui| {
                     ui.selectable_value(&mut e.parent, None, tr("(top level)"));
-                    for (fid, name) in &folders {
-                        ui.selectable_value(&mut e.parent, Some(*fid), name);
+                    for (fid, name) in folder_choices(&self.store, id) {
+                        ui.selectable_value(&mut e.parent, Some(fid), name);
                     }
                 });
                 ui.end_row();
@@ -2294,7 +2638,12 @@ impl AdminApp {
                             ui.end_row();
                         } else {
                             ui.label(tr("Port"));
-                            ui.add(egui::DragValue::new(&mut e.port).range(1..=65535));
+                            ui.horizontal(|ui| {
+                                ui.add(port_edit(&mut e.port));
+                                if e.port == 0 {
+                                    ui.weak(tf("(default port {0})", &[&e.protocol.default_port()]));
+                                }
+                            });
                             ui.end_row();
                         }
                     }
@@ -2377,7 +2726,8 @@ impl AdminApp {
                                 } else if kp_unlocked {
                                     let filter = e.keepass_entry.to_lowercase();
                                     egui::ComboBox::from_id_salt("kp_pick").selected_text(tr("Choose entry …")).width(200.0).show_ui(ui, |ui| {
-                                        for p in kp_paths.iter().filter(|p| filter.is_empty() || p.to_lowercase().contains(&filter)).take(300) {
+                                        let paths = self.keepass.entries.iter().map(|k| &k.path);
+                                    for p in paths.filter(|p| filter.is_empty() || p.to_lowercase().contains(&filter)).take(300) {
                                             if ui.selectable_label(false, p).clicked() {
                                                 e.keepass_entry = p.clone();
                                             }
@@ -2475,14 +2825,11 @@ impl AdminApp {
                                 ui.end_row();
                             }
                             ui.label(tr("Jump host"));
-                            let cur = e
-                                .jump_host
-                                .and_then(|j| jump_opts.iter().find(|(x, _)| *x == j).map(|(_, n)| n.clone()))
-                                .unwrap_or_else(|| tr("(none – connect directly)").into());
+                            let cur = jump_text(&self.store, e.jump_host);
                             egui::ComboBox::from_id_salt("jump_host").selected_text(cur).width(220.0).show_ui(ui, |ui| {
                                 ui.selectable_value(&mut e.jump_host, None, tr("(none – connect directly)"));
-                                for (jid, name) in &jump_opts {
-                                    ui.selectable_value(&mut e.jump_host, Some(*jid), name);
+                                for j in self.store.data.entries.iter().filter(|x| jump_ok(&self.store, id, x)) {
+                                    ui.selectable_value(&mut e.jump_host, Some(j.id), jump_label(j));
                                 }
                             });
                             ui.end_row();
@@ -2518,11 +2865,11 @@ impl AdminApp {
                             for (i, tun) in e.tunnels.iter_mut().enumerate() {
                                 ui.horizontal(|ui| {
                                     ui.label(tr("local"));
-                                    ui.add(egui::DragValue::new(&mut tun.local_port).range(1..=65535));
+                                    ui.add(tunnel_port_edit(&mut tun.local_port));
                                     ui.label("»");
                                     ui.add(egui::TextEdit::singleline(&mut tun.remote_host).desired_width(90.0));
                                     ui.label(":");
-                                    ui.add(egui::DragValue::new(&mut tun.remote_port).range(1..=65535));
+                                    ui.add(tunnel_port_edit(&mut tun.remote_port));
                                     ui.checkbox(&mut tun.auto, tr("auto")).on_hover_text(tr("Start together with the connection"));
                                     if ui.small_button("×").on_hover_text(tr("Remove")).clicked() {
                                         remove = Some(i);
@@ -2605,8 +2952,12 @@ impl AdminApp {
             if e.parent != self.store.data.entries[idx].parent {
                 self.expand(e.parent);
             }
+            let tunnels_changed = e.tunnels != self.store.data.entries[idx].tunnels;
             self.store.data.entries[idx] = e;
             self.mark_dirty(now);
+            if tunnels_changed {
+                self.sync_tunnels();
+            }
         }
         if let Some(a) = act {
             self.apply(a, &ctx, now);
@@ -2827,6 +3178,7 @@ impl AdminApp {
         if matches!(self.tabs[active].kind, TabKind::Start) {
             self.start_page(ui, &mut start_acts);
         } else if matches!(self.tabs[active].kind, TabKind::Tunnels) {
+            self.sync_tunnels();
             tunnel_acts = extra::tunnels_ui(ui, &self.store.data.entries, &mut self.tunnels);
         } else if matches!(self.tabs[active].kind, TabKind::Settings) {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -3022,13 +3374,7 @@ impl AdminApp {
         for a in tunnel_acts {
             match a {
                 TunnelAct::Start(id, idx) => self.start_tunnel(id, idx, now),
-                TunnelAct::Stop(id, idx) => {
-                    if let Some(mut r) = self.tunnels.remove(&(id, idx))
-                        && let Some(mut c) = r.child.take()
-                    {
-                        let _ = c.kill();
-                    }
-                }
+                TunnelAct::Stop(id, idx) => self.stop_tunnel((id, idx)),
             }
         }
         for a in netscan_acts {
@@ -3278,6 +3624,7 @@ impl AdminApp {
             match resp.inner {
                 Some(true) => {
                     self.store.remove(id);
+                    self.sync_tunnels();
                     if self.selected.map(|s| self.store.get(s).is_none()).unwrap_or(false) {
                         self.selected = None;
                     }
@@ -3409,6 +3756,8 @@ impl AdminApp {
 
         if self.ask.is_some() {
             let mut result: Option<bool> = None;
+            let mut cancel_all = false;
+            let waiting = self.ask_queue.len();
             if let Some(a) = &mut self.ask {
                 egui::Modal::new(egui::Id::new("ask_pw")).show(ctx, |ui| {
                     ui.set_width(380.0);
@@ -3431,6 +3780,9 @@ impl AdminApp {
                         ui.end_row();
                     });
                     ui.weak(tr("Leave empty for SSH key login. Remembered until AdminCraft closes."));
+                    if waiting > 0 {
+                        ui.label(tf("{0} more connections are waiting for their password.", &[&waiting]));
+                    }
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.horizontal(|ui| {
                         if ui.add(egui::Button::new(RichText::new(tr("Connect")).color(Color32::WHITE)).fill(ACCENT)).clicked() || enter {
@@ -3439,8 +3791,15 @@ impl AdminApp {
                         if ui.button(tr("Cancel")).clicked() {
                             result = Some(false);
                         }
+                        if waiting > 0 && ui.button(tr("Cancel all")).clicked() {
+                            result = Some(false);
+                            cancel_all = true;
+                        }
                     });
                 });
+            }
+            if cancel_all {
+                self.ask_queue.clear();
             }
             match (result, if result == Some(true) { self.ask.take() } else { None }) {
                 (Some(true), None) => {}
@@ -3458,6 +3817,8 @@ impl AdminApp {
                 (Some(false), _) => self.ask = None,
                 (None, _) => {}
             }
+            // then the next waiting question ("Open all" with several connections)
+            self.ask_next(ctx, now);
         }
 
         self.export_dialog(ctx, now);
@@ -4526,9 +4887,11 @@ impl eframe::App for AdminApp {
         for r in self.tunnels.values_mut() {
             if let Some(mut c) = r.child.take() {
                 let _ = c.kill();
+                let _ = c.wait();
             }
         }
-        if self.dirty_since.is_some() {
+        // folders opened or closed since the last save are kept for the next start
+        if self.dirty_since.is_some() || self.view_dirty {
             self.store.save();
         }
         for t in &mut self.tabs {
