@@ -885,3 +885,5 @@ Name with a line break or other control character refused: {0} = Ім'я з ро
  – login not passed: the Credential Manager already has one for this host, that one is used =  – дані входу не передано: диспетчер облікових даних уже має їх для цього хоста, використовуються вони
 No private folder for the temporary browser profile. = Немає приватної теки для тимчасового профілю браузера.
 Old PuTTY (before 0.77): the password is on its command line, please update PuTTY. = Старий PuTTY (до 0.77): пароль у його командному рядку, будь ласка, оновіть PuTTY.
+Referral to {0} was not followed (not a public WHOIS server). = Перенаправлення на {0} не виконано (не публічний сервер WHOIS).
+The recording is too large to play (more than {0} MiB). = Запис завеликий для відтворення (понад {0} МіБ).

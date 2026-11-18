@@ -99,6 +99,8 @@ For every connection you choose under **Password from**:
 **Automatic login:** for SSH and Telnet the password is typed in when the server asks for it
 (Settings » *Type the stored password in the terminal automatically*). For RDP it is handed to Windows
 for this one connection.
+Each stored password is typed only once, and only into a prompt that names its own host; a prompt without a host
+name (such as `Password:`) gets it only when the connection has a single password. Otherwise press **Send password** in the tab.
 
 **Master password** (Settings » Storage location): without it, stored passwords are only obfuscated — anyone
 with the file and AdminCraft could read them. With a master password they are properly encrypted

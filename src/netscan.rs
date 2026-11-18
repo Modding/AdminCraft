@@ -54,13 +54,14 @@ pub fn parse_targets(text: &str) -> Result<Vec<Ipv4Addr>, String> {
             let ip: Ipv4Addr = ip.trim().parse().map_err(|_| tf("Invalid address: {0}", &[&ip]))?;
             let bits: u32 = bits.trim().parse().ok().filter(|b| *b <= 32).ok_or_else(|| tf("Invalid mask: {0}", &[&part]))?;
             let mask = if bits == 0 { 0 } else { u32::MAX << (32 - bits) };
-            let net = u32_of(ip) & mask;
+            // 64-bit math: the top of the range (255.255.255.0/24, /31, /32) must not overflow
+            let net = u64::from(u32_of(ip) & mask);
             let size = 1u64 << (32 - bits);
-            if size as usize > MAX_HOSTS {
+            if size > MAX_HOSTS as u64 {
                 return Err(tr("Range too large (at most /16).").into());
             }
-            let (first, last) = if bits >= 31 { (net, net + size as u32 - 1) } else { (net + 1, net + size as u32 - 2) };
-            out.extend((first..=last).map(Ipv4Addr::from));
+            let (first, last) = if bits >= 31 { (net, net + size - 1) } else { (net + 1, net + size - 2) };
+            out.extend((first..=last).filter_map(|v| u32::try_from(v).ok()).map(Ipv4Addr::from));
         } else if let Some((a, b)) = part.split_once('-') {
             let start: Ipv4Addr = a.trim().parse().map_err(|_| tf("Invalid address: {0}", &[&a]))?;
             let end: Ipv4Addr = if b.contains('.') {
@@ -245,82 +246,145 @@ pub fn arp_table() -> BTreeMap<Ipv4Addr, String> {
     map
 }
 
+/// Most port probes (connects) of one scan at the same time.
+pub const MAX_CONNECTS: usize = 256;
+/// Most probes of one address at the same time.
+const MAX_PER_HOST: usize = 16;
+
+/// How a scan spreads its work: (addresses scanned at the same time, port probes per address at
+/// the same time). Together they stay within [`MAX_CONNECTS`].
+pub fn scan_plan(targets: usize, ports: usize) -> (usize, usize) {
+    let per_host = ports.clamp(1, MAX_PER_HOST);
+    let workers = targets.clamp(1, (MAX_CONNECTS / per_host).clamp(1, 64));
+    (workers, per_host)
+}
+
+/// What `ping_once` found: (answered, round trip in ms, name).
+type Ping = (bool, Option<u32>, String);
+
+/// Probes `ports` of `ip` with at most `threads` at the same time (the calling thread pings
+/// meanwhile, then helps). When no helper thread can be started, the calling thread probes them all.
+fn probe_ports(ip: Ipv4Addr, ports: &[u16], threads: usize, timeout_ms: u64, cancel: &AtomicBool) -> (Ping, Vec<(u16, Option<bool>)>) {
+    let timeout = Duration::from_millis(timeout_ms);
+    let next = AtomicUsize::new(0);
+    let found = Mutex::new(Vec::with_capacity(ports.len()));
+    let work = || {
+        while !cancel.load(Ordering::Relaxed) {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            let Some(&p) = ports.get(i) else { break };
+            let r = probe(ip, p, timeout);
+            found.lock().unwrap_or_else(|e| e.into_inner()).push((p, r));
+        }
+    };
+    let work = &work;
+    let ping = std::thread::scope(|s| {
+        for _ in 0..threads.min(ports.len()) {
+            if std::thread::Builder::new().spawn_scoped(s, work).is_err() {
+                break;
+            }
+        }
+        // ping and the port probes at the same time: a silent address costs about one timeout
+        let ping = ping_once(ip, timeout_ms, false);
+        work();
+        ping
+    });
+    (ping, found.into_inner().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Finishes a scan when the last worker lets go of it (also when no worker could start):
+/// adds MAC addresses, sorts, marks the scan finished.
+struct ScanDone {
+    state: Arc<Mutex<ScanState>>,
+    started: Instant,
+    ctx: eframe::egui::Context,
+}
+
+impl Drop for ScanDone {
+    fn drop(&mut self) {
+        let has_hosts = !self.state.lock().unwrap_or_else(|e| e.into_inner()).hosts.is_empty();
+        let arp = if has_hosts { arp_table() } else { BTreeMap::new() };
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        for h in &mut s.hosts {
+            if let Some(m) = arp.get(&h.ip) {
+                h.mac = m.clone();
+            }
+        }
+        s.hosts.sort_by_key(|h| u32::from(h.ip));
+        s.finished = true;
+        s.seconds = self.started.elapsed().as_secs_f32();
+        drop(s);
+        self.ctx.request_repaint();
+    }
+}
+
 impl NetScan {
     pub fn start(targets: Vec<Ipv4Addr>, ports: Vec<u16>, timeout_ms: u64, names: bool, ctx: eframe::egui::Context) -> NetScan {
         let state = Arc::new(Mutex::new(ScanState { total: targets.len(), ..Default::default() }));
         let cancel = Arc::new(AtomicBool::new(false));
         let next = Arc::new(AtomicUsize::new(0));
+        let (workers, per_host) = scan_plan(targets.len(), ports.len());
         let targets = Arc::new(targets);
         let ports = Arc::new(ports);
-        let started = Instant::now();
-        let workers = targets.len().clamp(1, 64);
-        let finished_workers = Arc::new(AtomicUsize::new(0));
-        for _ in 0..workers {
-            let (state, cancel, next, targets, ports, ctx, fw) =
-                (state.clone(), cancel.clone(), next.clone(), targets.clone(), ports.clone(), ctx.clone(), finished_workers.clone());
-            std::thread::spawn(move || {
-                let timeout = Duration::from_millis(timeout_ms);
-                loop {
-                    if cancel.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(&ip) = targets.get(i) else { break };
-                    // ping and all port probes at the same time: a silent address costs one timeout
-                    let ((mut alive, rtt, _), probes) = std::thread::scope(|s| {
-                        let handles: Vec<_> = ports.iter().map(|&p| s.spawn(move || (p, probe(ip, p, timeout)))).collect();
-                        let ping = ping_once(ip, timeout_ms, false);
-                        (ping, handles.into_iter().filter_map(|h| h.join().ok()).collect::<Vec<_>>())
-                    });
-                    let mut open = Vec::new();
-                    for (p, r) in probes {
-                        match r {
-                            Some(true) => {
-                                open.push(p);
-                                alive = true;
+        let done = Arc::new(ScanDone { state: state.clone(), started: Instant::now(), ctx: ctx.clone() });
+        // Every worker holds `done`; the last one to finish (or to fail to start) completes the scan.
+        let jobs: Vec<_> = (0..workers)
+            .map(|_| {
+                let (state, cancel, next, targets, ports, ctx, done) =
+                    (state.clone(), cancel.clone(), next.clone(), targets.clone(), ports.clone(), ctx.clone(), done.clone());
+                move || {
+                    let _done = done;
+                    loop {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(&ip) = targets.get(i) else { break };
+                        let ((mut alive, rtt, _), probes) = probe_ports(ip, &ports, per_host, timeout_ms, &cancel);
+                        let mut open = Vec::new();
+                        for (p, r) in probes {
+                            match r {
+                                Some(true) => {
+                                    open.push(p);
+                                    alive = true;
+                                }
+                                Some(false) => alive = true,
+                                None => {}
                             }
-                            Some(false) => alive = true,
-                            None => {}
                         }
-                    }
-                    open.sort_unstable();
-                    // names only for devices that answered (looking up silent addresses is slow)
-                    let mut name = String::new();
-                    if alive && names {
-                        // at most 1.5 s: addresses without a name make Windows try NetBIOS for long
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        std::thread::spawn(move || {
-                            let n = if cfg!(windows) { ping_once(ip, 300, true).2 } else { reverse_name(ip) };
-                            let _ = tx.send(n);
-                        });
-                        name = rx.recv_timeout(Duration::from_millis(1500)).unwrap_or_default();
-                    }
-                    if name == ip.to_string() {
-                        name.clear();
-                    }
-                    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-                    s.done += 1;
-                    if alive {
-                        s.hosts.push(ScanHost { ip, name, mac: String::new(), rtt_ms: rtt, ports: open });
-                    }
-                    drop(s);
-                    ctx.request_repaint();
-                }
-                if fw.fetch_add(1, Ordering::SeqCst) + 1 == workers {
-                    // last worker: add MAC addresses and sort
-                    let arp = arp_table();
-                    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-                    for h in &mut s.hosts {
-                        if let Some(m) = arp.get(&h.ip) {
-                            h.mac = m.clone();
+                        open.sort_unstable();
+                        // names only for devices that answered (looking up silent addresses is slow)
+                        let mut name = String::new();
+                        if alive && names {
+                            // at most 1.5 s: addresses without a name make Windows try NetBIOS for long
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            let spawned = std::thread::Builder::new().spawn(move || {
+                                let n = if cfg!(windows) { ping_once(ip, 300, true).2 } else { reverse_name(ip) };
+                                let _ = tx.send(n);
+                            });
+                            if spawned.is_ok() {
+                                name = rx.recv_timeout(Duration::from_millis(1500)).unwrap_or_default();
+                            }
                         }
+                        if name == ip.to_string() {
+                            name.clear();
+                        }
+                        let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+                        s.done += 1;
+                        if alive {
+                            s.hosts.push(ScanHost { ip, name, mac: String::new(), rtt_ms: rtt, ports: open });
+                        }
+                        drop(s);
+                        ctx.request_repaint();
                     }
-                    s.hosts.sort_by_key(|h| u32::from(h.ip));
-                    s.finished = true;
-                    s.seconds = started.elapsed().as_secs_f32();
-                    ctx.request_repaint();
                 }
-            });
+            })
+            .collect();
+        drop(done);
+        for job in jobs {
+            // a thread that cannot start drops its job, and with it its hold on `done`
+            if std::thread::Builder::new().name("netscan".into()).spawn(job).is_err() {
+                break;
+            }
         }
         NetScan { state, cancel }
     }

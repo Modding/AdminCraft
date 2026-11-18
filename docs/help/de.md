@@ -99,6 +99,8 @@ Für jede Verbindung wird unter **Passwort aus** gewählt:
 **Automatische Anmeldung:** Bei SSH und Telnet wird das Passwort eingetippt, sobald der Server danach fragt
 (Einstellungen » *Gespeichertes Passwort im Terminal automatisch eingeben*). Bei RDP wird es für diese eine
 Verbindung an Windows übergeben.
+Jedes gespeicherte Passwort wird nur einmal eingetippt, und nur in eine Abfrage, die seinen eigenen Host nennt; eine Abfrage
+ohne Hostnamen (etwa `Password:`) bekommt es nur, wenn die Verbindung ein einziges Passwort hat. Sonst im Tab auf **Passwort senden** klicken.
 
 **Masterpasswort** (Einstellungen » Speicherort): Ohne es sind gespeicherte Passwörter nur verschleiert – wer
 die Datei und AdminCraft hat, könnte sie lesen. Mit Masterpasswort sind sie richtig verschlüsselt

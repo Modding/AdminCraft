@@ -99,6 +99,8 @@ Pour chaque connexion, vous choisissez sous **Mot de passe depuis** :
 **Connexion automatique :** pour SSH et Telnet, le mot de passe est tapé quand le serveur le demande
 (Paramètres » *Saisir automatiquement le mot de passe enregistré dans le terminal*). Pour RDP, il est transmis à Windows
 pour cette seule connexion.
+Chaque mot de passe enregistré n'est tapé qu'une fois, et seulement dans une invite qui nomme son propre hôte ; une invite
+sans nom d'hôte (comme `Password:`) ne le reçoit que si la connexion n'a qu'un seul mot de passe. Sinon, appuyez sur **Envoyer le mot de passe** dans l'onglet.
 
 **Mot de passe maître** (Paramètres » Emplacement de stockage) : sans lui, les mots de passe enregistrés sont seulement masqués — toute personne
 ayant le fichier et AdminCraft pourrait les lire. Avec un mot de passe maître, ils sont vraiment chiffrés

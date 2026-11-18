@@ -56,8 +56,35 @@ pub struct ToolTab {
     community: String,
     port: String,
     walk_oid: String,
+    /// Filled by the background thread; the tab takes it out when it draws.
     result: Arc<Mutex<Option<Res>>>,
     running: Arc<Mutex<bool>>,
+    /// The result shown, with its text prepared once (not every frame).
+    shown: Option<Res>,
+    view: View,
+}
+
+/// A result laid out for drawing: built once when it arrives.
+#[derive(Default)]
+enum View {
+    #[default]
+    Other,
+    /// Whois: the answer's lines.
+    Lines(Vec<String>),
+    /// SNMP walk: OID, its name, the value.
+    Walk(Vec<[String; 3]>),
+}
+
+impl View {
+    fn of(res: &Res) -> View {
+        match res {
+            Res::Whois(Ok(w)) => View::Lines(w.text.lines().map(str::to_string).collect()),
+            Res::Walk(Ok(rows)) => {
+                View::Walk(rows.iter().map(|(o, v)| [o.clone(), nettools::oid_name(o).unwrap_or_default(), v.to_string()]).collect())
+            }
+            _ => View::Other,
+        }
+    }
 }
 
 impl ToolTab {
@@ -70,6 +97,17 @@ impl ToolTab {
             walk_oid: "1.3.6.1.2.1.1".into(),
             result: Arc::new(Mutex::new(None)),
             running: Arc::new(Mutex::new(false)),
+            shown: None,
+            view: View::Other,
+        }
+    }
+
+    /// Takes a result that arrived and prepares it for drawing.
+    fn take_result(&mut self) {
+        let new = self.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(res) = new {
+            self.view = View::of(&res);
+            self.shown = Some(res);
         }
     }
 
@@ -103,40 +141,45 @@ impl ToolTab {
     /// The result as text (for agents and the copy button).
     pub fn text(&self) -> String {
         let g = self.result.lock().unwrap_or_else(|e| e.into_inner());
-        match &*g {
-            None => String::new(),
-            Some(Res::Whois(Ok(w))) => w.text.clone(),
-            Some(Res::Http(Ok(h))) => {
-                let mut s = String::new();
-                for (n, hop) in h.hops.iter().enumerate() {
-                    s += &format!("{} {} {} ({} ms)\n", n + 1, hop.status, hop.url, hop.millis);
-                }
-                if let Some(last) = h.hops.last() {
-                    for (k, v) in &last.headers {
-                        s += &format!("  {k}: {v}\n");
-                    }
-                }
-                for x in &h.security {
-                    s += &format!("{} {}: {}\n", if x.present { "+" } else { "-" }, x.name, x.advice);
-                }
-                for c in &h.cookies {
-                    s += &format!("cookie {} secure={} httponly={} samesite={}\n", c.name, c.secure, c.http_only, c.same_site);
-                }
-                s
+        // a result not drawn yet is newer than the one shown
+        res_text(g.as_ref().or(self.shown.as_ref()))
+    }
+}
+
+fn res_text(res: Option<&Res>) -> String {
+    match res {
+        None => String::new(),
+        Some(Res::Whois(Ok(w))) => w.text.clone(),
+        Some(Res::Http(Ok(h))) => {
+            let mut s = String::new();
+            for (n, hop) in h.hops.iter().enumerate() {
+                s += &format!("{} {} {} ({} ms)\n", n + 1, hop.status, hop.url, hop.millis);
             }
-            Some(Res::Snmp(Ok(o))) => {
-                let mut s = format!("{}\n{}\nuptime {}\ncontact {}\nlocation {}\n", o.name, o.descr, o.uptime, o.contact, o.location);
-                for i in &o.interfaces {
-                    s += &format!(
-                        "{} {} oper={:?} speed={:?}Mbit mac={} in={:?} out={:?}\n",
-                        i.index, i.name, i.oper_up, i.speed_mbit, i.mac, i.in_octets, i.out_octets
-                    );
+            if let Some(last) = h.hops.last() {
+                for (k, v) in &last.headers {
+                    s += &format!("  {k}: {v}\n");
                 }
-                s
             }
-            Some(Res::Walk(Ok(rows))) => rows.iter().map(|(o, v)| format!("{o} = {v}\n")).collect(),
-            Some(Res::Whois(Err(e)) | Res::Http(Err(e)) | Res::Snmp(Err(e)) | Res::Walk(Err(e))) => e.clone(),
+            for x in &h.security {
+                s += &format!("{} {}: {}\n", if x.present { "+" } else { "-" }, x.name, x.advice);
+            }
+            for c in &h.cookies {
+                s += &format!("cookie {} secure={} httponly={} samesite={}\n", c.name, c.secure, c.http_only, c.same_site);
+            }
+            s
         }
+        Some(Res::Snmp(Ok(o))) => {
+            let mut s = format!("{}\n{}\nuptime {}\ncontact {}\nlocation {}\n", o.name, o.descr, o.uptime, o.contact, o.location);
+            for i in &o.interfaces {
+                s += &format!(
+                    "{} {} oper={:?} speed={:?}Mbit mac={} in={:?} out={:?}\n",
+                    i.index, i.name, i.oper_up, i.speed_mbit, i.mac, i.in_octets, i.out_octets
+                );
+            }
+            s
+        }
+        Some(Res::Walk(Ok(rows))) => rows.iter().map(|(o, v)| format!("{o} = {v}\n")).collect(),
+        Some(Res::Whois(Err(e)) | Res::Http(Err(e)) | Res::Snmp(Err(e)) | Res::Walk(Err(e))) => e.clone(),
     }
 }
 
@@ -195,8 +238,8 @@ pub fn tool_ui(ui: &mut egui::Ui, t: &mut ToolTab) {
         });
     }
     ui.separator();
-    let guard = t.result.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(res) = &*guard else {
+    t.take_result();
+    let Some(res) = &t.shown else {
         if !busy {
             ui.weak(match t.kind {
                 ToolKind::Whois => tr("Shows who a domain or IP address belongs to: registrar, owner network, dates, name servers."),
@@ -206,28 +249,49 @@ pub fn tool_ui(ui: &mut egui::Ui, t: &mut ToolTab) {
         }
         return;
     };
-    egui::ScrollArea::vertical().id_salt("tool_res").auto_shrink([false, false]).show(ui, |ui| match res {
-        Res::Whois(Err(e)) | Res::Http(Err(e)) | Res::Snmp(Err(e)) | Res::Walk(Err(e)) => {
-            ui.colored_label(BAD, e);
-        }
-        Res::Whois(Ok(w)) => {
+    // long answers: only the visible lines are laid out
+    match (res, &t.view) {
+        (Res::Whois(Ok(w)), View::Lines(lines)) => {
             ui.weak(tf("Asked: {0}", &[&w.servers.join(" » ")]));
-            ui.add(egui::Label::new(RichText::new(&w.text).monospace().size(12.5)).selectable(true));
-        }
-        Res::Http(Ok(h)) => http_ui(ui, h),
-        Res::Snmp(Ok(o)) => snmp_ui(ui, o),
-        Res::Walk(Ok(rows)) => {
-            ui.weak(tf("{0} values", &[&rows.len()]));
-            egui::Grid::new("walk").striped(true).num_columns(3).spacing([14.0, 4.0]).show(ui, |ui| {
-                for (oid, v) in rows {
-                    ui.monospace(oid);
-                    ui.weak(nettools::oid_name(oid).unwrap_or_default());
-                    ui.add(egui::Label::new(v.to_string()).selectable(true));
-                    ui.end_row();
-                }
+            let font = egui::FontId::monospace(12.5);
+            let row_h = ui.ctx().fonts_mut(|f| f.row_height(&font));
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                egui::ScrollArea::both().id_salt("tool_res").auto_shrink([false, false]).show_rows(ui, row_h, lines.len(), |ui, range| {
+                    for line in lines.get(range).unwrap_or_default() {
+                        ui.add(egui::Label::new(RichText::new(line.as_str()).font(font.clone())).selectable(true).extend());
+                    }
+                });
             });
         }
-    });
+        (Res::Walk(Ok(_)), View::Walk(rows)) => {
+            ui.weak(tf("{0} values", &[&rows.len()]));
+            let row_h = ui.text_style_height(&egui::TextStyle::Body).max(ui.text_style_height(&egui::TextStyle::Monospace));
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                egui::ScrollArea::both().id_salt("tool_res").auto_shrink([false, false]).show_rows(ui, row_h, rows.len(), |ui, range| {
+                    egui::Grid::new("walk").num_columns(3).spacing([14.0, 4.0]).min_row_height(row_h).show(ui, |ui| {
+                        for [oid, name, v] in rows.get(range).unwrap_or_default() {
+                            ui.monospace(oid.as_str());
+                            ui.weak(name.as_str());
+                            ui.add(egui::Label::new(v.as_str()).selectable(true).extend());
+                            ui.end_row();
+                        }
+                    });
+                });
+            });
+        }
+        _ => {
+            egui::ScrollArea::vertical().id_salt("tool_res").auto_shrink([false, false]).show(ui, |ui| match res {
+                Res::Whois(Err(e)) | Res::Http(Err(e)) | Res::Snmp(Err(e)) | Res::Walk(Err(e)) => {
+                    ui.colored_label(BAD, e);
+                }
+                Res::Http(Ok(h)) => http_ui(ui, h),
+                Res::Snmp(Ok(o)) => snmp_ui(ui, o),
+                Res::Whois(Ok(_)) | Res::Walk(Ok(_)) => {}
+            });
+        }
+    }
 }
 
 fn status_color(s: u16) -> Color32 {

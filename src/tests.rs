@@ -1266,6 +1266,130 @@ fn ipv6_addresses_in_brackets_where_a_colon_follows() {
 }
 
 #[test]
+fn password_goes_only_to_its_own_host() {
+    use crate::launch::PwRule;
+    use crate::terminal::{pick_password, prompt_host};
+    let r = |h: &str, u: &str, p: &str| PwRule { host: h.into(), user: u.into(), password: p.into() };
+    let rules = vec![r("10.0.0.4", "jump", "pw-jump"), r("10.0.0.40", "root", "pw-target")];
+    let fresh = [false, false];
+    assert_eq!(pick_password(&rules, &fresh, "root@10.0.0.40's password:"), Some(1));
+    assert_eq!(pick_password(&rules, &fresh, "jump@10.0.0.4's password:"), Some(0));
+    // the whole host name counts: 10.0.0.4 is not 10.0.0.40, and the other way round
+    assert_eq!(pick_password(&rules[..1], &[false], "root@10.0.0.40's password:"), None);
+    assert_eq!(pick_password(&rules[1..], &[false], "jump@10.0.0.4's password:"), None);
+    // keyboard-interactive and "password for" forms
+    assert_eq!(pick_password(&rules, &fresh, "(root@10.0.0.40) Password:"), Some(1));
+    assert_eq!(pick_password(&rules, &fresh, "Password for jump@10.0.0.4:"), Some(0));
+    // the jump host asking again gets nothing, not the target's password
+    assert_eq!(pick_password(&rules, &[true, false], "jump@10.0.0.4's password:"), None);
+    // a host without a rule gets nothing
+    assert_eq!(pick_password(&rules, &fresh, "admin@10.0.0.5's password:"), None);
+    // no host named: only when there is a single rule, and only once
+    assert_eq!(pick_password(&rules, &fresh, "Password:"), None);
+    assert_eq!(pick_password(&rules[..1], &[false], "Password:"), Some(0));
+    assert_eq!(pick_password(&rules[..1], &[true], "Password:"), None);
+    // same host, two users: the user decides
+    let two = vec![r("db01", "app", "a"), r("DB01", "root", "b")];
+    assert_eq!(pick_password(&two, &[false, false], "root@db01's password:"), Some(1));
+    assert_eq!(prompt_host("root@[fe80::1]'s password:"), Some(("root".to_string(), "fe80::1".to_string())));
+    assert_eq!(prompt_host("[sudo] password for alice:"), None);
+}
+
+#[test]
+fn paste_cannot_end_bracketed_paste() {
+    use crate::terminal::paste_bytes;
+    assert_eq!(paste_bytes("ls\x1b[201~rm -rf /\n", true), b"\x1b[200~ls[201~rm -rf /\r\x1b[201~".to_vec());
+    assert_eq!(paste_bytes("a\tb\r\nc\x1b", false), b"a\tb\rc".to_vec());
+    assert_eq!(paste_bytes("x\u{9b}201~y", false), b"x201~y".to_vec(), "8-bit CSI too");
+}
+
+#[test]
+fn session_log_leaves_out_all_escapes() {
+    use crate::terminal::strip_escapes;
+    let strip = |chunks: &[&[u8]]| {
+        let (mut st, mut out) = (0u8, Vec::new());
+        for c in chunks {
+            strip_escapes(&mut st, c, &mut out);
+        }
+        String::from_utf8(out).unwrap()
+    };
+    assert_eq!(strip(&[b"\x1b(Bplain\x1b[1;31mred\x1b[0m"]), "plainred");
+    assert_eq!(strip(&[b"\x1b)0\x1b#8x"]), "x");
+    assert_eq!(strip(&[b"\x1bPq#0;2;0;0;0\x1b\\after"]), "after");
+    assert_eq!(strip(&[b"\x1bPa\\b\x1b\\c"]), "c", "a backslash alone does not end a DCS");
+    assert_eq!(strip(&[b"\x1b_Gf=100;AAAA\x1b\\x"]), "x");
+    assert_eq!(strip(&[b"\x1bXsos\x1b\\1\x1b^pm\x1b\\2"]), "12");
+    assert_eq!(strip(&[b"\x1b]0;title\x07t"]), "t");
+    assert_eq!(strip(&[b"\x1b]0;ti", b"tle\x1b", b"\\ok\r\n"]), "ok\n");
+    assert_eq!(strip(&[b"\x1b[3", b"1mz"]), "z");
+}
+
+#[test]
+fn recordings_are_buffered_and_keep_arrival_time() {
+    let path = std::env::temp_dir().join(format!("admincraft-recbuf-{}.cast", std::process::id()));
+    {
+        let mut r = crate::terminal::Recorder::create(&path, 80, 24, "t").unwrap();
+        r.output(b"hello");
+        // the data arrived 5 s after the start, whenever the screen gets it
+        r.output_at(b"later", std::time::Instant::now() + std::time::Duration::from_secs(5));
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0, "not written per chunk");
+    }
+    let cast = crate::playback::parse_cast(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(cast.events.len(), 2, "written when dropped");
+    assert!(cast.events[1].0 >= 4.9, "{:?}", cast.events[1]);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn wide_and_odd_glyphs_stay_on_the_cell_grid() {
+    use crate::terminal::{for_each_run, nz};
+    let mut p = vt100::Parser::new(nz(2), nz(20), 0);
+    p.process("a漢b ä\u{1F600}c".as_bytes());
+    let runs = |inline: &dyn Fn(char) -> bool| {
+        let mut v: Vec<(u16, u16, String)> = Vec::new();
+        for_each_run(p.screen(), 1, 20, inline, |_, col, width, text, _| v.push((col, width, text.to_string())));
+        v
+    };
+    let at = |v: &Vec<(u16, u16, String)>, s: &str| v.iter().find(|r| r.2.starts_with(s)).map(|r| (r.0, r.1));
+    let v = runs(&|ch| ch == 'ä');
+    assert_eq!(at(&v, "a"), Some((0, 1)));
+    assert_eq!(at(&v, "漢"), Some((1, 2)));
+    assert_eq!(at(&v, "b ä"), Some((3, 3)), "a one-cell glyph may stay in the run");
+    assert_eq!(at(&v, "\u{1F600}"), Some((6, 2)));
+    assert_eq!(at(&v, "c"), Some((8, 12)));
+    // a glyph the font draws at another width is placed alone, at its column
+    let v = runs(&|_| false);
+    assert_eq!(at(&v, "ä"), Some((5, 1)));
+    assert_eq!(at(&v, "c"), Some((8, 12)));
+    assert_eq!(v.iter().map(|r| r.1).sum::<u16>(), 20, "every cell once");
+}
+
+#[test]
+fn whois_referrals_stay_public() {
+    use crate::nettools::referral_allowed;
+    assert!(referral_allowed("whois.verisign-grs.com"));
+    assert!(referral_allowed("whois.arin.net:43"));
+    assert!(referral_allowed("8.8.8.8"));
+    assert!(!referral_allowed("whois.example.net:4444"), "only port 43");
+    for bad in [
+        "127.0.0.1",
+        "10.1.2.3",
+        "192.168.0.1:43",
+        "172.16.0.1",
+        "169.254.169.254",
+        "100.64.0.1",
+        "0.0.0.0",
+        "[::1]",
+        "fe80::1",
+        "[fc00::5]:43",
+        "[::ffff:127.0.0.1]",
+        "localhost",
+    ] {
+        assert!(!referral_allowed(bad), "{bad}");
+    }
+}
+
+#[test]
 fn capture_buffer_size_is_checked() {
     use crate::embed::pixel_buffer_len;
     assert_eq!(pixel_buffer_len(10, 2), Some(80));
@@ -1421,4 +1545,84 @@ fn repaint_only_as_often_as_needed() {
     assert_eq!(keep_alive_interval(true, true), Some(Duration::from_millis(250)), "a window to put into its tab");
     assert_eq!(keep_alive_interval(false, true), Some(Duration::from_secs(1)));
     assert_eq!(keep_alive_interval(false, false), None);
+}
+
+#[test]
+fn playback_survives_odd_times() {
+    use crate::playback::{Player, parse_cast};
+    let text = "{\"version\":2,\"width\":80,\"height\":24}\n[-5.0,\"o\",\"a\"]\n[-1.0,\"o\",\"b\"]\n[\"x\",\"o\",\"c\"]\n";
+    let cast = parse_cast(text).unwrap();
+    assert!(cast.events.iter().all(|(t, _)| t.is_finite() && *t >= 0.0));
+    let mut p = Player::from_cast(std::path::Path::new("x.cast"), cast, false);
+    assert_eq!(p.duration(), 0.0);
+    for t in [3.0, -2.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0] {
+        p.seek(t);
+    }
+    assert!(p.screen_text().starts_with("ab"));
+    // times going back are kept in order
+    let cast = parse_cast("{\"version\":2}\n[2.0,\"o\",\"x\"]\n[1.0,\"o\",\"y\"]\n").unwrap();
+    assert_eq!(cast.events.iter().map(|e| e.0).collect::<Vec<_>>(), vec![2.0, 2.0]);
+}
+
+#[test]
+fn playback_seeks_back_from_keyframes() {
+    use crate::playback::{Player, parse_cast};
+    let mut text = String::from("{\"version\":2,\"width\":80,\"height\":24}\n");
+    for i in 0..600 {
+        let chunk = format!("line {i:04} {}\r\n", "x".repeat(1000));
+        text += &serde_json::json!([i as f64 * 0.1, "o", chunk]).to_string();
+        text.push('\n');
+    }
+    let path = std::path::Path::new("k.cast");
+    let mut p = Player::from_cast(path, parse_cast(&text).unwrap(), false);
+    p.seek(1000.0);
+    assert!(p.keyframes() > 0);
+    p.seek(41.05);
+    let mut fresh = Player::from_cast(path, parse_cast(&text).unwrap(), false);
+    fresh.seek(41.05);
+    assert_eq!(p.screen_text(), fresh.screen_text());
+    assert!(p.screen_text().contains("line 0410"));
+}
+
+#[test]
+fn recording_files_have_a_size_limit() {
+    use crate::playback::read_cast_file;
+    let path = std::env::temp_dir().join(format!("admincraft-big-{}.cast", std::process::id()));
+    std::fs::write(&path, "x".repeat(2000)).unwrap();
+    assert!(read_cast_file(&path, 1000).is_err());
+    assert_eq!(read_cast_file(&path, 1 << 20).unwrap().len(), 2000);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn scan_ranges_and_threads_are_bounded() {
+    use crate::netscan::{MAX_CONNECTS, parse_targets, scan_plan};
+    use std::net::Ipv4Addr;
+    assert_eq!(parse_targets("255.255.255.0/24").unwrap().len(), 254);
+    assert_eq!(parse_targets("255.255.255.254/31").unwrap().len(), 2);
+    assert_eq!(parse_targets("255.255.255.255/32").unwrap(), vec![Ipv4Addr::new(255, 255, 255, 255)]);
+    assert_eq!(parse_targets("255.255.0.0/16").unwrap().len(), 65534);
+    assert_eq!(parse_targets("0.0.0.0/32").unwrap().len(), 1);
+    for (t, p) in [(65536, 65535), (65536, 5), (1, 1), (10, 0), (0, 0), (300, 16), (64, 3)] {
+        let (w, k) = scan_plan(t, p);
+        assert!(w >= 1 && k >= 1 && w * k <= MAX_CONNECTS, "{t} {p}: {w}x{k}");
+    }
+}
+
+#[test]
+fn snmp_numbers_and_answers_are_checked() {
+    use crate::nettools::{decode_oid, encode_get, encode_oid, match_answer};
+    use std::net::SocketAddr;
+    assert!(encode_oid("2.18446744073709551615").is_err(), "first arcs overflow");
+    assert_eq!(decode_oid(&encode_oid("2.100.3").unwrap()).unwrap(), "2.100.3");
+    let mut long = vec![0xffu8; 10];
+    long.push(0x7f);
+    assert!(decode_oid(&long).is_err(), "arc larger than 64 bits");
+    let asked: SocketAddr = "192.0.2.1:161".parse().unwrap();
+    let pkt = encode_get("public", 7, 0xa2, &["1.3.6.1.2.1.1.5.0"]).unwrap();
+    assert!(match_answer(asked, asked, &pkt, 7).is_some_and(|r| r.is_ok()));
+    assert!(match_answer(asked, "192.0.2.1:5000".parse().unwrap(), &pkt, 7).is_none(), "another port");
+    assert!(match_answer(asked, "192.0.2.9:161".parse().unwrap(), &pkt, 7).is_none(), "another sender");
+    assert!(match_answer(asked, asked, &pkt, 8).is_none(), "another request");
+    assert!(match_answer(asked, asked, &[0x30, 0x05, 0x02], 7).is_none(), "a damaged packet is skipped");
 }

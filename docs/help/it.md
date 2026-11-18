@@ -99,6 +99,8 @@ Per ogni connessione scegli in **Password da**:
 **Accesso automatico:** per SSH e Telnet la password viene digitata quando il server la chiede
 (Impostazioni » *Digita automaticamente la password salvata nel terminale*). Per RDP viene passata a Windows
 solo per quella connessione.
+Ogni password salvata viene digitata una sola volta, e solo in una richiesta che nomina il proprio host; una richiesta
+senza nome host (come `Password:`) la riceve solo se la connessione ha una sola password. Altrimenti premi **Invia password** nella scheda.
 
 **Password principale** (Impostazioni » Posizione di archiviazione): senza di essa, le password salvate sono solo offuscate — chiunque
 abbia il file e AdminCraft potrebbe leggerle. Con una password principale sono crittografate davvero

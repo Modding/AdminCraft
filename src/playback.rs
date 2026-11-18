@@ -37,9 +37,16 @@ pub fn parse_cast(text: &str) -> Result<Cast, String> {
         timestamp: header["timestamp"].as_u64().unwrap_or(0),
         events: Vec::new(),
     };
+    // times are made safe to play: no NaN or infinity, never below 0, never going back
+    let mut last = 0.0f64;
     for l in lines {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(l) else { continue };
         let (Some(t), Some(kind), Some(data)) = (v[0].as_f64(), v[1].as_str(), v[2].as_str()) else { continue };
+        if !t.is_finite() {
+            continue;
+        }
+        let t = t.max(last);
+        last = t;
         match kind {
             "o" => cast.events.push((t, Ev::Out(data.to_string()))),
             "r" => {
@@ -56,18 +63,42 @@ pub fn parse_cast(text: &str) -> Result<Cast, String> {
 }
 
 /// Pauses longer than `max` seconds shrink to `max` (nobody wants to watch a coffee break).
+#[cfg(test)]
 pub fn compress_pauses(events: &[(f64, Ev)], max: f64) -> Vec<(f64, Ev)> {
-    let mut out = Vec::with_capacity(events.len());
+    shorten_pauses(events.to_vec(), max)
+}
+
+/// [`compress_pauses`] without copying the events.
+fn shorten_pauses(mut events: Vec<(f64, Ev)>, max: f64) -> Vec<(f64, Ev)> {
     let (mut last, mut shift) = (0.0, 0.0);
-    for (t, e) in events {
-        let gap = t - last;
+    for (t, _) in events.iter_mut() {
+        let gap = *t - last;
         if gap > max {
             shift += gap - max;
         }
         last = *t;
-        out.push(((t - shift).max(0.0), e.clone()));
+        *t = (*t - shift).max(0.0);
     }
-    out
+    events
+}
+
+/// Largest recording the playback tab opens.
+pub const MAX_CAST_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Reads a recording file of at most `max` bytes.
+pub(crate) fn read_cast_file(path: &Path, max: u64) -> Result<String, String> {
+    let too_large = || tf("The recording is too large to play (more than {0} MiB).", &[&(max / (1024 * 1024))]);
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    if file.metadata().map(|m| m.len()).unwrap_or(0) > max {
+        return Err(too_large());
+    }
+    let mut text = String::new();
+    // the size may grow while reading: never read more than allowed
+    std::io::Read::read_to_string(&mut std::io::Read::take(file, max.saturating_add(1)), &mut text).map_err(|e| e.to_string())?;
+    if text.len() as u64 > max {
+        return Err(too_large());
+    }
+    Ok(text)
 }
 
 pub fn recordings_dir() -> PathBuf {
@@ -110,8 +141,23 @@ pub fn list() -> Vec<RecFile> {
     v
 }
 
-struct Player {
+/// Memory all keyframes of one recording may take together (estimated).
+const KEYFRAME_MEMORY: usize = 64 * 1024 * 1024;
+/// Most keyframes of one recording.
+const MAX_KEYFRAMES: usize = 64;
+
+/// The screen at some point of the timeline, so a backward seek need not replay from the start.
+struct Keyframe {
+    /// Index of the first event not in `screen`.
+    next: usize,
+    /// Time of the last event in `screen`.
+    t: f64,
+    screen: vt100::Screen,
+}
+
+pub(crate) struct Player {
     path: PathBuf,
+    /// Header of the recording (its events moved to `events`).
     cast: Cast,
     /// The timeline played (pauses shortened when wanted).
     events: Vec<(f64, Ev)>,
@@ -119,19 +165,54 @@ struct Player {
     next: usize,
     t: f64,
     playing: bool,
+    keyframes: Vec<Keyframe>,
+    /// Output bytes between two keyframes.
+    key_every: usize,
+    /// Output bytes played since the last keyframe.
+    since_key: usize,
+    key_memory: usize,
 }
 
 impl Player {
     fn open(path: &Path, skip_pauses: bool) -> Result<Player, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let text = read_cast_file(path, MAX_CAST_BYTES)?;
         let cast = parse_cast(&text)?;
-        let events = if skip_pauses { compress_pauses(&cast.events, 2.0) } else { cast.events.clone() };
-        let parser = new_parser(cast.rows, cast.cols);
-        Ok(Player { path: path.to_path_buf(), cast, events, parser, next: 0, t: 0.0, playing: true })
+        drop(text);
+        Ok(Player::from_cast(path, cast, skip_pauses))
     }
 
-    fn duration(&self) -> f64 {
-        self.events.last().map(|e| e.0).unwrap_or(0.0)
+    pub(crate) fn from_cast(path: &Path, mut cast: Cast, skip_pauses: bool) -> Player {
+        let events = std::mem::take(&mut cast.events);
+        let events = if skip_pauses { shorten_pauses(events, 2.0) } else { events };
+        let total: usize = events.iter().map(|(_, e)| if let Ev::Out(s) = e { s.len() } else { 0 }).sum();
+        let parser = new_parser(cast.rows, cast.cols);
+        Player {
+            path: path.to_path_buf(),
+            cast,
+            events,
+            parser,
+            next: 0,
+            t: 0.0,
+            playing: true,
+            keyframes: Vec::new(),
+            key_every: (total / MAX_KEYFRAMES).max(256 * 1024),
+            since_key: 0,
+            key_memory: 0,
+        }
+    }
+
+    pub(crate) fn duration(&self) -> f64 {
+        self.events.last().map(|e| e.0).filter(|t| t.is_finite()).unwrap_or(0.0).max(0.0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn screen_text(&self) -> String {
+        self.parser.screen().contents()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn keyframes(&self) -> usize {
+        self.keyframes.len()
     }
 
     /// Plays everything up to `self.t`.
@@ -140,20 +221,54 @@ impl Player {
             if *t > self.t {
                 break;
             }
+            let t = *t;
+            let mut clean_end = true;
             match e {
-                Ev::Out(s) => self.parser.process(s.as_bytes()),
+                Ev::Out(s) => {
+                    self.parser.process(s.as_bytes());
+                    self.since_key += s.len();
+                    // a keyframe right inside an escape sequence would lose its start
+                    let b = s.as_bytes();
+                    clean_end = !b.get(b.len().saturating_sub(32)..).unwrap_or(b).contains(&0x1b);
+                }
                 Ev::Resize(c, r) => self.parser.set_size(crate::terminal::nz(*r), crate::terminal::nz(*c)),
             }
             self.next += 1;
+            if clean_end && self.since_key >= self.key_every {
+                self.keyframe(t);
+            }
         }
     }
 
-    fn seek(&mut self, t: f64) {
-        if t < self.t {
-            self.parser = new_parser(self.cast.rows, self.cast.cols);
-            self.next = 0;
+    /// Keeps the screen now as a keyframe, while memory and count allow.
+    fn keyframe(&mut self, t: f64) {
+        if self.keyframes.last().is_some_and(|k| k.next >= self.next) {
+            return;
         }
-        self.t = t.clamp(0.0, self.duration());
+        let (rows, cols) = self.parser.screen().size();
+        let cost = usize::from(rows.get()) * usize::from(cols.get()) * 64;
+        if self.keyframes.len() >= MAX_KEYFRAMES || self.key_memory + cost > KEYFRAME_MEMORY {
+            return;
+        }
+        self.keyframes.push(Keyframe { next: self.next, t, screen: self.parser.screen().clone() });
+        self.key_memory += cost;
+        self.since_key = 0;
+    }
+
+    pub(crate) fn seek(&mut self, t: f64) {
+        let t = if t.is_finite() { t.clamp(0.0, self.duration()) } else { 0.0 };
+        if t < self.t {
+            // back: from the last keyframe before `t`, or from the start
+            let mut parser = new_parser(self.cast.rows, self.cast.cols);
+            self.next = 0;
+            if let Some(k) = self.keyframes.iter().rev().find(|k| k.t <= t) {
+                *parser.screen_mut() = k.screen.clone();
+                self.next = k.next;
+            }
+            self.parser = parser;
+            self.since_key = 0;
+        }
+        self.t = t;
         self.advance();
     }
 }

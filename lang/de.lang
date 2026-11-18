@@ -867,3 +867,5 @@ Name with a line break or other control character refused: {0} = Name mit Zeilen
  – login not passed: the Credential Manager already has one for this host, that one is used =  – Anmeldedaten nicht übergeben: die Anmeldeinformationsverwaltung hat schon welche für diesen Host, die werden benutzt
 No private folder for the temporary browser profile. = Kein privater Ordner für das temporäre Browserprofil.
 Old PuTTY (before 0.77): the password is on its command line, please update PuTTY. = Altes PuTTY (vor 0.77): das Passwort steht auf dessen Kommandozeile, bitte PuTTY aktualisieren.
+Referral to {0} was not followed (not a public WHOIS server). = Verweis auf {0} nicht gefolgt (kein öffentlicher WHOIS-Server).
+The recording is too large to play (more than {0} MiB). = Die Aufzeichnung ist zu groß zum Abspielen (mehr als {0} MiB).
