@@ -855,3 +855,160 @@ fn embedded_window_that_frees_itself_is_noticed() {
     // a single border line is no reason to take it in again (that would flicker every frame)
     assert!(!embedding_broken(inside | 0x0080_0000, true));
 }
+
+#[test]
+fn power_menu_only_where_it_can_work() {
+    use crate::extra::{power_possible, windows_power};
+    assert!(power_possible(Protocol::Ssh), "sudo reboot over SSH works from every system");
+    for p in [Protocol::Rdp, Protocol::Vnc, Protocol::PowerShell] {
+        assert_eq!(power_possible(p), cfg!(windows), "shutdown /m only exists on Windows: {p:?}");
+    }
+    assert!(!power_possible(Protocol::Http));
+    if !cfg!(windows) {
+        // outside Windows `shutdown` is the local machine's program: refused before it starts
+        assert!(windows_power("192.0.2.1", true).is_err());
+    }
+}
+
+#[test]
+fn cmd_c_on_macos_does_not_interrupt() {
+    use crate::terminal::{clipboard_key_bytes, key_bytes};
+    use eframe::egui::{Key, Modifiers};
+    // Windows and Linux: Ctrl+C reaches the terminal as "copy" and stays the interrupt
+    assert_eq!(clipboard_key_bytes(0x03, false), Some(0x03));
+    assert_eq!(clipboard_key_bytes(0x18, false), Some(0x18));
+    // macOS: "copy" is Cmd+C, nothing goes to the program
+    assert_eq!(clipboard_key_bytes(0x03, true), None);
+    assert_eq!(clipboard_key_bytes(0x18, true), None);
+    // the real Ctrl+C on macOS is a key with Ctrl held and still interrupts
+    assert_eq!(key_bytes(Key::C, Modifiers::CTRL, false), Some(vec![0x03]));
+    assert_eq!(key_bytes(Key::C, Modifiers::MAC_CMD, false), None);
+}
+
+#[test]
+fn freerdp_2_and_3_get_their_own_options() {
+    use crate::launch::{Creds, freerdp_args, freerdp_version, freerdp_version_of};
+    use crate::model::Entry;
+    // told by the library the program links
+    assert_eq!(freerdp_version_of(b"\0libfreerdp-client2.so.2\0libwinpr2.so.2\0"), 2);
+    assert_eq!(freerdp_version_of(b"\0libfreerdp-client3.so.3\0"), 3);
+    assert_eq!(freerdp_version_of(b"@rpath/libfreerdp-client3.3.dylib"), 3);
+    assert_eq!(freerdp_version_of(b"nothing known"), 3, "unknown: the current version");
+    // a 3 in the name needs no look into the file
+    assert_eq!(freerdp_version(std::path::Path::new("/nonexistent/xfreerdp3")), 3);
+
+    let mut e = Entry { host: " rdp01 ".into(), protocol: Protocol::Rdp, port: 0, ..Default::default() };
+    e.rdp.redirect_drives = true;
+    let c = Creds { user: "admin".into(), domain: "CORP".into(), password: String::new() };
+    let v2 = freerdp_args(&e, &c, 2);
+    assert!(v2.contains(&"/cert-tofu".to_string()) && !v2.iter().any(|a| a.starts_with("/cert:")));
+    let v3 = freerdp_args(&e, &c, 3);
+    assert!(v3.contains(&"/cert:tofu".to_string()) && !v3.contains(&"/cert-tofu".to_string()));
+    for args in [&v2, &v3] {
+        assert_eq!(args[0], "/v:rdp01", "port 0 means the default port");
+        assert!(args.contains(&"+home-drive".to_string()) && !args.iter().any(|a| a.contains('~')));
+        assert!(args.contains(&"/u:admin".to_string()) && args.contains(&"/d:CORP".to_string()));
+    }
+    e.port = 3390;
+    assert_eq!(freerdp_args(&e, &c, 3)[0], "/v:rdp01:3390");
+}
+
+#[test]
+fn remmina_gets_the_default_rdp_port() {
+    use crate::launch::{Creds, remmina_rdp_url};
+    use crate::model::Entry;
+    let mut e = Entry { host: "rdp01".into(), protocol: Protocol::Rdp, port: 0, ..Default::default() };
+    assert_eq!(remmina_rdp_url(&e, &Creds::default()), "rdp://rdp01:3389");
+    e.port = 3390;
+    let c = Creds { user: "admin".into(), ..Default::default() };
+    assert_eq!(remmina_rdp_url(&e, &c), "rdp://admin@rdp01:3390");
+}
+
+#[cfg(unix)]
+#[test]
+fn password_files_live_in_a_folder_of_this_user_only() {
+    use crate::secretfile::{private_dir, write};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let base = std::env::temp_dir().join(format!("admincraft-private-test-{}", std::process::id()));
+    std::fs::create_dir_all(&base).unwrap();
+    let uid = std::fs::metadata(&base).unwrap().uid();
+    // new: made with 0700
+    let d = private_dir(&base.join("new"), uid).unwrap();
+    assert_eq!(std::fs::metadata(&d).unwrap().mode() & 0o777, 0o700);
+    // there already, ours but open for others (an older AdminCraft made it with 0755): closed
+    let wide = base.join("wide");
+    std::fs::create_dir(&wide).unwrap();
+    std::fs::set_permissions(&wide, std::fs::Permissions::from_mode(0o755)).unwrap();
+    private_dir(&wide, uid).unwrap();
+    assert_eq!(std::fs::metadata(&wide).unwrap().mode() & 0o777, 0o700);
+    // someone else's folder is refused, and so is a link
+    assert!(private_dir(&wide, uid.wrapping_add(1)).is_err());
+    let link = base.join("link");
+    std::os::unix::fs::symlink(&wide, &link).unwrap();
+    assert!(private_dir(&link, uid).is_err());
+    // the real password folder is one of these
+    let f = write("x").unwrap();
+    let parent = f.path().parent().unwrap().to_path_buf();
+    let md = std::fs::symlink_metadata(&parent).unwrap();
+    assert!(md.is_dir() && md.uid() == uid && md.mode() & 0o077 == 0, "{}", parent.display());
+    assert_ne!(parent, std::env::temp_dir().join("admincraft"), "not the folder all users share");
+    drop(f);
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn macos_terminal_never_sees_the_password() {
+    use crate::programs::{macos_do_script, terminal_script};
+    use std::path::Path;
+    let env = vec![("AC_ASKPASS_PW_0".to_string(), "s3cr'et pw".to_string())];
+    let args = vec!["-p".to_string(), "2222".to_string(), "root@db 01".to_string()];
+    let script = terminal_script(Path::new("/usr/bin/ssh"), &args, &env);
+    // the script file removes itself first, then sets the environment and starts ssh
+    let lines: Vec<&str> = script.lines().collect();
+    assert_eq!(lines[0], "rm -f -- \"$0\"");
+    assert_eq!(lines[1], r#"export AC_ASKPASS_PW_0='s3cr'\''et pw'"#);
+    assert_eq!(lines[2], "/usr/bin/ssh -p 2222 'root@db 01'");
+    // what Terminal is told to type: only the script's name
+    let apple = macos_do_script(Path::new("/private/var/folders/x/admincraft-501/pw-1-ab.txt"));
+    assert_eq!(apple, "tell application \"Terminal\" to do script \"/bin/sh /private/var/folders/x/admincraft-501/pw-1-ab.txt\"");
+    assert!(!apple.contains("s3cr"));
+}
+
+#[test]
+fn powershell_goes_over_ssh_where_there_is_no_winrm() {
+    use crate::launch::{Creds, powershell_session};
+    use crate::model::Entry;
+    let mut e = Entry { host: " win01 ".into(), protocol: Protocol::PowerShell, port: 5985, ..Default::default() };
+    let c = Creds { user: "admin".into(), domain: "CORP".into(), password: "pw".into() };
+    // Windows: WinRM with a credential from the environment
+    let (s, env) = powershell_session(&e, &c, false);
+    assert!(s.contains("-ComputerName $env:AC_HOST") && s.contains("-Credential $c"));
+    assert!(env.contains(&("AC_PW".to_string(), "pw".to_string())));
+    // Linux / macOS: SSH remoting; the password is typed at ssh's prompt, it is not in the environment
+    let (s, env) = powershell_session(&e, &c, true);
+    assert_eq!(s, "Enter-PSSession -HostName $env:AC_HOST -UserName $env:AC_USER");
+    assert!(env.contains(&("AC_HOST".to_string(), "win01".to_string())));
+    assert!(env.contains(&("AC_USER".to_string(), r"CORP\admin".to_string())));
+    assert!(!env.iter().any(|(k, _)| k == "AC_PW"));
+    e.port = 2222;
+    assert!(powershell_session(&e, &c, true).0.ends_with(" -Port 2222"));
+    for p in [0, 22, 5985, 5986] {
+        e.port = p;
+        assert!(!powershell_session(&e, &c, true).0.contains("-Port"), "port {p}");
+    }
+}
+
+#[test]
+fn scan_names_and_traceroute_outside_windows() {
+    use crate::netscan::parse_reverse_name;
+    use crate::tools::trace_cmd;
+    assert_eq!(parse_reverse_name("10.0.0.5        web01.lan web01\n", false), "web01.lan");
+    assert_eq!(parse_reverse_name("", false), "");
+    // macOS: dscacheutil, no getent
+    assert_eq!(parse_reverse_name("name: router.lan\nip_address: 192.168.1.1\n\n", true), "router.lan");
+    assert_eq!(parse_reverse_name("", true), "");
+    assert!(parse_reverse_name(&format!("name: {}", "a".repeat(5000)), true).len() <= 253, "bounded");
+    assert_eq!(trace_cmd("h", true, false).0, "tracert");
+    assert_eq!(trace_cmd("h", false, false), ("traceroute".to_string(), vec!["-n".to_string(), "h".to_string()]));
+    assert_eq!(trace_cmd("h", false, true).0, "tracepath", "Linux without traceroute");
+}

@@ -74,7 +74,7 @@ Right-click a folder » **Open all connections in the folder** opens them all at
 | RDP | Remote Desktop window inside the tab (Windows) | `mstsc` (Windows), FreeRDP or Remmina (Linux), Windows App (macOS) |
 | VNC | viewer window inside the tab | a VNC viewer such as TigerVNC or TightVNC |
 | Telnet | terminal tab | — |
-| PowerShell | terminal tab with `Enter-PSSession` | PowerShell, WinRM on the target |
+| PowerShell | terminal tab with `Enter-PSSession` | PowerShell; WinRM on the target. Linux and macOS: PowerShell remoting over SSH (`-HostName`) |
 | HTTP / HTTPS | browser app window inside the tab | Edge, Chrome or your own browser (Brave, Vivaldi, Firefox …); otherwise the normal browser |
 | SFTP / SCP / FTP / FTPS | file transfer tab | OpenSSH or PuTTY for SFTP/SCP; FTP is built in |
 | Serial, raw TCP, rlogin | PuTTY in the tab or a terminal tab | PuTTY/plink (Windows); picocom, nc … elsewhere |
@@ -173,7 +173,7 @@ All tools are in the **Tools** menu, the buttons at the top, and the right-click
   started by hand or together with the connection.
 - **Check status** (button above the tree) — tests every connection's port and colours the dots in the tree.
 - **Windows tools** (right-click a Windows server) — services, event viewer, computer management,
-  the `C$` share, **Restart** and **Shut down** (with confirmation). Linux servers can be restarted over SSH.
+  the `C$` share, **Restart** and **Shut down** (with confirmation). Linux servers can be restarted over SSH. Restarting Windows computers needs AdminCraft on Windows.
 - **Multi-input** — type the same thing into several SSH tabs at once (Tools » Multi-input).
 - **Saved commands** — in the terminal tab under *Commands*; placeholders `{host}` `{user}` `{name}`.
 - **Whois** — who owns a domain or an IP address, with the registrar and the dates.

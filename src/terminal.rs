@@ -490,8 +490,8 @@ impl Terminal {
         for ev in events {
             match ev {
                 egui::Event::Text(t) => out.extend_from_slice(t.as_bytes()),
-                egui::Event::Copy => out.push(0x03),
-                egui::Event::Cut => out.push(0x18),
+                egui::Event::Copy => out.extend(clipboard_key_bytes(0x03, cfg!(target_os = "macos"))),
+                egui::Event::Cut => out.extend(clipboard_key_bytes(0x18, cfg!(target_os = "macos"))),
                 egui::Event::Paste(t) => {
                     let t = t.replace("\r\n", "\r").replace('\n', "\r");
                     if bracketed {
@@ -518,7 +518,14 @@ impl Terminal {
     }
 }
 
-fn key_bytes(key: Key, m: egui::Modifiers, app_cursor: bool) -> Option<Vec<u8>> {
+/// What egui's "copy" / "cut" (Ctrl+C / Ctrl+X, on macOS Cmd+C / Cmd+X) sends to the program.
+/// On Windows and Linux that is Ctrl+C itself, the interrupt. On macOS it is Cmd+C, which people
+/// press to copy: it must not stop the running command (Ctrl+C there arrives as a normal key).
+pub fn clipboard_key_bytes(control: u8, macos: bool) -> Option<u8> {
+    if macos { None } else { Some(control) }
+}
+
+pub(crate) fn key_bytes(key: Key, m: egui::Modifiers, app_cursor: bool) -> Option<Vec<u8>> {
     let arrow = |c: u8| -> Vec<u8> {
         if m.ctrl {
             format!("\x1b[1;5{}", c as char).into_bytes()

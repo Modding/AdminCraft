@@ -74,7 +74,7 @@ Rechtsklick auf einen Ordner » **Alle Verbindungen im Ordner öffnen** öffnet 
 | RDP | Remotedesktop-Fenster im Tab (Windows) | `mstsc` (Windows), FreeRDP oder Remmina (Linux), Windows App (macOS) |
 | VNC | Viewer-Fenster im Tab | einen VNC-Viewer wie TigerVNC oder TightVNC |
 | Telnet | Terminal-Tab | — |
-| PowerShell | Terminal-Tab mit `Enter-PSSession` | PowerShell, WinRM auf dem Ziel |
+| PowerShell | Terminal-Tab mit `Enter-PSSession` | PowerShell; WinRM auf dem Ziel. Linux und macOS: PowerShell-Remoting über SSH (`-HostName`) |
 | HTTP / HTTPS | Browser-App-Fenster im Tab | Edge, Chrome oder Ihr eigener Browser (Brave, Vivaldi, Firefox …); sonst der normale Browser |
 | SFTP / SCP / FTP / FTPS | Dateiübertragungs-Tab | OpenSSH oder PuTTY für SFTP/SCP; FTP ist eingebaut |
 | Seriell, Raw-TCP, rlogin | PuTTY im Tab oder ein Terminal-Tab | PuTTY/plink (Windows); picocom, nc … anderswo |
@@ -173,7 +173,7 @@ Alle Werkzeuge stehen im Menü **Werkzeuge**, in den Schaltflächen oben und im 
   von Hand oder zusammen mit der Verbindung gestartet.
 - **Status prüfen** (Schaltfläche über dem Baum) – testet den Port jeder Verbindung und färbt die Punkte im Baum.
 - **Windows-Verwaltung** (Rechtsklick auf einen Windows-Server) – Dienste, Ereignisanzeige, Computerverwaltung,
-  die Freigabe `C$`, **Neu starten** und **Herunterfahren** (mit Rückfrage). Linux-Server lassen sich über SSH neu starten.
+  die Freigabe `C$`, **Neu starten** und **Herunterfahren** (mit Rückfrage). Linux-Server lassen sich über SSH neu starten. Windows-Computer neu starten geht nur mit AdminCraft unter Windows.
 - **Mehrfach-Eingabe** – dasselbe gleichzeitig in mehrere SSH-Tabs tippen (Werkzeuge » Mehrfach-Eingabe).
 - **Gespeicherte Befehle** – im Terminal-Tab unter *Befehle*; Platzhalter `{host}` `{user}` `{name}`.
 

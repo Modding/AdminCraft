@@ -74,7 +74,7 @@ Clic droit sur un dossier » **Ouvrir toutes les connexions du dossier** les ouv
 | RDP | fenêtre Bureau à distance dans l'onglet (Windows) | `mstsc` (Windows), FreeRDP ou Remmina (Linux), Windows App (macOS) |
 | VNC | fenêtre de la visionneuse dans l'onglet | une visionneuse VNC comme TigerVNC ou TightVNC |
 | Telnet | onglet terminal | — |
-| PowerShell | onglet terminal avec `Enter-PSSession` | PowerShell, WinRM sur la cible |
+| PowerShell | onglet terminal avec `Enter-PSSession` | PowerShell ; WinRM sur la cible. Linux et macOS : PowerShell remoting via SSH (`-HostName`) |
 | HTTP / HTTPS | fenêtre d'application du navigateur dans l'onglet | Edge, Chrome ou votre propre navigateur (Brave, Vivaldi, Firefox …) ; sinon le navigateur habituel |
 | SFTP / SCP / FTP / FTPS | onglet de transfert de fichiers | OpenSSH ou PuTTY pour SFTP/SCP ; FTP est intégré |
 | Série, TCP brut, rlogin | PuTTY dans l'onglet ou un onglet terminal | PuTTY/plink (Windows) ; picocom, nc … ailleurs |
@@ -174,7 +174,7 @@ Tous les outils se trouvent dans le menu **Outils**, dans les boutons du haut et
   démarrées à la main ou en même temps que la connexion.
 - **Vérifier l'état** (bouton au-dessus de l'arborescence) — teste le port de chaque connexion et colore les points de l'arborescence.
 - **Outils Windows** (clic droit sur un serveur Windows) — services, observateur d'événements, gestion de l'ordinateur,
-  le partage `C$`, **Redémarrer** et **Éteindre** (avec confirmation). Les serveurs Linux peuvent être redémarrés via SSH.
+  le partage `C$`, **Redémarrer** et **Éteindre** (avec confirmation). Les serveurs Linux peuvent être redémarrés via SSH. Redémarrer des ordinateurs Windows nécessite AdminCraft sous Windows.
 - **Saisie multiple** — tapez la même chose dans plusieurs onglets SSH à la fois (Outils » Saisie multiple).
 - **Commandes enregistrées** — dans l'onglet terminal sous *Commandes* ; variables `{host}` `{user}` `{name}`.
 

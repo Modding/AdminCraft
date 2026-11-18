@@ -174,15 +174,31 @@ fn reverse_name(ip: Ipv4Addr) -> String {
     if cfg!(windows) {
         return String::new(); // came with ping -a
     }
-    let mut cmd = Command::new("getent");
-    cmd.args(["hosts", &ip.to_string()]).stdout(Stdio::piped()).stderr(Stdio::null());
-    if let Ok(out) = cmd.output() {
-        let s = String::from_utf8_lossy(&out.stdout);
-        if let Some(name) = s.split_whitespace().nth(1) {
-            return name.to_string();
-        }
+    // macOS has no getent; dscacheutil asks the same system resolver (hosts file, DNS, Bonjour)
+    let macos = cfg!(target_os = "macos");
+    let ip = ip.to_string();
+    let mut cmd = if macos { Command::new("dscacheutil") } else { Command::new("getent") };
+    if macos {
+        cmd.args(["-q", "host", "-a", "ip_address", &ip]);
+    } else {
+        cmd.args(["hosts", &ip]);
     }
-    String::new()
+    cmd.stdout(Stdio::piped()).stderr(Stdio::null()).stdin(Stdio::null());
+    match cmd.output() {
+        Ok(out) => parse_reverse_name(&String::from_utf8_lossy(&out.stdout), macos),
+        Err(_) => String::new(),
+    }
+}
+
+/// The host name in the answer of `getent hosts IP` ("10.0.0.5  web01.lan web01") or, on macOS,
+/// `dscacheutil -q host -a ip_address IP` ("name: web01.lan" lines).
+pub fn parse_reverse_name(text: &str, macos: bool) -> String {
+    let name = if macos {
+        text.lines().find_map(|l| l.trim().strip_prefix("name:")).map(str::trim)
+    } else {
+        text.lines().next().and_then(|l| l.split_whitespace().nth(1))
+    };
+    name.unwrap_or("").chars().take(253).collect()
 }
 
 /// IP → MAC from the system's neighbour table (filled by the scan itself).

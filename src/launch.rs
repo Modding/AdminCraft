@@ -301,30 +301,18 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
         Protocol::PowerShell => {
             let ps = if cfg!(windows) { first_found(&["pwsh", "powershell"]) } else { first_found(&["pwsh"]) }
                 .ok_or(tr("PowerShell not found (install pwsh)."))?;
-            let mut script = String::from("Enter-PSSession -ComputerName $env:AC_HOST");
-            if e.port != 0 && e.port != 5985 {
-                script.push_str(&format!(" -Port {0}", e.port));
-                if e.port == 5986 {
-                    script.push_str(" -UseSSL");
-                }
-            }
+            // PowerShell 7 on Linux and macOS has no WSMan: there it goes over SSH, and ssh's
+            // password prompt is answered like in an SSH tab.
+            let over_ssh = !cfg!(windows);
+            let (script, env) = powershell_session(e, c, over_ssh);
             let mut cmd = CommandBuilder::new(&ps);
-            cmd.env("AC_HOST", e.host.trim());
-            if !c.user.is_empty() {
-                cmd.env("AC_USER", c.full_user());
-                if !c.password.is_empty() {
-                    cmd.env("AC_PW", &c.password);
-                    script = format!(
-                        "$c = New-Object System.Management.Automation.PSCredential($env:AC_USER, (ConvertTo-SecureString $env:AC_PW -AsPlainText -Force)); Remove-Item Env:AC_PW; {0} -Credential $c",
-                        script
-                    );
-                } else {
-                    script.push_str(" -Credential $env:AC_USER");
-                }
+            for (k, v) in &env {
+                cmd.env(k, v);
             }
             cmd.args(["-NoLogo", "-NoExit", "-Command", &script]);
-            let preview = format!("Enter-PSSession -ComputerName {0}", e.host.trim());
-            Ok(Launch::Terminal { cmd, preview, passwords: Vec::new(), chain: Vec::new() })
+            let how = if over_ssh { "-HostName" } else { "-ComputerName" };
+            let preview = format!("Enter-PSSession {how} {0}", e.host.trim());
+            Ok(Launch::Terminal { cmd, preview, passwords: if over_ssh { single_pw } else { Vec::new() }, chain: Vec::new() })
         }
         Protocol::LocalShell => {
             let mut cmd = if cfg!(windows) {
@@ -377,6 +365,47 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
         Protocol::Vnc => launch_vnc(e, c, settings),
         Protocol::Serial | Protocol::Raw | Protocol::Rlogin => launch_line(e, c, settings, &extra),
     }
+}
+
+/// The PowerShell command for a remote session and the environment it reads host, user and
+/// password from (never the command line). `over_ssh`: PowerShell remoting over SSH
+/// (`-HostName`, Linux and macOS, where PowerShell has no WSMan); the password is typed at ssh's
+/// prompt instead. Otherwise WinRM (`-ComputerName`), port 5986 with TLS.
+pub fn powershell_session(e: &Entry, c: &Creds, over_ssh: bool) -> (String, Vec<(String, String)>) {
+    let mut env = vec![("AC_HOST".to_string(), e.host.trim().to_string())];
+    let winrm_port = matches!(e.port, 0 | 5985 | 5986);
+    if over_ssh {
+        let mut script = String::from("Enter-PSSession -HostName $env:AC_HOST");
+        if !c.user.is_empty() {
+            env.push(("AC_USER".into(), c.full_user()));
+            script.push_str(" -UserName $env:AC_USER");
+        }
+        // the WinRM ports of an entry made for Windows mean "the usual", here SSH's 22
+        if !winrm_port && e.port != 22 {
+            script.push_str(&format!(" -Port {0}", e.port));
+        }
+        return (script, env);
+    }
+    let mut script = String::from("Enter-PSSession -ComputerName $env:AC_HOST");
+    if e.port != 0 && e.port != 5985 {
+        script.push_str(&format!(" -Port {0}", e.port));
+        if e.port == 5986 {
+            script.push_str(" -UseSSL");
+        }
+    }
+    if !c.user.is_empty() {
+        env.push(("AC_USER".into(), c.full_user()));
+        if !c.password.is_empty() {
+            env.push(("AC_PW".into(), c.password.clone()));
+            script = format!(
+                "$c = New-Object System.Management.Automation.PSCredential($env:AC_USER, (ConvertTo-SecureString $env:AC_PW -AsPlainText -Force)); Remove-Item Env:AC_PW; {0} -Credential $c",
+                script
+            );
+        } else {
+            script.push_str(" -Credential $env:AC_USER");
+        }
+    }
+    (script, env)
 }
 
 /// Serial console, raw TCP and rlogin: PuTTY in the tab, else plink in a terminal tab, else
@@ -725,45 +754,77 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
         Ok(Launch::Done(tf("RDP file opened (Windows App / Microsoft Remote Desktop): {0}", &[&host])))
     } else {
         if let Some(prog) = programs::find("rdp", settings) {
-            let addr = if e.port == 3389 || e.port == 0 { host.to_string() } else { format!("{host}:{}", e.port) };
-            let mut args = vec![format!("/v:{addr}"), "/cert:tofu".to_string(), "/dynamic-resolution".into()];
-            if !c.user.is_empty() {
-                args.push(format!("/u:{}", c.user));
-            }
-            if !c.domain.is_empty() {
-                args.push(format!("/d:{}", c.domain));
-            }
-            if !c.password.is_empty() && e.rdp.pass_credentials {
-                args.push(format!("/p:{}", c.password));
-            }
-            if e.rdp.fullscreen {
-                args.push("/f".into());
-            } else if e.rdp.width > 0 {
-                args.push(format!("/size:{}x{}", e.rdp.width, e.rdp.height));
-            }
-            if e.rdp.multimon {
-                args.push("/multimon".into());
-            }
-            if e.rdp.redirect_clipboard {
-                args.push("+clipboard".into());
-            }
-            if e.rdp.redirect_drives {
-                args.push("/drive:home,~".into());
-            }
-            if e.rdp.admin_session {
-                args.push("/admin".into());
-            }
-            args.extend(split_words(&e.extra_args));
+            let args = freerdp_args(e, c, freerdp_version(&prog));
             let child = spawn(&prog, &args)?;
             return Ok(Launch::Process { child, label: tf("FreeRDP: {0}", &[&host]), embed: None });
         }
         if let Some(prog) = programs::find("remmina", settings) {
-            let url = if c.user.is_empty() { format!("rdp://{host}:{}", e.port) } else { format!("rdp://{}@{host}:{}", c.user, e.port) };
-            let child = spawn(&prog, &["-c".into(), url])?;
+            let child = spawn(&prog, &["-c".into(), remmina_rdp_url(e, c)])?;
             return Ok(Launch::Process { child, label: tf("Remmina: {0}", &[&host]), embed: None });
         }
         Err(tr("No RDP program found. Please install FreeRDP (xfreerdp) or Remmina.").into())
     }
+}
+
+/// The main version of a FreeRDP program (2 or 3). Their options differ (`/cert-tofu` against
+/// `/cert:tofu`), and FreeRDP refuses an option it doesn't know. FreeRDP 3 programs often carry
+/// the 3 in their name (`xfreerdp3`); a plain `xfreerdp` is told by the library it links
+/// (`libfreerdp-client2` / `-client3`), read from the file, so nothing is started. Unknown: 3.
+pub fn freerdp_version(program: &Path) -> u8 {
+    let name = program.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if name.ends_with('3') {
+        return 3;
+    }
+    std::fs::read(program).map(|bytes| freerdp_version_of(&bytes)).unwrap_or(3)
+}
+
+/// See `freerdp_version`: the version from the bytes of the program file.
+pub fn freerdp_version_of(program_bytes: &[u8]) -> u8 {
+    let has = |s: &[u8]| program_bytes.windows(s.len()).any(|w| w == s);
+    if !has(b"freerdp-client3") && (has(b"freerdp-client2") || has(b"freerdp2")) { 2 } else { 3 }
+}
+
+/// What Remmina opens for a Remote Desktop connection (port 0 = the default port).
+pub fn remmina_rdp_url(e: &Entry, c: &Creds) -> String {
+    let (host, port) = (e.host.trim(), effective_port(e));
+    if c.user.is_empty() { format!("rdp://{host}:{port}") } else { format!("rdp://{}@{host}:{port}", c.user) }
+}
+
+/// The FreeRDP command line (Linux, macOS) for FreeRDP `version` 2 or 3.
+pub fn freerdp_args(e: &Entry, c: &Creds, version: u8) -> Vec<String> {
+    let host = e.host.trim();
+    let addr = if e.port == 3389 || e.port == 0 { host.to_string() } else { format!("{host}:{}", e.port) };
+    let tofu = if version == 2 { "/cert-tofu" } else { "/cert:tofu" };
+    let mut args = vec![format!("/v:{addr}"), tofu.to_string(), "/dynamic-resolution".into()];
+    if !c.user.is_empty() {
+        args.push(format!("/u:{}", c.user));
+    }
+    if !c.domain.is_empty() {
+        args.push(format!("/d:{}", c.domain));
+    }
+    if !c.password.is_empty() && e.rdp.pass_credentials {
+        args.push(format!("/p:{}", c.password));
+    }
+    if e.rdp.fullscreen {
+        args.push("/f".into());
+    } else if e.rdp.width > 0 && e.rdp.height > 0 {
+        args.push(format!("/size:{}x{}", e.rdp.width, e.rdp.height));
+    }
+    if e.rdp.multimon {
+        args.push("/multimon".into());
+    }
+    if e.rdp.redirect_clipboard {
+        args.push("+clipboard".into());
+    }
+    if e.rdp.redirect_drives {
+        // the home folder, in both versions (a "~" in /drive: is not expanded by every version)
+        args.push("+home-drive".into());
+    }
+    if e.rdp.admin_session {
+        args.push("/admin".into());
+    }
+    args.extend(split_words(&e.extra_args));
+    args
 }
 
 // ------------------------------------------------------------------ VNC

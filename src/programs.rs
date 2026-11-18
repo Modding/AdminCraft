@@ -289,6 +289,30 @@ fn sh_quote(s: &str) -> String {
     }
 }
 
+/// The shell script a macOS Terminal runs for `spawn_in_terminal`: it removes its own file first
+/// (the shell keeps reading the open file), then sets the environment and starts the program.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn terminal_script(program: &Path, args: &[String], env: &[(String, String)]) -> String {
+    let mut s = String::from("rm -f -- \"$0\"\n");
+    for (k, v) in env {
+        s.push_str(&format!("export {0}={1}\n", k, sh_quote(v)));
+    }
+    s.push_str(&sh_quote(&program.display().to_string()));
+    for a in args {
+        s.push(' ');
+        s.push_str(&sh_quote(a));
+    }
+    s.push('\n');
+    s
+}
+
+/// The AppleScript that has Terminal run the script file `script` – only its name is typed.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn macos_do_script(script: &Path) -> String {
+    let line = format!("/bin/sh {}", sh_quote(&script.display().to_string()));
+    format!("tell application \"Terminal\" to do script \"{0}\"", line.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// Starts a program in its own terminal window (e.g. OpenSSH "outside" AdminCraft).
 pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(String, String)]) -> Result<String, String> {
     #[cfg(windows)]
@@ -312,22 +336,18 @@ pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(S
     }
     #[cfg(target_os = "macos")]
     {
-        let mut line = String::new();
-        for (k, v) in env {
-            line.push_str(&format!("export {0}={1}; ", k, sh_quote(v)));
-        }
-        line.push_str(&sh_quote(&program.display().to_string()));
-        for a in args {
-            line.push(' ');
-            line.push_str(&sh_quote(a));
-        }
-        let script = format!("tell application \"Terminal\" to do script \"{0}\"", line.replace('\\', "\\\\").replace('"', "\\\""));
+        // Terminal gets only the name of a script file: what it is told to type shows in its
+        // window and lands in the shell history, and the environment can hold passwords. The file
+        // is readable by this user only and removes itself when the shell starts it.
+        let file = crate::secretfile::write(&terminal_script(program, args, env))?;
         let _ = title;
         Command::new("osascript")
-            .args(["-e", &script, "-e", "tell application \"Terminal\" to activate"])
+            .args(["-e", &macos_do_script(file.path()), "-e", "tell application \"Terminal\" to activate"])
             .spawn()
-            .map(|_| tr("Terminal").to_string())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        // from here the script removes itself (a Terminal that never runs it: swept after a day)
+        file.leave_to_program();
+        Ok(tr("Terminal").to_string())
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
@@ -344,7 +364,8 @@ pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(S
         for (term, pre) in candidates {
             if let Some(t) = crate::launch::which(term) {
                 let mut cmd = Command::new(t);
-                if term == "xterm" || term == "konsole" || term == "x-terminal-emulator" {
+                // -T (title) is part of what Debian asks of x-terminal-emulator; Konsole may refuse it
+                if term == "xterm" || term == "x-terminal-emulator" {
                     cmd.args(["-T", title]);
                 }
                 cmd.args(pre).args(&line);

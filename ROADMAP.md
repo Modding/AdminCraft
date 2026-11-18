@@ -24,6 +24,52 @@
 - KeePass as connection list with KeePassXC open at the same time; SNMP against real switches.
 - Linux and macOS builds (compiled and run there).
 
+## Linux and macOS (code review 2026-11-18)
+
+Found by reading the code and the release files; nothing was run on a Linux or macOS machine.
+
+Open:
+
+1. **Check the Linux release's glibc in the next nightly dry run.** Built on `ubuntu-latest`
+   (Ubuntu 26.04) the program linked `atan2f@GLIBC_2.43` and didn't start on Ubuntu 24.04 LTS,
+   Debian 13, Fedora 43 or RHEL. Since #10 it is built in the `build-linux` job inside
+   `ubuntu:22.04` (glibc 2.35), and a step fails the build when it needs more. Look at that step
+   ("Check the glibc it needs") in the first dry run, and if possible start the program on
+   Ubuntu 22.04 or Debian 12.
+2. **Try the fixes below on real machines:** OpenSSH in its own window on macOS (the Terminal
+   shows only `/bin/sh …/pw-….txt`, the file is gone afterwards, the password is typed by
+   AdminCraft); FreeRDP 2 (Debian 12) and 3 (`xfreerdp3`, Homebrew) with *Connect local drives*;
+   PowerShell over SSH to a host with PowerShell as SSH subsystem; PuTTY with password on a
+   Linux machine with two users; a network scan with names on macOS; OpenSSH in its own window
+   from KDE (Konsole).
+
+Fixed in code (tests in `src/tests.rs`, not yet tried on Linux or macOS):
+
+- **macOS: password visible in Terminal.** OpenSSH "in its own window" sent
+  `export AC_ASKPASS_PW_0='…'` to Terminal through `osascript`: shown in the window, kept in the
+  shell history. Now Terminal runs a script file only the user can read, which removes itself
+  (`programs::terminal_script`).
+- **FreeRDP 2.** `/cert:tofu` is FreeRDP 3 syntax (FreeRDP 2: `/cert-tofu`), and Debian 12,
+  Ubuntu 22.04 and Mint 21 ship FreeRDP 2 as `xfreerdp`. The version is now told from the program
+  (`launch::freerdp_version`); drives go as `+home-drive` instead of `/drive:home,~`.
+- **Restart / shut down ran the local `shutdown`** with Windows arguments for Remote Desktop, VNC
+  and PowerShell connections on Linux and macOS. The menu now offers it there for SSH only, and
+  `extra::windows_power` refuses to start outside Windows.
+- **PowerShell connections** used `Enter-PSSession -ComputerName` (WSMan), which PowerShell 7 on
+  Linux and macOS doesn't have; there it now goes over SSH (`-HostName`, `launch::powershell_session`).
+- **Terminal: Cmd+C on macOS** was sent as Ctrl+C and stopped the running command; now nothing
+  is sent (Ctrl+C still interrupts).
+- **Password files in the shared `/tmp/admincraft`** (made 0755 by the first user, so a second
+  user couldn't write there). Now `$XDG_RUNTIME_DIR/admincraft` or `admincraft-<uid>`, 0700,
+  refused when it belongs to someone else (`secretfile::private_dir`).
+- **Network scan names on macOS** came from `getent`, which macOS doesn't have; now `dscacheutil`.
+- **Remmina** got `rdp://host:0` for port 0; now the default port.
+- **Traceroute on Linux** falls back to `tracepath` when `traceroute` isn't installed.
+- **Konsole** no longer gets `-T` (title), which it may refuse.
+- **macOS release:** the README says how to allow the unsigned program (Gatekeeper). Signing and
+  an Intel build: *Releases* in the work list.
+- **German text in the code:** the section title "SSH / Dateien" is now translated text.
+
 ## Work list (security and Craft house rules)
 
 Open work, most useful first. Each item is one pull request against `main`: read `AGENTS.md`
