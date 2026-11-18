@@ -78,175 +78,191 @@ fixes one marks it **fixed**. Items marked *to try* need a real program or serve
 
 ### Security
 
-- **S1** Auto-typing can type the wrong host's password (`terminal.rs` `pick_password`): when no
+- **S1** *fixed* · Auto-typing can type the wrong host's password (`terminal.rs` `pick_password`): when no
   rule matches the prompt, any unused password is typed (a jump host asking again gets the target's
   password), and `10.0.0.4` matches a prompt for `10.0.0.40`.
-- **S2** OpenSSH askpass (`transfer.rs` `askpass_main`): prompts like `(user@host) Password:`
+- **S2** *fixed* · OpenSSH askpass (`transfer.rs` `askpass_main`): prompts like `(user@host) Password:`
   (keyboard-interactive) match no host and fall back to the target's password, which then goes to
   the jump host.
-- **S3** KeePass lookup by host (`keepass_vault.rs`): a title that merely contains the host
+- **S3** *fixed* · KeePass lookup by host (`keepass_vault.rs`): a title that merely contains the host
   (`fw 10.0.0.10` for `10.0.0.1`) gives its password; the recycle bin is skipped by its English or
   German name only.
-- **S4** WinSCP / FileZilla get the password inside the URL on their command line (`app.rs`
+- **S4** *fixed* · WinSCP / FileZilla get the password inside the URL on their command line (`app.rs`
   "Open in WinSCP/FileZilla"); IPv6 hosts are not bracketed there.
-- **S5** The psftp script file has one name per process in the shared temp folder (`transfer.rs`
+- **S5** *fixed* · The psftp script file has one name per process in the shared temp folder (`transfer.rs`
   `sftp_batch`): two transfer tabs run each other's scripts; in `/tmp` another user can swap it.
-- **S6** FTP download writes outside the target folder when the server lists names like `../x`,
+- **S6** *fixed* · FTP download writes outside the target folder when the server lists names like `../x`,
   `..\x` or `C:\x` (`transfer.rs` `ftp_download`).
-- **S7** A host or user starting with `-` becomes an option of ssh, sftp, scp, plink or PuTTY
+- **S7** *fixed* · A host or user starting with `-` becomes an option of ssh, sftp, scp, plink or PuTTY
   (`-oProxyCommand=…`); a line break in the host adds lines to the `.rdp` file (`launch.rs`,
   `transfer.rs`).
-- **S8** `control.json` (port and token of the control channel) gets no owner-only protection on
+- **S8** *fixed* · `control.json` (port and token of the control channel) gets no owner-only protection on
   Windows; in a portable folder other users can read it (`control.rs`).
-- **S9** Control channel: a thread per connection without limit, only a per-read timeout (a slow
+- **S9** *fixed* · Control channel: a thread per connection without limit, only a per-read timeout (a slow
   client holds a thread for days), `thread::spawn` can panic and stop the listener, no write timeout;
   a request that timed out still runs later; switching the channel off leaves the listener running
   (`control.rs`).
-- **S10** Bracketed paste: pasted text containing `ESC[201~` ends the paste early and the rest runs
+- **S10** *fixed* · Bracketed paste: pasted text containing `ESC[201~` ends the paste early and the rest runs
   as typed commands (`terminal.rs`).
-- **S11** sftp batch quoting lets a line break through, so a file name can add an sftp command such
+- **S11** *fixed* · sftp batch quoting lets a line break through, so a file name can add an sftp command such
   as `!cmd` (a local shell) (`transfer.rs` `q`).
-- **S12** PuTTY `-proxycmd`: `\t`, `\n`, `\x` in the plink or password-file path are PuTTY escapes
+- **S12** *fixed* · PuTTY `-proxycmd`: `\t`, `\n`, `\x` in the plink or password-file path are PuTTY escapes
   (`C:\Users\tom\…` breaks); user and host go in unquoted (`launch.rs` `launch_putty`).
-- **S13** Control channel / MCP: a ping, traceroute or DNS target starting with `-` becomes an option
+- **S13** *fixed* · Control channel / MCP: a ping, traceroute or DNS target starting with `-` becomes an option
   of the system tool (`app_control.rs` `open_tool`).
-- **S14** Agent screenshots and temporary browser profiles go to the shared `/tmp/admincraft`
+- **S14** *fixed* · Agent screenshots and temporary browser profiles go to the shared `/tmp/admincraft`
   (`app_control.rs`, `launch.rs` `web_profile_dir`).
-- **S15** MCP `window_screenshot` reads whatever file the window's answer names, with no type or size
+- **S15** *fixed* · MCP `window_screenshot` reads whatever file the window's answer names, with no type or size
   check (`agent.rs`).
-- **S16** Remote Desktop login (`wincred.rs`): an existing `TERMSRV/host` entry is overwritten and
+- **S16** *fixed* · Remote Desktop login (`wincred.rs`): an existing `TERMSRV/host` entry is overwritten and
   then kept; when AdminCraft closes within 90 s the password stays in the Credential Manager.
-- **S17** SCP through PuTTY ignores the key file and the jump hosts (`transfer.rs`).
-- **S18** File transfer with a PuTTY older than 0.77 falls back to `-pw` silently; the tab should
+- **S17** *fixed* · SCP through PuTTY ignores the key file and the jump hosts (`transfer.rs`).
+- **S18** *fixed* · File transfer with a PuTTY older than 0.77 falls back to `-pw` silently; the tab should
   say so as the terminal does (`transfer.rs`).
-- **S19** A whois referral can point to any host and port (`nettools.rs`).
-- **S20** `kdbx::Key` prints the password with `Debug` and is not wiped (`kdbx.rs`).
-- **S21** The terminal tab's header copies entry and login (with the password) every frame (`app.rs`).
+- **S19** *fixed* · A whois referral can point to any host and port (`nettools.rs`).
+- **S20** *fixed* · `kdbx::Key` prints the password with `Debug` and is not wiped (`kdbx.rs`).
+- **S21** *fixed* · The terminal tab's header copies entry and login (with the password) every frame (`app.rs`).
 
 ### Data loss
 
-- **D1** With a master password, a reload never takes a colleague's change (the salt is emptied
+- **D1** *fixed* · With a master password, a reload never takes a colleague's change (the salt is emptied
   before the check), and the next save overwrites it; a change seen while locked is skipped for
   good (`model.rs` `replace_if_same_key`).
-- **D2** WebDAV: a server copy fetched before a save is applied after it and reverts the edit;
+- **D2** *fixed* · WebDAV: a server copy fetched before a save is applied after it and reverts the edit;
   uploads from quick saves can arrive in the wrong order (`model.rs`).
-- **D3** "KeePass as connection list" replaces the whole list as soon as the group "AdminCraft"
+- **D3** *fixed* · "KeePass as connection list" replaces the whole list as soon as the group "AdminCraft"
   holds any entry, e.g. one saved password (`model.rs` `use_keepass`).
-- **D4** Duplicate and export keep `kp_id`; in KeePass mode the copy then overwrites the original's
+- **D4** *fixed* · Duplicate and export keep `kp_id`; in KeePass mode the copy then overwrites the original's
   KeePass entry (`app.rs`, `sharing.rs`, `kdbx.rs`).
-- **D5** Any read error counts as "no file": the sample list is saved over the real (shared) list
+- **D5** *fixed* · Any read error counts as "no file": the sample list is saved over the real (shared) list
   (`model.rs` `Store::open`).
-- **D6** WebDAV: the server's answer overwrites the local copy before it was checked (`model.rs`).
-- **D7** Shared folder: every instance writes the same `.tmp` name, nothing checks for a change
+- **D6** *fixed* · WebDAV: the server's answer overwrites the local copy before it was checked (`model.rs`).
+- **D7** *fixed* · Shared folder: every instance writes the same `.tmp` name, nothing checks for a change
   since reading, no `sync_all` before the rename (`model.rs`).
-- **D8** Encrypted file plus KeePass list: KeePass is never unlocked after the master password, new
+- **D8** *fixed* · Encrypted file plus KeePass list: KeePass is never unlocked after the master password, new
   entries are lost (`model.rs`).
-- **D9** A KeePass save deletes entries in the group that were added in KeePass meanwhile
+- **D9** *fixed* · A KeePass save deletes entries in the group that were added in KeePass meanwhile
   (`kdbx.rs`).
-- **D10** FTP download empties the local file before the transfer; an aborted one leaves a part
+- **D10** *fixed* · FTP download empties the local file before the transfer; an aborted one leaves a part
   file that looks complete (`transfer.rs`).
-- **D11** Port 0 ("default") becomes 1 just by showing the entry, and is saved (`app.rs`,
+- **D11** *fixed* · Port 0 ("default") becomes 1 just by showing the entry, and is saved (`app.rs`,
   egui's `DragValue` range).
-- **D12** Restart over SSH types `sudo reboot` into the last tab when the session could not start
+- **D12** *fixed* · Restart over SSH types `sudo reboot` into the last tab when the session could not start
   (`app.rs` power dialog).
-- **D13** Opening or closing a folder in the tree saves the data file: with KeePass two key
+- **D13** *fixed* · Opening or closing a folder in the tree saves the data file: with KeePass two key
   derivations on the UI thread, on shared storage a reload for every colleague (`app.rs`).
-- **D14** Ids: `u64::MAX` overflows; an import with repeated ids gives repeated new ids
+- **D14** *fixed* · Ids: `u64::MAX` overflows; an import with repeated ids gives repeated new ids
   (`model.rs`, `sharing.rs`).
-- **D15** Import: RAW and RLOGIN become Telnet, `%h` in `~/.ssh/config` is not expanded; IPv6
+- **D15** *fixed* · Import: RAW and RLOGIN become Telnet, `%h` in `~/.ssh/config` is not expanded; IPv6
   hosts in KeePass URLs lose their brackets (`import.rs`, `kdbx.rs`).
-- **D16** Only one password question at a time: "Open all" with several "ask" connections opens
+- **D16** *fixed* · Only one password question at a time: "Open all" with several "ask" connections opens
   only the last (`app.rs`).
-- **D17** Tunnel runs are kept by position: removing a tunnel or an entry leaves ssh running unseen
+- **D17** *fixed* · Tunnel runs are kept by position: removing a tunnel or an entry leaves ssh running unseen
   or shows the wrong state (`app.rs`).
 
 ### Crashes and hangs
 
-- **C1** Playback: `clamp(0, duration)` panics when a recording has negative times
+- **C1** *fixed* · Playback: `clamp(0, duration)` panics when a recording has negative times
   (`playback.rs`).
-- **C2** Deleting an entry whose parent chain loops runs forever (`model.rs` `remove`); an import
+- **C2** *fixed* · Deleting an entry whose parent chain loops runs forever (`model.rs` `remove`); an import
   can bring an entry that is its own parent (`sharing.rs`).
-- **C3** Repeated ids in a data file make the tree grow exponentially (`app.rs` `tree_level`).
-- **C4** Network scan: a thread per port per address (up to 64 × 65535); a refused thread panics
+- **C3** *fixed* · Repeated ids in a data file make the tree grow exponentially (`app.rs` `tree_level`).
+- **C4** *fixed* · Network scan: a thread per port per address (up to 64 × 65535); a refused thread panics
   and the scan never finishes (`netscan.rs`); other `thread::spawn` in loops (`tools.rs`).
-- **C5** File transfer deadlocks when the sftp script is large (deleting a folder of 100+ files):
+- **C5** *fixed* · File transfer deadlocks when the sftp script is large (deleting a folder of 100+ files):
   stdin is written before stdout is read (`transfer.rs` `run`).
-- **C6** SSH tunnels: stderr is never read while ssh runs, so after a few KB of channel errors the
+- **C6** *fixed* · SSH tunnels: stderr is never read while ssh runs, so after a few KB of channel errors the
   tunnel stops (`extra.rs`).
-- **C7** Tab screenshot: `ColorImage::region` panics on a rectangle from an older frame
+- **C7** *fixed* · Tab screenshot: `ColorImage::region` panics on a rectangle from an older frame
   (`app.rs`, `app_control.rs`).
-- **C8** mRemoteNG import: `KdfIterations` from the file is not limited (`import.rs`).
-- **C9** Network ranges like `255.255.255.0/24` overflow (`netscan.rs` `parse_targets`).
-- **C10** SNMP: OID arithmetic overflows; one damaged packet from the target ends the query
+- **C8** *fixed* · mRemoteNG import: `KdfIterations` from the file is not limited (`import.rs`).
+- **C9** *fixed* · Network ranges like `255.255.255.0/24` overflow (`netscan.rs` `parse_targets`).
+- **C10** *fixed* · SNMP: OID arithmetic overflows; one damaged packet from the target ends the query
   (`nettools.rs`).
-- **C11** The UI waits for slow work: `shutdown /m`, WebDAV test and apply, writes into a terminal
+- **C11** *partly fixed* (still open: KeePass saves run on the UI thread) · The UI waits for slow work: `shutdown /m`, WebDAV test and apply, writes into a terminal
   (a large paste into a slow session), KeePass saves (`app.rs`, `extra.rs`, `terminal.rs`, `model.rs`).
-- **C12** FTP has no timeouts; closing a transfer tab doesn't cancel queued jobs (`transfer.rs`).
-- **C13** MCP `port_scan` can block the MCP server for over an hour; the first address may be IPv6
+- **C12** *fixed* · FTP has no timeouts; closing a transfer tab doesn't cancel queued jobs (`transfer.rs`).
+- **C13** *fixed* · MCP `port_scan` can block the MCP server for over an hour; the first address may be IPv6
   (`localhost` → `::1`), same in the certificate check (`agent.rs`, `admintools.rs`).
-- **C14** Shortcuts work while the list is locked or a dialog is open (`app.rs`).
+- **C14** *fixed* · Shortcuts work while the list is locked or a dialog is open (`app.rs`).
 
 ### Speed
 
-- **P1** The settings page reads and parses every language file and writes a test file next to the
+- **P1** *fixed* · The settings page reads and parses every language file and writes a test file next to the
   program on every frame (`i18n::available`, `programs::tools_dir`).
-- **P2** The web settings search the PATH for the browser on every frame (`app_web.rs`).
-- **P3** Only the visible terminal tab reads its output: hidden tabs grow without limit, record
+- **P2** *fixed* · The web settings search the PATH for the browser on every frame (`app_web.rs`).
+- **P3** *fixed* · Only the visible terminal tab reads its output: hidden tabs grow without limit, record
   wrong times and type no passwords; switching back can freeze the window (`app.rs`, `terminal.rs`).
-- **P4** Drawing the tree costs O(n²) per frame (`Store::get` / `children` are linear scans), a lock
+- **P4** *fixed* · Drawing the tree costs O(n²) per frame (`Store::get` / `children` are linear scans), a lock
   per row, hover texts built for every row (`app.rs`, `model.rs`).
-- **P5** The properties panel rebuilds folder, jump-host and KeePass lists every frame (`app.rs`).
-- **P6** The search lowercases every entry every frame (`app.rs`).
-- **P7** Ping and DNS output grows without limit and is laid out in full every frame (`tools.rs`,
+- **P5** *fixed* · The properties panel rebuilds folder, jump-host and KeePass lists every frame (`app.rs`).
+- **P6** *fixed* · The search lowercases every entry every frame (`app.rs`).
+- **P7** *fixed* · Ping and DNS output grows without limit and is laid out in full every frame (`tools.rs`,
   `app.rs`).
-- **P8** The transfer tab copies the listing and log every frame; drive letters are probed every
+- **P8** *fixed* · The transfer tab copies the listing and log every frame; drive letters are probed every
   frame while the list is open (`app.rs`, `transfer.rs`).
-- **P9** The network scan tab looks up local subnets and copies all hosts every frame (`extra.rs`).
-- **P10** Four repaints a second for as long as any terminal or outside program runs (`app.rs`).
-- **P11** Terminal drawing: wide or fallback glyphs push the rest of a run off the cell grid; a new
+- **P9** *fixed* · The network scan tab looks up local subnets and copies all hosts every frame (`extra.rs`).
+- **P10** *fixed* · Four repaints a second for as long as any terminal or outside program runs (`app.rs`).
+- **P11** *fixed* · Terminal drawing: wide or fallback glyphs push the rest of a run off the cell grid; a new
   string per run (`terminal.rs`).
-- **P12** Playback reads the whole file on the UI thread, copies all events and replays from the
+- **P12** *fixed* · Playback reads the whole file on the UI thread, copies all events and replays from the
   start on every backward seek (`playback.rs`).
-- **P13** Argon2 runs again on each reload of a list without master password and on every WebDAV
+- **P13** *fixed* · Argon2 runs again on each reload of a list without master password and on every WebDAV
   request (`model.rs`, `remote.rs`).
-- **P14** Every save encrypts every password again, so the file always changes: needless uploads
+- **P14** *fixed* · Every save encrypts every password again, so the file always changes: needless uploads
   and reloads (`model.rs`).
-- **P15** A KeePass save runs the key derivation twice on the UI thread, also when only settings
+- **P15** *partly fixed* (an unchanged list is not written again; the key derivation itself still runs twice per real save) · A KeePass save runs the key derivation twice on the UI thread, also when only settings
   changed (`model.rs`, `kdbx.rs`).
-- **P16** File transfer logs in once per folder when deleting, and once more for the listing after
+- **P16** *open* (needs one sftp session per batch) · File transfer logs in once per folder when deleting, and once more for the listing after
   each job (`transfer.rs`).
-- **P17** Helper programs are searched again and again (6 times per transfer tab, twice per program
+- **P17** *fixed* · Helper programs are searched again and again (6 times per transfer tab, twice per program
   on refresh) (`programs.rs`, `app.rs`).
-- **P18** Whois text and SNMP walk rows are rebuilt every frame (`tooltabs.rs`).
-- **P19** Monitoring copies the status map every frame (`app.rs`).
-- **P20** Session logs and recordings write unbuffered, once per output chunk (`terminal.rs`).
+- **P18** *fixed* · Whois text and SNMP walk rows are rebuilt every frame (`tooltabs.rs`).
+- **P19** *fixed* · Monitoring copies the status map every frame (`app.rs`).
+- **P20** *fixed* · Session logs and recordings write unbuffered, once per output chunk (`terminal.rs`).
 
 ### Smaller bugs
 
-- **B1** A snippet sent to all "Multi" tabs uses the active tab's `{host}` / `{user}` everywhere
+- **B1** *fixed* · A snippet sent to all "Multi" tabs uses the active tab's `{host}` / `{user}` everywhere
   (`app.rs`).
-- **B2** DNS: a late answer overwrites a newer query's result (`app.rs`).
-- **B3** Command runner: one child slot for all runs (the wrong process is waited for, "running"
+- **B2** *fixed* · DNS: a late answer overwrites a newer query's result (`app.rs`).
+- **B3** *fixed* · Command runner: one child slot for all runs (the wrong process is waited for, "running"
   goes off too early); stopped or finished programs are not reaped (zombies on Linux/macOS)
   (`tools.rs`, `app.rs`, `launch.rs`, `programs.rs`).
-- **B4** A continuous ping may keep running after AdminCraft closes (`tools.rs`). *To try.*
-- **B5** Two close requests in one frame lose one; closing and moving a tab in the same frame can
+- **B4** *fixed* · A continuous ping may keep running after AdminCraft closes (`tools.rs`). *To try.*
+- **B5** *fixed* · Two close requests in one frame lose one; closing and moving a tab in the same frame can
   close the wrong one (`app_control.rs`, `app.rs`).
-- **B6** TOTP ignores `algorithm=` and treats HOTP as TOTP: wrong codes (`admintools.rs`).
-- **B7** The SCP listing needs an sh-like shell (`$(pwd)`, `VAR=x cmd`): csh, tcsh and fish fail
+- **B6** *fixed* · TOTP ignores `algorithm=` and treats HOTP as TOTP: wrong codes (`admintools.rs`).
+- **B7** *fixed* · The SCP listing needs an sh-like shell (`$(pwd)`, `VAR=x cmd`): csh, tcsh and fish fail
   (`transfer.rs`).
-- **B8** psftp batch syntax: `ls -la`, `-mkdir` and `\"` quoting are OpenSSH sftp syntax
+- **B8** *open* · psftp batch syntax: `ls -la`, `-mkdir` and `\"` quoting are OpenSSH sftp syntax
   (`transfer.rs`). *To try with a real psftp.*
-- **B9** Listings: leading spaces of names are cut; echoed `sftp>` lines can become phantom entries
+- **B9** *fixed* · Listings: leading spaces of names are cut; echoed `sftp>` lines can become phantom entries
   (`transfer.rs` `parse_ls_line`).
-- **B10** IPv6 literals are not bracketed for scp, sftp, FTP and `-J` (`transfer.rs`).
-- **B11** Session logs keep the `B` of `ESC ( B` and DCS payloads (`terminal.rs`).
-- **B12** Windows console output: only German letters of code page 850 are decoded (`tools.rs`).
-- **B13** "Change" / "Set" (master password) are not translated (`app.rs`).
-- **B14** `--open connect:NAME` can pick a folder (`app.rs`).
-- **B15** MCP `initialize` echoes any protocol version; ports are cut with `as u16`
+- **B10** *fixed* · IPv6 literals are not bracketed for scp, sftp, FTP and `-J` (`transfer.rs`).
+- **B11** *fixed* · Session logs keep the `B` of `ESC ( B` and DCS payloads (`terminal.rs`).
+- **B12** *open* (use craft-libs `craft-codepage`, work list item 13) · Windows console output: only German letters of code page 850 are decoded (`tools.rs`).
+- **B13** *fixed* · "Change" / "Set" (master password) are not translated (`app.rs`).
+- **B14** *fixed* · `--open connect:NAME` can pick a folder (`app.rs`).
+- **B15** *fixed* · MCP `initialize` echoes any protocol version; ports are cut with `as u16`
   (`agent.rs`, `control.rs`).
-- **B16** Window capture computes the buffer size in `i32` (`embed.rs`).
+- **B16** *fixed* · Window capture computes the buffer size in `i32` (`embed.rs`).
+
+After the fixes:
+
+- Auto-typing now answers only a prompt that names the connection's own host (S1). A connection
+  whose host is an `~/.ssh/config` alias with another `HostName` gets no automatic password; the
+  *Send password* button still works.
+- When a colleague's change is reloaded while only folders were opened or closed here, that
+  open/closed state is not kept (D13).
+- On Windows the control channel's port and token moved to
+  `%LOCALAPPDATA%\AdminCraft\control-<hash>.json` (S8); `admincraft cli` and `admincraft mcp` find
+  it the same way.
+- To try on real machines: file transfer with OpenSSH and with PuTTY (psftp, pscp, plink, jump
+  host through `-proxycmd`), FTP/FTPS with a slow server, SSH tunnels with failing forwards, WebDAV
+  with two computers, KeePass as connection list with an existing group, a shared folder used by
+  two people at once, terminal tabs in the background (passwords, recordings), the control channel
+  from an agent.
 
 ## Work list (security and Craft house rules)
 
