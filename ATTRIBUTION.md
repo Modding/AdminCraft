@@ -79,18 +79,23 @@ target platforms). Each crate keeps its own license; see the crate for the full 
 | x509-parser | 0.18.1 | MIT OR Apache-2.0 |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT |
 
-## Licences outside the Craft allowlist
+## Licences and the Craft allowlist
 
 The house rules in `AGENTS.md` list the licences a Craft repository may depend on. These crates
-of the dependency graph carry a licence that is not on that list. All three licences are
-permissive; they are named here until `storytold/craft-contrib` decides on them or the crates
-are replaced. Don't add to this list.
+carry licences that joined that list with craft-contrib RFC-0027 (2026-11-15); before that they
+were named here as exceptions.
 
 | Crate | License | Comes in through |
 |---|---|---|
 | foldhash, slotmap, zlib-rs | Zlib | egui / image (PNG) |
 | clipboard-win, error-code | BSL-1.0 | egui's clipboard on Windows (arboard) |
 | webpki-roots | CDLA-Permissive-2.0 | the list of trusted certificate authorities for TLS |
+
+Three licence expressions above also offer a licence that is not on the list as one choice of an
+`OR` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`, `Apache-2.0 OR GPL-2.0-only`,
+`CC0-1.0 OR MIT-0 OR Apache-2.0`); AdminCraft uses those crates under a listed choice. Whether the
+rule "every identifier is in this list" also covers such choices is open with
+`storytold/craft-contrib`.
 
 ## Assets
 

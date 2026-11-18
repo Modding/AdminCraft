@@ -96,11 +96,11 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
    all five languages with `--screenshot`; it reuses existing texts and was not looked at yet.
 5. **The saved WebDAV password** (`src/remote.rs`) is encrypted with a key built into the
    program, so it is only obscured. Encrypt it with the store's vault when a master password is set.
-6. **Licences outside the allowlist** (`ATTRIBUTION.md`): `Zlib` and `BSL-1.0` come with egui and
-   can't be swapped; ask in `storytold/craft-contrib` whether they join the allowlist.
-   `CDLA-Permissive-2.0` is `webpki-roots`; it can be replaced by the system's certificate store
-   (`rustls-platform-verifier` or `rustls-native-certs`) if that licence stays out.
-   Add `cargo deny` with the allowlist to CI once this is settled.
+6. **Licences:** `Zlib`, `BSL-1.0` and `CDLA-Permissive-2.0` joined the Craft allowlist
+   (craft-contrib RFC-0027), so every licence in `ATTRIBUTION.md` is on it or offered as one choice
+   of an `OR`. Still to settle with craft-contrib: three crates name a licence outside the list as
+   another choice (`LGPL-2.1-or-later`, `GPL-2.0-only`, `MIT-0` in an `OR`), and the rule reads
+   "every identifier". Then add `cargo deny` with the allowlist to CI (shared CI, see item 9).
 7. **Contributor credits.** `contributors/people.toml` and `contributors/contributors.json` as in
    the other Craft apps, shown in *Help » About*. Add only entries their owners asked for.
 8. **Split the crate.** `crates/` for model, storage, import, network tools and transfer (no
@@ -129,6 +129,11 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
     placed in the tab, focus, size, logins kept); hide the browser's own title bar inside the tab; a browser per connection instead of one for all; on Linux/macOS use the chosen
     browser too instead of the system one. A built-in webview (WebView2) is not an option: the Rust
     house rules allow no webview in native Craft apps.
+13. **Shared libraries first** (house rule 16). `storytold/craft-libs` has crates for code
+    AdminCraft carries itself: `craft-ber` (SNMP), `craft-codepage` (Windows console output),
+    `craft-atomic` (safe file replacement), `craft-dav` (WebDAV), `craft-jsonrpc` / `craft-mcp`
+    (the MCP server), `craft-i18n`, `craft-update`. Check each one's API and licence and move over
+    one at a time; the UI crates need the same egui version (craft-libs v0.1.0 uses egui 0.36).
 
 Done and to be tried against real servers: the Remote Desktop login through the Credential
 Manager (`src/wincred.rs`) — log in to a real host with *Pass the login automatically* and check
