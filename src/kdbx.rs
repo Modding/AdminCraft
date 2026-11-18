@@ -20,10 +20,25 @@ const FIELD: &str = "AdminCraft";
 /// Marks AdminCraft's settings of a folder in the group's notes.
 const FOLDER_MARK: &str = "\n\n[AdminCraft] ";
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Key {
     pub password: String,
     pub keyfile: String,
+}
+
+/// Never shows the password (a `{:?}` in a log or an error must not leak it).
+impl std::fmt::Debug for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Key").field("password", &if self.password.is_empty() { "" } else { "<hidden>" }).field("keyfile", &self.keyfile).finish()
+    }
+}
+
+/// The password is wiped from memory when the key goes away.
+impl Drop for Key {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.password.zeroize();
+    }
 }
 
 impl Key {
@@ -74,11 +89,13 @@ fn write(db: &keepass::Database, path: &str, key: &Key) -> Result<(), String> {
 // ------------------------------------------------------------------ URL <-> connection
 
 /// `ssh://10.0.0.30:22`, `rdp://server.corp.local:3389`, `https://10.0.0.1/`.
+/// An IPv6 address goes in brackets: `ssh://[fe80::1]:22`.
 pub fn url_of(e: &Entry) -> String {
+    let host = if e.host.contains(':') && !e.host.starts_with('[') { format!("[{}]", e.host) } else { e.host.clone() };
     match e.protocol {
         Protocol::LocalShell => String::new(),
-        Protocol::Http | Protocol::Https if e.port == e.protocol.default_port() => format!("{}://{}/", e.protocol.key(), e.host),
-        p => format!("{}://{}:{}", p.key(), e.host, e.port),
+        Protocol::Http | Protocol::Https if e.port == e.protocol.default_port() => format!("{}://{host}/", e.protocol.key()),
+        p => format!("{}://{host}:{}", p.key(), e.port),
     }
 }
 
@@ -100,6 +117,9 @@ pub fn parse_url(url: &str) -> Option<(Protocol, String, u16)> {
     let (host, port) = if let Some(v6) = hostport.strip_prefix('[') {
         let (h, after) = v6.split_once(']').unwrap_or((v6, ""));
         (h.to_string(), after.strip_prefix(':').and_then(|p| p.parse().ok()))
+    } else if hostport.matches(':').count() > 1 {
+        // an IPv6 address without brackets: all of it is the host
+        (hostport.to_string(), None)
     } else {
         match hostport.rsplit_once(':') {
             Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) && !p.is_empty() => (h.to_string(), p.parse().ok()),
@@ -236,9 +256,26 @@ fn folder_notes(f: &Entry) -> String {
     format!("{}{FOLDER_MARK}{}", f.description, json)
 }
 
+/// Something in the group (or below it) that the list never saw: added in KeePass meanwhile.
+fn holds_unknown(db: &keepass::Database, g: GroupId, known: &HashSet<String>, depth: usize) -> bool {
+    let Some(gr) = db.group(g) else { return false };
+    if depth > 32 {
+        // too deep to look through: keep it
+        return true;
+    }
+    if gr.entries().any(|e| !known.contains(&e.id().to_string())) {
+        return true;
+    }
+    let subs: Vec<GroupId> = gr.groups().map(|s| s.id()).collect();
+    subs.into_iter().any(|s| !known.contains(&s.to_string()) || holds_unknown(db, s, known, depth + 1))
+}
+
 /// Writes the whole list into the database: changed entries are updated (KeePass keeps their
-/// history), new ones added, moved ones moved, deleted ones removed. Sets `kp_id` on each.
-pub fn save(path: &str, key: &Key, list: &mut [Entry]) -> Result<(), String> {
+/// history), new ones added, moved ones moved. Sets `kp_id` on each. Two list entries never
+/// share one KeePass entry or group (a repeated `kp_id` makes a new one). Of what the list no
+/// longer has, only what is in `known` (the KeePass ids of the last load or save) is removed:
+/// entries added in KeePass meanwhile stay.
+pub fn save(path: &str, key: &Key, list: &mut [Entry], known: &HashSet<String>) -> Result<(), String> {
     let mut db = open(path, key)?;
     let gid = match find_group(&db) {
         Some(g) => g,
@@ -288,7 +325,8 @@ pub fn save(path: &str, key: &Key, list: &mut [Entry]) -> Result<(), String> {
     let mut kept_groups: HashSet<GroupId> = HashSet::new();
     for i in order {
         let parent_g = list[i].parent.and_then(|p| group_of.get(&p).copied()).unwrap_or(gid);
-        let existing = old_groups.get(&list[i].kp_id).copied();
+        // a group already given to another folder of the list (a copy kept its id): a new one
+        let existing = old_groups.get(&list[i].kp_id).copied().filter(|g| !kept_groups.contains(g));
         let id = match existing {
             Some(g) => {
                 let now_parent = db.group(g).and_then(|x| x.parent().map(|p| p.id()));
@@ -331,7 +369,8 @@ pub fn save(path: &str, key: &Key, list: &mut [Entry]) -> Result<(), String> {
             (fields::NOTES, c.description.clone(), false),
             (FIELD, extra_json(c), false),
         ];
-        let id = match old_entries.get(&c.kp_id).copied() {
+        // an entry already given to another connection of the list (a copy kept its id): a new one
+        let id = match old_entries.get(&c.kp_id).copied().filter(|e| !kept_entries.contains(e)) {
             Some(id) => {
                 let now_parent = db.entry(id).map(|x| x.parent().id());
                 if let Some(mut em) = db.entry_mut(id) {
@@ -370,16 +409,20 @@ pub fn save(path: &str, key: &Key, list: &mut [Entry]) -> Result<(), String> {
         kept_entries.insert(id);
     }
 
-    // what was deleted in AdminCraft goes (KeePass records the deletion for merging)
-    for (_, id) in old_entries {
+    // what was deleted in AdminCraft goes (KeePass records the deletion for merging); what
+    // AdminCraft never saw stays
+    for (k, id) in old_entries {
         if !kept_entries.contains(&id)
+            && known.contains(&k)
             && let Some(mut em) = db.entry_mut(id)
         {
             em.track_changes().remove();
         }
     }
-    for (_, g) in old_groups {
+    for (k, g) in old_groups {
         if !kept_groups.contains(&g)
+            && known.contains(&k)
+            && !holds_unknown(&db, g, known, 0)
             && let Some(mut gm) = db.group_mut(g)
         {
             let _ = gm.track_changes().remove();

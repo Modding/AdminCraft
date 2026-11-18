@@ -26,7 +26,7 @@ pub struct KeePassVault {
     pub key: Option<crate::kdbx::Key>,
 }
 
-fn walk(group: keepass::db::GroupRef<'_>, prefix: &str, out: &mut Vec<KpEntry>, depth: usize) {
+fn walk(db: &keepass::Database, group: keepass::db::GroupRef<'_>, prefix: &str, out: &mut Vec<KpEntry>, depth: usize) {
     if depth > 32 {
         return;
     }
@@ -43,11 +43,12 @@ fn walk(group: keepass::db::GroupRef<'_>, prefix: &str, out: &mut Vec<KpEntry>, 
         });
     }
     for g in group.groups() {
-        if g.name.eq_ignore_ascii_case("Recycle Bin") || g.name.eq_ignore_ascii_case("Papierkorb") {
+        // the recycle bin, whatever it is called in the language KeePass ran in
+        if db.meta.recyclebin_uuid == Some(g.id().uuid()) {
             continue;
         }
         let p = if prefix.is_empty() { g.name.clone() } else { format!("{prefix}/{}", g.name) };
-        walk(g, &p, out, depth + 1);
+        walk(db, g, &p, out, depth + 1);
     }
 }
 
@@ -79,7 +80,7 @@ impl KeePassVault {
             }
         })?;
         let mut out = Vec::new();
-        walk(db.root(), "", &mut out, 0);
+        walk(&db, db.root(), "", &mut out, 0);
         out.sort_by_key(|a| a.path.to_lowercase());
         self.entries = out;
         self.opened_path = path.to_string();
@@ -113,10 +114,20 @@ impl KeePassVault {
                     .iter()
                     .find(|e| url_host(&e.url) == h)
                     .or_else(|| self.entries.iter().find(|e| e.title.to_lowercase() == h))
-                    .or_else(|| self.entries.iter().find(|e| e.title.to_lowercase().contains(&h)))
+                    .or_else(|| self.entries.iter().find(|e| title_names_host(&e.title.to_lowercase(), &h)))
             }
         }
     }
+}
+
+/// The title has the host as a word of its own ("web01 (Linux)", "root@10.0.0.1"), not just
+/// as a piece of a longer name or address ("fw 10.0.0.10" doesn't name 10.0.0.1).
+fn title_names_host(title: &str, host: &str) -> bool {
+    title
+        .split(|c: char| {
+            c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '|' | '/' | '\\' | '"' | '\'' | '@')
+        })
+        .any(|w| w == host)
 }
 
 /// "https://admin@10.0.0.5:8443/x" -> "10.0.0.5"

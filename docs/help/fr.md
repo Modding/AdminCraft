@@ -99,6 +99,8 @@ Pour chaque connexion, vous choisissez sous **Mot de passe depuis** :
 **Connexion automatique :** pour SSH et Telnet, le mot de passe est tapé quand le serveur le demande
 (Paramètres » *Saisir automatiquement le mot de passe enregistré dans le terminal*). Pour RDP, il est transmis à Windows
 pour cette seule connexion.
+Chaque mot de passe enregistré n'est tapé qu'une fois, et seulement dans une invite qui nomme son propre hôte ; une invite
+sans nom d'hôte (comme `Password:`) ne le reçoit que si la connexion n'a qu'un seul mot de passe. Sinon, appuyez sur **Envoyer le mot de passe** dans l'onglet.
 
 **Mot de passe maître** (Paramètres » Emplacement de stockage) : sans lui, les mots de passe enregistrés sont seulement masqués — toute personne
 ayant le fichier et AdminCraft pourrait les lire. Avec un mot de passe maître, ils sont vraiment chiffrés
@@ -122,6 +124,8 @@ mot de passe, URL (p. ex. `ssh://10.0.0.30:22`) et notes ; les dossiers devienne
 pouvez aussi les modifier dans KeePass ; AdminCraft le remarque et recharge. Une entrée créée dans ce groupe
 dans KeePass (avec une URL comme `rdp://10.0.0.10`) apparaît comme connexion. Au démarrage, AdminCraft
 demande le mot de passe maître KeePass. **Revenir à la liste propre d'AdminCraft** au même endroit recopie la liste.
+Si le groupe contient déjà des entrées, rien n'est remplacé : votre liste reste, les entrées que seul KeePass
+possède sont ajoutées, et la liste telle qu'elle était est conservée à côté (`….json.before-keepass`).
 
 **Enregistrer le mot de passe dans KeePass …** (sur une connexion avec *Mot de passe depuis » KeePass*) :
 saisissez le mot de passe une fois ; AdminCraft le range dans le groupe *AdminCraft* de votre base et
@@ -228,6 +232,8 @@ dans la liste.
 **Liste centrale pour l'équipe** (Paramètres » Emplacement de stockage) : gardez la liste sur un **partage réseau** (SMB,
 p. ex. `\\server\it\AdminCraft-Connections.json`) ou un **serveur WebDAV** (Nextcloud, ownCloud, IIS).
 Protégez-la avec le mot de passe maître. Quand un collègue modifie quelque chose, AdminCraft la recharge.
+Si un collègue a enregistré pendant que vous modifiiez, sa liste reste et la vôtre est conservée dans un
+fichier à côté (`….conflict-….json`) ; la barre d'état l'indique.
 
 **Venir d'autres outils :** Fichier » Importer un fichier mRemoteNG (`confCons.xml`, avec les mots de passe) et
 Fichier » Importer la configuration OpenSSH (`~/.ssh/config`, ProxyJump compris).
@@ -339,8 +345,9 @@ admincraft cli window type 2 uptime     taper dans un terminal ou un PuTTY inté
 
 Le serveur MCP offre la même chose sous forme d'outils `window_…`. Taper dans les terminaux n'est possible
 qu'après l'avoir autorisé dans les paramètres, et chaque saisie est affichée dans la fenêtre. Seuls les
-programmes de cet ordinateur pouvant lire le dossier de données peuvent se connecter ; les mots de passe ne
-sont jamais transmis.
+programmes de cet ordinateur qui tournent sous votre propre compte utilisateur peuvent se connecter ; les
+mots de passe ne sont jamais transmis. Une capture d'écran sans nom de fichier va dans le dossier
+`screenshots` du dossier de données ; un fichier existant n'est jamais écrasé.
 
 ## Questions et problèmes
 

@@ -81,9 +81,10 @@ mod imp {
 
     /// Picture of part of our window as the screen shows it (embedded windows included).
     pub fn capture(parent: isize, r: PxRect) -> Option<(usize, usize, Vec<u8>)> {
-        if r.w <= 0 || r.h <= 0 {
-            return None;
-        }
+        // checked before any handle is made: no overflow and no huge buffer from a bad rectangle
+        let len = super::pixel_buffer_len(r.w, r.h)?;
+        // SAFETY: every handle is created here and released before returning; the pixel buffer
+        // is as large as the bitmap GetDIBits fills (width * height * 4 bytes, checked above).
         unsafe {
             let mut pt = POINT { x: r.x, y: r.y };
             ClientToScreen(parent as HWND, &mut pt);
@@ -100,7 +101,7 @@ mod imp {
             info.bmiHeader.biPlanes = 1;
             info.bmiHeader.biBitCount = 32;
             info.bmiHeader.biCompression = BI_RGB;
-            let mut buf = vec![0u8; (r.w * r.h * 4) as usize];
+            let mut buf = vec![0u8; len];
             let lines = GetDIBits(mem, bmp, 0, r.h as u32, buf.as_mut_ptr() as *mut _, &mut info, DIB_RGB_COLORS);
             DeleteObject(bmp as HGDIOBJ);
             DeleteDC(mem);
@@ -124,19 +125,21 @@ mod imp {
         /// PW_CLIENTONLY | PW_RENDERFULLCONTENT: the client area as the compositor draws it.
         const CLIENT_AS_DRAWN: u32 = 1 | 2;
         // SAFETY: every handle is created here and released before returning; the pixel buffer
-        // is as large as the bitmap GetDIBits fills (width * height * 4 bytes).
+        // is as large as the bitmap GetDIBits fills (width * height * 4 bytes, checked below).
         unsafe {
             let mut client: RECT = std::mem::zeroed();
             if GetClientRect(parent as HWND, &mut client) == 0 {
                 return None;
             }
-            let (cw, ch) = (client.right - client.left, client.bottom - client.top);
+            let (cw, ch) = (client.right.saturating_sub(client.left), client.bottom.saturating_sub(client.top));
+            // checked first: an empty or huge window gives no picture (and no clamp below 0)
+            let len = super::pixel_buffer_len(cw, ch)?;
             // the wanted part, kept inside the window
             let x = r.x.clamp(0, cw);
             let y = r.y.clamp(0, ch);
             let w = r.w.min(cw - x);
             let h = r.h.min(ch - y);
-            if cw <= 0 || ch <= 0 || w <= 0 || h <= 0 || cw > 16_384 || ch > 16_384 {
+            if w <= 0 || h <= 0 {
                 return None;
             }
             let screen = GetDC(std::ptr::null_mut());
@@ -152,7 +155,7 @@ mod imp {
             info.bmiHeader.biPlanes = 1;
             info.bmiHeader.biBitCount = 32;
             info.bmiHeader.biCompression = BI_RGB;
-            let mut all = vec![0u8; (cw as usize) * (ch as usize) * 4];
+            let mut all = vec![0u8; len];
             let lines = if drawn != 0 { GetDIBits(mem, bmp, 0, ch as u32, all.as_mut_ptr() as *mut _, &mut info, DIB_RGB_COLORS) } else { 0 };
             DeleteObject(bmp as HGDIOBJ);
             DeleteDC(mem);
@@ -515,6 +518,19 @@ pub use imp::{Embedded, capture, capture_window, install_focus_hook, set_active}
 
 /// Can this system put other programs' windows into tabs?
 pub const SUPPORTED: bool = cfg!(windows);
+
+/// Largest width or height of a picture taken of our window.
+const MAX_SIDE: i32 = 16_384;
+
+/// Bytes of a 32-bit picture `w` × `h` pixels, or None for an empty, negative or too large one.
+/// Computed in `usize` with checked math, so a bad rectangle can't overflow into a short buffer.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn pixel_buffer_len(w: i32, h: i32) -> Option<usize> {
+    if !(1..=MAX_SIDE).contains(&w) || !(1..=MAX_SIDE).contains(&h) {
+        return None;
+    }
+    usize::try_from(w).ok()?.checked_mul(usize::try_from(h).ok()?)?.checked_mul(4)
+}
 
 /// `root` and every process below it, from (process, parent) pairs; at most 256, so a broken
 /// snapshot can't grow it without end.

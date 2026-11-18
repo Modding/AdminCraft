@@ -62,7 +62,9 @@ pub fn whois(query: &str, timeout: Duration) -> Result<WhoisResult, String> {
         if !result.text.is_empty() {
             result.text.push('\n');
         }
-        match whois_ask(&server, &request, timeout) {
+        // only the first server is ours; every later one comes from an answer and must be public
+        let referred = !result.servers.is_empty();
+        match whois_ask(&server, &request, timeout, referred) {
             Ok(answer) => {
                 result.text.push_str(&format!("--- {server} ---\n"));
                 result.text.push_str(answer.trim_end());
@@ -70,6 +72,10 @@ pub fn whois(query: &str, timeout: Duration) -> Result<WhoisResult, String> {
                 next = parse_referral(&answer)
                     .filter(|r| !r.eq_ignore_ascii_case(&server))
                     .filter(|r| !result.servers.iter().any(|s| s.eq_ignore_ascii_case(r)));
+                if let Some(r) = next.take_if(|r| !referral_allowed(r)) {
+                    result.text.push_str(&tf("Referral to {0} was not followed (not a public WHOIS server).", &[&r]));
+                    result.text.push('\n');
+                }
                 result.servers.push(server);
             }
             Err(e) if result.servers.is_empty() => return Err(e),
@@ -151,11 +157,68 @@ fn split_host_port(server: &str, default_port: u16) -> (String, u16) {
     (server.to_string(), default_port)
 }
 
-/// Sends one query to one WHOIS server and reads its answer (at most 256 KiB).
-fn whois_ask(server: &str, request: &str, timeout: Duration) -> Result<String, String> {
+/// Whether a referral from a WHOIS answer may be followed: only to the WHOIS port 43, and not
+/// to a loopback, private, link-local or other non-public address written as a literal.
+pub fn referral_allowed(server: &str) -> bool {
+    let (host, port) = split_host_port(server, 43);
+    if port != 43 || host.is_empty() || host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".localhost") {
+        return false;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(ip) => is_public_ip(ip),
+        Err(_) => !host.contains(':'),
+    }
+}
+
+/// An address on the public internet (not loopback, private, link-local, shared, multicast,
+/// documentation or unspecified).
+pub fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(a) => {
+            let o = a.octets();
+            !(a.is_loopback()
+                || a.is_private()
+                || a.is_link_local()
+                || a.is_unspecified()
+                || a.is_broadcast()
+                || a.is_multicast()
+                || a.is_documentation()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10, shared address space
+                || o[0] >= 240)
+        }
+        IpAddr::V6(a) => {
+            if let Some(v4) = a.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            let s = a.segments();
+            !(a.is_loopback()
+                || a.is_unspecified()
+                || a.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00 // unique local
+                || (s[0] & 0xffc0) == 0xfe80 // link-local
+                || (s[0] & 0xffc0) == 0xfec0 // site-local (old)
+                || (s[0] == 0x2001 && s[1] == 0x0db8)) // documentation
+        }
+    }
+}
+
+/// Sends one query to one WHOIS server and reads its answer (at most 256 KiB). `referred`: the
+/// server came from another server's answer, so it is only asked at a public address.
+fn whois_ask(server: &str, request: &str, timeout: Duration, referred: bool) -> Result<String, String> {
     let timeout = timeout.max(Duration::from_millis(1));
     let (host, port) = split_host_port(server, 43);
-    let addrs: Vec<SocketAddr> = (host.as_str(), port).to_socket_addrs().map_err(|e| tf("Cannot resolve {0}: {1}", &[&host, &e]))?.collect();
+    let mut addrs: Vec<SocketAddr> = (host.as_str(), port).to_socket_addrs().map_err(|e| tf("Cannot resolve {0}: {1}", &[&host, &e]))?.collect();
+    if referred {
+        if port != 43 {
+            return Err(tf("Referral to {0} was not followed (not a public WHOIS server).", &[&server]));
+        }
+        let found = addrs.len();
+        addrs.retain(|a| is_public_ip(a.ip()));
+        if found > 0 && addrs.is_empty() {
+            return Err(tf("Referral to {0} was not followed (not a public WHOIS server).", &[&server]));
+        }
+    }
     if addrs.is_empty() {
         return Err(tf("No address found for {0}.", &[&host]));
     }
@@ -677,9 +740,14 @@ pub fn encode_oid(oid: &str) -> Result<Vec<u8>, String> {
         .map(|a| a.parse::<u64>())
         .collect::<Result<_, _>>()
         .map_err(|_| tf("Not an OID: {0}", &[&oid]))?;
-    if arcs.len() < 2 || arcs[0] > 2 || (arcs[0] < 2 && arcs[1] >= 40) {
+    let (Some(&a0), Some(&a1)) = (arcs.first(), arcs.get(1)) else {
         return Err(tf("Not an OID: {0}", &[&oid]));
-    }
+    };
+    // the first two arcs share one number: a0 * 40 + a1, which must fit
+    let first = a0.checked_mul(40).and_then(|v| v.checked_add(a1));
+    let Some(first) = first.filter(|_| a0 <= 2 && (a0 == 2 || a1 < 40)) else {
+        return Err(tf("Not an OID: {0}", &[&oid]));
+    };
     let mut out = Vec::new();
     let mut push = |mut v: u64| {
         let mut tmp = vec![(v & 0x7f) as u8];
@@ -691,8 +759,8 @@ pub fn encode_oid(oid: &str) -> Result<Vec<u8>, String> {
         tmp.reverse();
         out.extend(tmp);
     };
-    push(arcs[0] * 40 + arcs[1]);
-    for a in &arcs[2..] {
+    push(first);
+    for a in arcs.iter().skip(2) {
         push(*a);
     }
     Ok(out)
@@ -702,7 +770,11 @@ pub fn decode_oid(b: &[u8]) -> Result<String, String> {
     let mut arcs: Vec<u64> = Vec::new();
     let mut v: u64 = 0;
     for (i, &x) in b.iter().enumerate() {
-        v = v.checked_shl(7).ok_or("OID too long")? | (x & 0x7f) as u64;
+        // seven more bits must still fit into 64
+        if v > u64::MAX >> 7 {
+            return Err(tr("The SNMP answer is damaged.").to_string());
+        }
+        v = (v << 7) | (x & 0x7f) as u64;
         if x & 0x80 == 0 {
             if arcs.is_empty() {
                 let first = (v / 40).min(2);
@@ -713,7 +785,7 @@ pub fn decode_oid(b: &[u8]) -> Result<String, String> {
             }
             v = 0;
         } else if i == b.len() - 1 {
-            return Err("OID cut off".into());
+            return Err(tr("The SNMP answer is damaged.").to_string());
         }
     }
     Ok(arcs.iter().map(|a| a.to_string()).collect::<Vec<_>>().join("."))
@@ -850,6 +922,23 @@ fn next_request_id() -> i32 {
     (REQUEST_ID.fetch_add(1, Ordering::Relaxed) & 0x7fff_ffff) as i32
 }
 
+/// Looks at one UDP packet that arrived while waiting for the answer to request `id` sent to
+/// `asked`. None: not the answer (another sender or port, damaged, another request) — keep
+/// waiting. Otherwise the values, or the device's refusal.
+pub fn match_answer(asked: SocketAddr, from: SocketAddr, packet: &[u8], id: i32) -> Option<Result<Vec<(String, SnmpValue)>, String>> {
+    if from.ip() != asked.ip() || from.port() != asked.port() {
+        return None;
+    }
+    let (rid, err, binds) = decode_response(packet).ok()?;
+    if rid != id {
+        return None;
+    }
+    if err != 0 {
+        return Some(Err(tf("The device refused the request (SNMP error {0}).", &[&err])));
+    }
+    Some(Ok(binds))
+}
+
 fn snmp_exchange(host: &str, port: u16, community: &str, pdu_type: u8, oids: &[&str], timeout: Duration) -> Result<Vec<(String, SnmpValue)>, String> {
     let addr: SocketAddr =
         (host.trim(), port).to_socket_addrs().map_err(|e| tf("{0}: {1}", &[&host, &e]))?.next().ok_or_else(|| tf("{0}: no address", &[&host]))?;
@@ -864,17 +953,11 @@ fn snmp_exchange(host: &str, port: u16, community: &str, pdu_type: u8, oids: &[&
         let until = Instant::now() + timeout;
         while Instant::now() < until {
             match sock.recv_from(&mut buf) {
-                Ok((n, from)) if from.ip() == addr.ip() => {
-                    let (rid, err, binds) = decode_response(&buf[..n])?;
-                    if rid != id {
-                        continue;
+                Ok((n, from)) => {
+                    if let Some(answer) = match_answer(addr, from, buf.get(..n).unwrap_or_default(), id) {
+                        return answer;
                     }
-                    if err != 0 {
-                        return Err(tf("The device refused the request (SNMP error {0}).", &[&err]));
-                    }
-                    return Ok(binds);
                 }
-                Ok(_) => continue,
                 Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => break,
                 // Windows reports "port unreachable" as a reset: nothing listens there
                 Err(e) if e.kind() == ErrorKind::ConnectionReset => return Err(tf("No SNMP service on {0} (port {1} is closed).", &[&host, &port])),

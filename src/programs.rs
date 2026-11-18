@@ -144,8 +144,15 @@ pub fn def(key: &str) -> Option<&'static ProgDef> {
 }
 
 /// "AdminCraftTools" next to the program (portable), or inside the data folder when the
-/// program's own folder can't be written (macOS app bundle, read-only share).
+/// program's own folder can't be written (macOS app bundle, read-only share). Worked out once:
+/// the settings page and every program search ask for it, and the answer does not change while
+/// AdminCraft runs (no test file written next to the program on every call).
 pub fn tools_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(find_tools_dir).clone()
+}
+
+fn find_tools_dir() -> PathBuf {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
@@ -160,6 +167,15 @@ pub fn tools_dir() -> PathBuf {
         }
     }
     crate::model::data_dir(false).join("AdminCraftTools")
+}
+
+/// Waits for a started program in the background, so it doesn't stay behind as a zombie on
+/// Linux and macOS once it ended (programs handed to the system: browser, file manager, a
+/// terminal window). Nothing is waited for when no thread can be started.
+pub fn reap_in_background(mut child: std::process::Child) {
+    let _ = std::thread::Builder::new().name("reap-child".into()).spawn(move || {
+        let _ = child.wait();
+    });
 }
 
 /// Creates the tools folder with a short note in it.
@@ -324,7 +340,13 @@ pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(S
             for (k, v) in env {
                 cmd.env(k, v);
             }
-            return cmd.spawn().map(|_| tr("Windows-Terminal").to_string()).map_err(|e| e.to_string());
+            return cmd
+                .spawn()
+                .map(|c| {
+                    reap_in_background(c);
+                    tr("Windows-Terminal").to_string()
+                })
+                .map_err(|e| e.to_string());
         }
         let mut cmd = Command::new(program);
         cmd.args(args).creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
@@ -332,7 +354,12 @@ pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(S
             cmd.env(k, v);
         }
         let _ = title;
-        cmd.spawn().map(|_| tr("console window").to_string()).map_err(|e| e.to_string())
+        cmd.spawn()
+            .map(|c| {
+                reap_in_background(c);
+                tr("console window").to_string()
+            })
+            .map_err(|e| e.to_string())
     }
     #[cfg(target_os = "macos")]
     {
@@ -344,6 +371,7 @@ pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(S
         Command::new("osascript")
             .args(["-e", &macos_do_script(file.path()), "-e", "tell application \"Terminal\" to activate"])
             .spawn()
+            .map(reap_in_background)
             .map_err(|e| e.to_string())?;
         // from here the script removes itself (a Terminal that never runs it: swept after a day)
         file.leave_to_program();
@@ -372,7 +400,13 @@ pub fn spawn_in_terminal(program: &Path, args: &[String], title: &str, env: &[(S
                 for (k, v) in env {
                     cmd.env(k, v);
                 }
-                return cmd.spawn().map(|_| term.to_string()).map_err(|e| e.to_string());
+                return cmd
+                    .spawn()
+                    .map(|c| {
+                        reap_in_background(c);
+                        term.to_string()
+                    })
+                    .map_err(|e| e.to_string());
             }
         }
         let _ = sh_quote("");

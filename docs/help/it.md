@@ -99,6 +99,8 @@ Per ogni connessione scegli in **Password da**:
 **Accesso automatico:** per SSH e Telnet la password viene digitata quando il server la chiede
 (Impostazioni » *Digita automaticamente la password salvata nel terminale*). Per RDP viene passata a Windows
 solo per quella connessione.
+Ogni password salvata viene digitata una sola volta, e solo in una richiesta che nomina il proprio host; una richiesta
+senza nome host (come `Password:`) la riceve solo se la connessione ha una sola password. Altrimenti premi **Invia password** nella scheda.
 
 **Password principale** (Impostazioni » Posizione di archiviazione): senza di essa, le password salvate sono solo offuscate — chiunque
 abbia il file e AdminCraft potrebbe leggerle. Con una password principale sono crittografate davvero
@@ -122,6 +124,8 @@ URL (ad es. `ssh://10.0.0.30:22`) e note; le cartelle diventano gruppi KeePass. 
 KeePass; AdminCraft se ne accorge e ricarica. Una voce creata in KeePass in quel gruppo (con un URL come
 `rdp://10.0.0.10`) compare come connessione. All'avvio AdminCraft chiede la password principale di KeePass.
 **Torna all'elenco proprio di AdminCraft** nello stesso punto ricopia l'elenco.
+Se il gruppo contiene già delle voci, nulla viene sostituito: il tuo elenco resta, le voci che ha solo KeePass
+vengono aggiunte e l'elenco com'era viene conservato accanto (`….json.before-keepass`).
 
 **Salva password in KeePass …** (su una connessione con *Password da » KeePass*): digita la password una
 volta; AdminCraft la mette nel gruppo *AdminCraft* del database e da allora usa quella voce.
@@ -227,6 +231,8 @@ dall'elenco.
 **Elenco centrale per il team** (Impostazioni » Posizione di archiviazione): tieni l'elenco su una **condivisione di rete** (SMB,
 es. `\\server\it\AdminCraft-Connections.json`) o su un **server WebDAV** (Nextcloud, ownCloud, IIS).
 Proteggilo con la password principale. Quando un collega cambia qualcosa, AdminCraft lo ricarica.
+Se un collega ha salvato mentre stavi modificando, il suo elenco resta e il tuo viene conservato in un file
+accanto (`….conflict-….json`); la barra di stato lo indica.
 
 **Passare da altri strumenti:** File » Importa file mRemoteNG (`confCons.xml`, con le password) e
 File » Importa configurazione OpenSSH (`~/.ssh/config`, incluso ProxyJump).
@@ -338,7 +344,9 @@ admincraft cli window type 2 uptime     scrive in un terminale o in un PuTTY inc
 
 Il server MCP offre lo stesso come strumenti `window_…`. Scrivere nei terminali è possibile solo dopo averlo
 consentito nelle impostazioni, e ogni digitazione viene mostrata nella finestra. Possono collegarsi solo i
-programmi su questo computer che leggono la cartella dati; le password non vengono mai fornite.
+programmi su questo computer eseguiti con il tuo account utente; le password non vengono mai fornite.
+Uno screenshot senza nome di file va nella cartella `screenshots` della cartella dati; un file esistente
+non viene mai sovrascritto.
 
 ## Domande e problemi
 

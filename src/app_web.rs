@@ -4,6 +4,14 @@
 use super::*;
 use crate::model::{BrowserFamily, WebProfile};
 
+/// The key of the browser in the program list (`programs::PROGRAMS`).
+const BROWSER: &str = "browser";
+
+/// The browser as last looked for, from the window's program list.
+fn browser_in(cache: &HashMap<&'static str, Option<(PathBuf, programs::Source)>>) -> Option<PathBuf> {
+    cache.get(BROWSER).cloned().flatten().map(|(p, _)| p)
+}
+
 impl AdminApp {
     /// The "Web interfaces" section of the settings; true when something changed.
     pub(super) fn web_settings_ui(&mut self, ui: &mut egui::Ui) -> bool {
@@ -15,16 +23,17 @@ impl AdminApp {
             .on_hover_text(tr("Off: only connections with \"Open in a tab\" ticked; the others open in the system's browser."))
             .changed();
         let s = &mut self.store.data.settings;
+        // the browser is looked for again when its field is left, not on every frame
+        let mut recheck = false;
         egui::Grid::new("web_settings").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(tr("Browser"));
             ui.horizontal(|ui| {
                 let own = s.programs.entry("browser".to_string()).or_default();
-                changed |= ui
-                    .add(egui::TextEdit::singleline(own).hint_text(tr("empty = Edge or Chrome")).desired_width(360.0))
-                    .on_hover_text(tr(
-                        "The browser's program, e.g. brave.exe, vivaldi.exe or firefox.exe. Take the program itself, not a portable launcher.",
-                    ))
-                    .changed();
+                let r = ui.add(egui::TextEdit::singleline(own).hint_text(tr("empty = Edge or Chrome")).desired_width(360.0)).on_hover_text(tr(
+                    "The browser's program, e.g. brave.exe, vivaldi.exe or firefox.exe. Take the program itself, not a portable launcher.",
+                ));
+                changed |= r.changed();
+                recheck |= r.lost_focus();
                 if own.trim().is_empty() {
                     s.programs.remove("browser");
                 }
@@ -61,7 +70,11 @@ impl AdminApp {
                 ui.add(egui::TextEdit::singleline(&mut s.web_args).hint_text(tr("optional, separated by spaces")).desired_width(360.0)).changed();
             ui.end_row();
         });
-        let found = programs::find("browser", &self.store.data.settings);
+        if recheck {
+            self.prog_cache.insert(BROWSER, programs::find_with_source(BROWSER, &self.store.data.settings));
+        }
+        // from the program list the settings page reads when it opens (and on "Search again")
+        let found = browser_in(&self.prog_cache);
         match &found {
             Some(p) => {
                 let family = launch::browser_family(p, self.store.data.settings.web_family);

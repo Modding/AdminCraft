@@ -77,9 +77,25 @@ pub struct CertInfo {
     pub chain_len: usize,
 }
 
+/// Addresses tried for one host, at most (each may take the full connect timeout).
+const MAX_ADDRS: usize = 4;
+
+/// Connects to the host's addresses, IPv4 first, in order until one answers (`localhost` may
+/// give `::1` first, where the service often doesn't listen).
+fn connect_any(host: &str, port: u16) -> Result<TcpStream, String> {
+    let addrs = crate::tools::prefer_ipv4((host, port).to_socket_addrs().map_err(|e| e.to_string())?.collect());
+    let mut last = tr("No address found.").to_string();
+    for addr in addrs.iter().take(MAX_ADDRS) {
+        match TcpStream::connect_timeout(addr, Duration::from_secs(8)) {
+            Ok(s) => return Ok(s),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(last)
+}
+
 fn handshake(host: &str, port: u16, cfg: Arc<rustls::ClientConfig>) -> Result<rustls::ClientConnection, String> {
-    let addr = (host, port).to_socket_addrs().map_err(|e| e.to_string())?.next().ok_or_else(|| tr("No address found.").to_string())?;
-    let mut sock = TcpStream::connect_timeout(&addr, Duration::from_secs(8)).map_err(|e| e.to_string())?;
+    let mut sock = connect_any(host, port)?;
     sock.set_read_timeout(Some(Duration::from_secs(8))).ok();
     let name = rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| e.to_string())?;
     let mut conn = rustls::ClientConnection::new(cfg, name).map_err(|e| e.to_string())?;
@@ -242,17 +258,25 @@ fn hmac_sha1(key: &[u8], msg: &[u8]) -> [u8; 20] {
 }
 
 /// Secret from an "otpauth://totp/...?secret=XXX&digits=6&period=30" link or a bare base32 key.
-/// Returns (secret, digits, period).
+/// Returns (secret, digits, period). Only time-based codes with SHA-1 are made: an `hotp` link or
+/// another `algorithm` gives `None`, never a wrong code.
 pub fn parse_otp(text: &str) -> Option<(Vec<u8>, u32, u64)> {
     let t = text.trim();
     let (mut secret, mut digits, mut period) = (t.to_string(), 6u32, 30u64);
-    if let Some(q) = t.split_once('?').map(|(_, q)| q).filter(|_| t.starts_with("otpauth://")) {
+    if let Some(rest) = t.get(..10).filter(|p| p.eq_ignore_ascii_case("otpauth://")).and_then(|_| t.get(10..)) {
+        // counter-based (hotp) codes need a counter that is kept between uses
+        if !rest.get(..5).is_some_and(|k| k.eq_ignore_ascii_case("totp/")) {
+            return None;
+        }
+        secret.clear();
+        let q = rest.split_once('?').map(|(_, q)| q).unwrap_or("");
         for kv in q.split('&') {
             let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
             match k.to_lowercase().as_str() {
-                "secret" => secret = v.replace("%3D", "="),
+                "secret" => secret = v.replace("%3D", "=").replace("%3d", "="),
                 "digits" => digits = v.parse().unwrap_or(6),
                 "period" => period = v.parse().unwrap_or(30),
+                "algorithm" if !v.eq_ignore_ascii_case("SHA1") => return None,
                 _ => {}
             }
         }

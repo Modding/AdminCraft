@@ -99,6 +99,8 @@ For every connection you choose under **Password from**:
 **Automatic login:** for SSH and Telnet the password is typed in when the server asks for it
 (Settings » *Type the stored password in the terminal automatically*). For RDP it is handed to Windows
 for this one connection.
+Each stored password is typed only once, and only into a prompt that names its own host; a prompt without a host
+name (such as `Password:`) gets it only when the connection has a single password. Otherwise press **Send password** in the tab.
 
 **Master password** (Settings » Storage location): without it, stored passwords are only obfuscated — anyone
 with the file and AdminCraft could read them. With a master password they are properly encrypted
@@ -122,6 +124,8 @@ URL (e.g. `ssh://10.0.0.30:22`) and notes; folders become KeePass groups. You ca
 too; AdminCraft notices and reloads. An entry you make in that group in KeePass (with a URL such as
 `rdp://10.0.0.10`) shows up as a connection. At start AdminCraft asks for the KeePass master password.
 **Back to AdminCraft's own list** in the same place copies the list back.
+When the group already holds entries, nothing is replaced: your list stays, entries only KeePass has are
+added, and the list as it was is kept next to it (`….json.before-keepass`).
 
 **Save password in KeePass …** (on a connection with *Password from » KeePass*): type a password once;
 AdminCraft puts it into the group *AdminCraft* of your database and uses that entry from then on.
@@ -225,6 +229,8 @@ from the list.
 **Central list for the team** (Settings » Storage location): keep the list on a **network share** (SMB,
 e.g. `\\server\it\AdminCraft-Connections.json`) or a **WebDAV server** (Nextcloud, ownCloud, IIS).
 Protect it with the master password. When a colleague changes something, AdminCraft reloads it.
+When a colleague saved while you were editing, their list stays and yours is kept in a file next to it
+(`….conflict-….json`); the status bar names it.
 
 **Moving from other tools:** File » Import mRemoteNG file (`confCons.xml`, with passwords) and
 File » Import OpenSSH configuration (`~/.ssh/config`, including ProxyJump).
@@ -333,7 +339,8 @@ admincraft cli window type 2 uptime     type into a terminal tab or embedded PuT
 
 The MCP server offers the same as `window_…` tools. Typing into terminals is only possible after you
 allowed it in the settings, and every typing is shown in the window. Only programs on this computer
-that can read the data folder can connect; passwords are never given out.
+that run under your own user account can connect; passwords are never given out. A screenshot without
+a file name goes to the folder `screenshots` in the data folder; an existing file is never overwritten.
 
 ## Questions and problems
 

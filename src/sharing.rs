@@ -59,6 +59,7 @@ fn collect(store: &Store, root: Option<u64>) -> Vec<Entry> {
         .cloned()
         .map(|mut e| {
             e.password_enc = None; // encrypted with this PC's key: useless elsewhere
+            e.kp_id.clear(); // a KeePass entry of this list: the copy must not write over it
             e
         })
         .collect()
@@ -146,27 +147,32 @@ pub fn is_encrypted(text: &str) -> bool {
 }
 
 /// Adds imported entries under a new folder `folder_name`, with fresh ids (folders, parents
-/// and jump hosts are kept together). Returns (new folder id, connections added).
+/// and jump hosts are kept together). Every entry gets its own id, also when the file repeats
+/// one (references then go to the first); an entry can't end up as its own parent, directly or
+/// through others. Returns (new folder id, connections added).
 pub fn merge(store: &mut Store, entries: Vec<Entry>, passwords: BTreeMap<u64, String>, folder_name: &str) -> (u64, usize) {
     let folder_id = store.next_id();
     store.data.entries.push(Entry { id: folder_id, folder: true, name: folder_name.into(), inherit_credentials: false, ..Default::default() });
+    let new_ids: Vec<u64> = entries.iter().map(|_| store.next_id()).collect();
     let mut map: HashMap<u64, u64> = HashMap::new();
-    for e in &entries {
-        map.insert(e.id, store.next_id());
+    for (e, &nid) in entries.iter().zip(&new_ids) {
+        map.entry(e.id).or_insert(nid);
     }
-    let mut n = 0;
-    for mut e in entries {
+    let mut added = Vec::with_capacity(entries.len());
+    for (mut e, nid) in entries.into_iter().zip(new_ids) {
         let old = e.id;
-        e.id = map[&old];
-        e.parent = Some(e.parent.and_then(|p| map.get(&p).copied()).unwrap_or(folder_id));
-        e.jump_host = e.jump_host.and_then(|j| map.get(&j).copied());
+        e.id = nid;
+        e.parent = Some(e.parent.and_then(|p| map.get(&p).copied()).filter(|&p| p != nid).unwrap_or(folder_id));
+        e.jump_host = e.jump_host.and_then(|j| map.get(&j).copied()).filter(|&j| j != nid);
         e.password = passwords.get(&old).cloned().unwrap_or_default();
         e.password_enc = None;
-        if !e.folder {
-            n += 1;
-        }
-        store.data.entries.push(e);
+        // the colleague's KeePass ids mean nothing here (and must not hit entries of this list)
+        e.kp_id.clear();
+        added.push(e);
     }
+    crate::model::break_parent_cycles(&mut added, Some(folder_id));
+    let n = added.iter().filter(|e| !e.folder).count();
+    store.data.entries.extend(added);
     (folder_id, n)
 }
 

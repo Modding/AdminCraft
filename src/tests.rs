@@ -1012,3 +1012,1594 @@ fn scan_names_and_traceroute_outside_windows() {
     assert_eq!(trace_cmd("h", false, false), ("traceroute".to_string(), vec!["-n".to_string(), "h".to_string()]));
     assert_eq!(trace_cmd("h", false, true).0, "tracepath", "Linux without traceroute");
 }
+
+fn review_hop(host: &str, user: &str, password: &str) -> crate::transfer::Hop {
+    crate::transfer::Hop { host: host.into(), user: user.into(), port: 22, password: password.into() }
+}
+
+fn review_endpoint(kind: crate::transfer::Kind, target: crate::transfer::Hop) -> crate::transfer::Endpoint {
+    crate::transfer::Endpoint {
+        kind,
+        target,
+        key_file: String::new(),
+        jumps: Vec::new(),
+        tls: false,
+        check_cert: true,
+        tool: crate::transfer::Tool::Putty,
+        progs: crate::transfer::Progs::default(),
+    }
+}
+
+#[test]
+fn askpass_answers_only_the_host_the_prompt_names() {
+    use crate::transfer::askpass_answer;
+    let hops = vec![review_hop("bastion", "jump", "J"), review_hop("10.0.0.4", "admin", "A"), review_hop("10.0.0.40", "root", "T")];
+    // keyboard-interactive prompts name the login in brackets
+    assert_eq!(askpass_answer("(jump@bastion) Password: ", &hops), Some("J"));
+    assert_eq!(askpass_answer("(root@10.0.0.40) Password:", &hops), Some("T"));
+    assert_eq!(askpass_answer("root@10.0.0.40's password: ", &hops), Some("T"));
+    // whole host names: 10.0.0.4 is not 10.0.0.40
+    assert_eq!(askpass_answer("x@10.0.0.4's password: ", &hops), Some("A"));
+    // with jump hosts a prompt naming no known host gets nothing (no guessing)
+    assert_eq!(askpass_answer("Password: ", &hops), None);
+    assert_eq!(askpass_answer("(root@other) Password: ", &hops), None);
+    // a single host keeps the fallback
+    let one = vec![review_hop("db", "root", "T")];
+    assert_eq!(askpass_answer("Password: ", &one), Some("T"));
+    let v6 = vec![review_hop("bastion", "jump", "J"), review_hop("fe80::1", "root", "V")];
+    assert_eq!(askpass_answer("root@fe80::1's password: ", &v6), Some("V"));
+}
+
+#[test]
+fn ftp_download_names_stay_inside_the_folder() {
+    use crate::transfer::is_plain_name;
+    for ok in ["file.txt", "my file", " lead", "ü.bin", ".hidden"] {
+        assert!(is_plain_name(ok), "{ok}");
+    }
+    for bad in ["", ".", "..", "../x", "..\\x", "C:\\x", "C:x", "/etc/passwd", "a/b", "a\\b", "a\0b", "a\nb", "x:stream"] {
+        assert!(!is_plain_name(bad), "{bad:?}");
+    }
+}
+
+#[test]
+fn ftp_download_goes_through_a_part_file() {
+    use crate::transfer::write_via_part;
+    use std::io::Write;
+    let dir = std::env::temp_dir().join(format!("admincraft-part-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("data.bin");
+    std::fs::write(&file, b"old").unwrap();
+    // an aborted download leaves the old file as it was and no part file
+    let r = write_via_part(&file, |f| {
+        f.write_all(b"half").unwrap();
+        Err("connection lost".into())
+    });
+    assert!(r.is_err());
+    assert_eq!(std::fs::read(&file).unwrap(), b"old");
+    assert!(!dir.join("data.bin.part").exists());
+    // a finished one replaces it
+    write_via_part(&file, |f| f.write_all(b"new").map_err(|e| e.to_string())).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"new");
+    assert!(!dir.join("data.bin.part").exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn host_or_user_can_not_become_an_option() {
+    use crate::launch::{Creds, check_login, launch};
+    use crate::model::{Entry, Settings};
+    assert!(check_login("10.0.0.1", "root").is_ok());
+    assert!(check_login(" fe80::1 ", "DOMAIN\\John Smith").is_ok());
+    assert!(check_login("-oProxyCommand=calc", "root").is_err());
+    assert!(check_login("host\r\nusername:s:x", "root").is_err());
+    assert!(check_login("a b", "root").is_err());
+    assert!(check_login("host", "-oProxyCommand=calc").is_err());
+    assert!(check_login("host", "root\nx").is_err());
+    let settings = Settings::default();
+    let c = Creds { user: "root".into(), ..Default::default() };
+    for (protocol, host) in [(Protocol::Ssh, "-oProxyCommand=calc"), (Protocol::Rdp, "h\r\nusername:s:evil"), (Protocol::Telnet, "-l")] {
+        let e = Entry { host: host.into(), protocol, ..Default::default() };
+        assert!(launch(&e, &c, &settings, &[], (0, 0)).is_err(), "{protocol:?}");
+    }
+    // file transfer: target and jump hosts
+    let mut ep = review_endpoint(crate::transfer::Kind::Sftp, review_hop("db", "root", ""));
+    assert!(crate::transfer::check_endpoint(&ep).is_ok());
+    ep.jumps.push(review_hop("-oProxyCommand=x", "j", ""));
+    assert!(crate::transfer::check_endpoint(&ep).is_err());
+}
+
+#[test]
+fn sftp_batch_refuses_control_characters() {
+    use crate::transfer::{local_q, q};
+    assert_eq!(q("/srv/my \"file\"").unwrap(), r#""/srv/my \"file\"""#);
+    assert!(q("x\n!rm -rf ~").is_err(), "a line break would start a new sftp command");
+    assert!(q("x\ry").is_err());
+    assert!(local_q(std::path::Path::new("dir\nput x")).is_err());
+}
+
+#[test]
+fn putty_proxy_command_escapes_values() {
+    use crate::launch::{ProxyPassword, putty_proxy_command};
+    use std::path::Path;
+    let pc =
+        putty_proxy_command(Path::new(r"C:\Users\tom\plink.exe"), 2222, "ad min", ProxyPassword::File(Path::new(r"C:\Temp\pw-1.txt")), "jump", true);
+    assert_eq!(pc, r#""C:\\Users\\tom\\plink.exe" -batch -ssh -P 2222 -l "ad min" -pwfile "C:\\Temp\\pw-1.txt" -nc %host:%port "jump""#);
+    // an old plink with the password: quotes, % and a trailing backslash survive PuTTY's escapes
+    let pc = putty_proxy_command(Path::new("plink"), 22, "", ProxyPassword::Plain("a\"b%c\\"), "jump", true);
+    assert!(pc.contains(r#" -pw "a\\"b%%c\\\\" "#), "{pc}");
+    // elsewhere /bin/sh runs it: single quotes
+    let pc = putty_proxy_command(Path::new("/usr/bin/plink"), 22, "o'neil", ProxyPassword::None, "jump", false);
+    assert_eq!(pc, r#"'/usr/bin/plink' -batch -ssh -P 22 -l 'o'\\''neil' -nc %host:%port 'jump'"#);
+}
+
+#[test]
+fn temporary_browser_profile_in_the_private_folder() {
+    use crate::launch::web_profile_dir;
+    use crate::model::{BrowserFamily, WebProfile};
+    let private = crate::secretfile::private_temp_dir().unwrap();
+    let tmp = web_profile_dir(BrowserFamily::Chromium, WebProfile::Temporary, 5).unwrap();
+    assert_eq!(tmp, private.join("web-chromium-5"));
+}
+
+#[cfg(windows)]
+#[test]
+fn rdp_login_leaves_an_existing_entry_and_goes_at_exit() {
+    use crate::wincred::{clean_up_later, exists, forget_pending, store, user_of};
+    let target = format!("AdminCraftTest/keep-{}", std::process::id());
+    assert_eq!(store(&target, "first", "a"), Ok(false));
+    assert_eq!(store(&target, "second", "b"), Ok(true), "there before: left alone");
+    assert_eq!(user_of(&target).as_deref(), Some("first"));
+    // AdminCraft closing removes what is still waiting for its removal
+    clean_up_later(Some(target.clone()), Vec::new());
+    forget_pending();
+    assert!(!exists(&target));
+}
+
+#[test]
+fn scp_through_putty_takes_the_key_and_refuses_jump_hosts() {
+    use crate::transfer::{plink_args, pscp_args};
+    let mut ep = review_endpoint(crate::transfer::Kind::Scp, review_hop("db", "root", ""));
+    ep.key_file = " C:\\keys\\id.ppk ".into();
+    let a = plink_args(&ep, Vec::new(), "pwd").unwrap();
+    assert!(a.windows(2).any(|w| w == ["-i", "C:\\keys\\id.ppk"]), "{a:?}");
+    let a = pscp_args(&ep, Vec::new(), false, "a", "b").unwrap();
+    assert!(a.windows(2).any(|w| w == ["-i", "C:\\keys\\id.ppk"]), "{a:?}");
+    ep.jumps.push(review_hop("bastion", "j", ""));
+    assert!(plink_args(&ep, Vec::new(), "pwd").is_err());
+    assert!(pscp_args(&ep, Vec::new(), false, "a", "b").is_err());
+}
+
+#[test]
+fn transfer_tab_says_when_putty_is_old() {
+    use crate::transfer::old_putty_note;
+    let dir = std::env::temp_dir().join(format!("admincraft-oldputty-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (old, new) = (dir.join("pscp-old.exe"), dir.join("pscp-new.exe"));
+    std::fs::write(&old, b"MZ..-pw..").unwrap();
+    std::fs::write(&new, b"MZ..-pw..-pwfile..").unwrap();
+    let mut ep = review_endpoint(crate::transfer::Kind::Sftp, review_hop("db", "root", "pw"));
+    ep.progs.psftp = Some(old.clone());
+    assert!(old_putty_note(&ep).is_some());
+    ep.progs.psftp = Some(new.clone());
+    assert!(old_putty_note(&ep).is_none());
+    ep.kind = crate::transfer::Kind::Scp;
+    ep.progs.pscp = Some(new);
+    ep.progs.plink = Some(old);
+    assert!(old_putty_note(&ep).is_some(), "the listing goes through the old plink");
+    ep.target.password.clear();
+    assert!(old_putty_note(&ep).is_none(), "no password, nothing on the command line");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn closed_transfer_tab_drops_queued_jobs() {
+    use crate::transfer::{Job, next_job};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cancel = AtomicBool::new(false);
+    tx.send(Job::Mkdir("/a".into())).unwrap();
+    tx.send(Job::Mkdir("/b".into())).unwrap();
+    assert!(next_job(&rx, &cancel).is_some());
+    cancel.store(true, Ordering::SeqCst);
+    assert!(next_job(&rx, &cancel).is_none(), "the tab is gone: the rest is not run");
+}
+
+#[test]
+fn ftp_server_that_says_nothing_times_out() {
+    use std::time::{Duration, Instant};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // accepts, then never answers
+    let keep = std::thread::spawn(move || {
+        if let Ok((socket, _)) = listener.accept() {
+            std::thread::sleep(Duration::from_secs(1));
+            drop(socket);
+        }
+    });
+    let mut target = review_hop("127.0.0.1", "u", "p");
+    target.port = port;
+    let ep = review_endpoint(crate::transfer::Kind::Ftp, target);
+    let start = Instant::now();
+    let r = crate::transfer::ftp_connect_with(&ep, Duration::from_secs(2), Duration::from_millis(300));
+    assert!(r.is_err());
+    assert!(start.elapsed() < Duration::from_secs(2), "the read timeout ends the wait");
+    let _ = keep.join();
+}
+
+#[test]
+fn listings_keep_leading_spaces_and_skip_echoed_commands() {
+    use crate::transfer::{parse_ls_line, parse_scp_listing, scp_list_command};
+    let f = parse_ls_line("-rw-r--r--    1 demo     users      379 Sep 19  2023   two spaces").unwrap();
+    assert_eq!(f.name, "  two spaces");
+    let f = parse_ls_line("-rw-r--r--+ 1 demo users 5 Jan  1 12:00 acl").unwrap();
+    assert_eq!(f.name, "acl");
+    assert!(parse_ls_line(r#"sftp> rm "/srv/a b c d e f g h i j""#).is_none());
+    assert!(parse_ls_line(r#"psftp> rm "/srv/a b c d e f g h i j""#).is_none());
+    assert!(parse_ls_line("total 12").is_none());
+    // SCP listing: works without sh-only syntax; the line after the mark is the folder
+    let cmd = scp_list_command("/srv/it's here");
+    assert_eq!(cmd, r#"cd '/srv/it'\''s here' && echo AdminCraft-folder: && pwd && env LC_ALL=C ls -la"#);
+    assert!(!cmd.contains("$(") && !cmd.contains("cd --"));
+    assert!(scp_list_command("-x").starts_with("cd './-x' && "));
+    assert_eq!(scp_list_command(""), "echo AdminCraft-folder: && pwd && env LC_ALL=C ls -la");
+    let (dir, items) = parse_scp_listing("AdminCraft-folder:\n/srv/data\ntotal 8\n-rw-r--r-- 1 u g 5 Jan  1 12:00 a.txt\n");
+    assert_eq!(dir.as_deref(), Some("/srv/data"));
+    assert_eq!(items.len(), 1);
+}
+
+#[test]
+fn ipv6_addresses_in_brackets_where_a_colon_follows() {
+    use crate::transfer::{bracket_host, ftp_addrs, jump_arg, remote_spec};
+    assert_eq!(bracket_host("::1"), "[::1]");
+    assert_eq!(bracket_host("[::1]"), "[::1]");
+    assert_eq!(bracket_host("db.lan"), "db.lan");
+    assert_eq!(remote_spec(&review_hop("fe80::1", "root", ""), "/tmp"), "root@[fe80::1]:/tmp");
+    let mut ep = review_endpoint(crate::transfer::Kind::Sftp, review_hop("db", "root", ""));
+    let mut j = review_hop("2001:db8::5", "jump", "");
+    j.port = 2222;
+    ep.jumps = vec![j, review_hop("::2", "", "")];
+    assert_eq!(jump_arg(&ep).as_deref(), Some("jump@[2001:db8::5]:2222,[::2]"));
+    for h in ["::1", "[::1]"] {
+        let a = ftp_addrs(h, 21).unwrap();
+        assert!(a.iter().all(|a| a.is_ipv6() && a.port() == 21), "{h}");
+    }
+}
+
+#[test]
+fn password_goes_only_to_its_own_host() {
+    use crate::launch::PwRule;
+    use crate::terminal::{pick_password, prompt_host};
+    let r = |h: &str, u: &str, p: &str| PwRule { host: h.into(), user: u.into(), password: p.into() };
+    let rules = vec![r("10.0.0.4", "jump", "pw-jump"), r("10.0.0.40", "root", "pw-target")];
+    let fresh = [false, false];
+    assert_eq!(pick_password(&rules, &fresh, "root@10.0.0.40's password:"), Some(1));
+    assert_eq!(pick_password(&rules, &fresh, "jump@10.0.0.4's password:"), Some(0));
+    // the whole host name counts: 10.0.0.4 is not 10.0.0.40, and the other way round
+    assert_eq!(pick_password(&rules[..1], &[false], "root@10.0.0.40's password:"), None);
+    assert_eq!(pick_password(&rules[1..], &[false], "jump@10.0.0.4's password:"), None);
+    // keyboard-interactive and "password for" forms
+    assert_eq!(pick_password(&rules, &fresh, "(root@10.0.0.40) Password:"), Some(1));
+    assert_eq!(pick_password(&rules, &fresh, "Password for jump@10.0.0.4:"), Some(0));
+    // the jump host asking again gets nothing, not the target's password
+    assert_eq!(pick_password(&rules, &[true, false], "jump@10.0.0.4's password:"), None);
+    // a host without a rule gets nothing
+    assert_eq!(pick_password(&rules, &fresh, "admin@10.0.0.5's password:"), None);
+    // no host named: only when there is a single rule, and only once
+    assert_eq!(pick_password(&rules, &fresh, "Password:"), None);
+    assert_eq!(pick_password(&rules[..1], &[false], "Password:"), Some(0));
+    assert_eq!(pick_password(&rules[..1], &[true], "Password:"), None);
+    // same host, two users: the user decides
+    let two = vec![r("db01", "app", "a"), r("DB01", "root", "b")];
+    assert_eq!(pick_password(&two, &[false, false], "root@db01's password:"), Some(1));
+    assert_eq!(prompt_host("root@[fe80::1]'s password:"), Some(("root".to_string(), "fe80::1".to_string())));
+    assert_eq!(prompt_host("[sudo] password for alice:"), None);
+}
+
+#[test]
+fn paste_cannot_end_bracketed_paste() {
+    use crate::terminal::paste_bytes;
+    assert_eq!(paste_bytes("ls\x1b[201~rm -rf /\n", true), b"\x1b[200~ls[201~rm -rf /\r\x1b[201~".to_vec());
+    assert_eq!(paste_bytes("a\tb\r\nc\x1b", false), b"a\tb\rc".to_vec());
+    assert_eq!(paste_bytes("x\u{9b}201~y", false), b"x201~y".to_vec(), "8-bit CSI too");
+}
+
+#[test]
+fn session_log_leaves_out_all_escapes() {
+    use crate::terminal::strip_escapes;
+    let strip = |chunks: &[&[u8]]| {
+        let (mut st, mut out) = (0u8, Vec::new());
+        for c in chunks {
+            strip_escapes(&mut st, c, &mut out);
+        }
+        String::from_utf8(out).unwrap()
+    };
+    assert_eq!(strip(&[b"\x1b(Bplain\x1b[1;31mred\x1b[0m"]), "plainred");
+    assert_eq!(strip(&[b"\x1b)0\x1b#8x"]), "x");
+    assert_eq!(strip(&[b"\x1bPq#0;2;0;0;0\x1b\\after"]), "after");
+    assert_eq!(strip(&[b"\x1bPa\\b\x1b\\c"]), "c", "a backslash alone does not end a DCS");
+    assert_eq!(strip(&[b"\x1b_Gf=100;AAAA\x1b\\x"]), "x");
+    assert_eq!(strip(&[b"\x1bXsos\x1b\\1\x1b^pm\x1b\\2"]), "12");
+    assert_eq!(strip(&[b"\x1b]0;title\x07t"]), "t");
+    assert_eq!(strip(&[b"\x1b]0;ti", b"tle\x1b", b"\\ok\r\n"]), "ok\n");
+    assert_eq!(strip(&[b"\x1b[3", b"1mz"]), "z");
+}
+
+#[test]
+fn recordings_are_buffered_and_keep_arrival_time() {
+    let path = std::env::temp_dir().join(format!("admincraft-recbuf-{}.cast", std::process::id()));
+    {
+        let mut r = crate::terminal::Recorder::create(&path, 80, 24, "t").unwrap();
+        r.output(b"hello");
+        // the data arrived 5 s after the start, whenever the screen gets it
+        r.output_at(b"later", std::time::Instant::now() + std::time::Duration::from_secs(5));
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0, "not written per chunk");
+    }
+    let cast = crate::playback::parse_cast(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(cast.events.len(), 2, "written when dropped");
+    assert!(cast.events[1].0 >= 4.9, "{:?}", cast.events[1]);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn wide_and_odd_glyphs_stay_on_the_cell_grid() {
+    use crate::terminal::{for_each_run, nz};
+    let mut p = vt100::Parser::new(nz(2), nz(20), 0);
+    p.process("a漢b ä\u{1F600}c".as_bytes());
+    let runs = |inline: &dyn Fn(char) -> bool| {
+        let mut v: Vec<(u16, u16, String)> = Vec::new();
+        for_each_run(p.screen(), 1, 20, inline, |_, col, width, text, _| v.push((col, width, text.to_string())));
+        v
+    };
+    let at = |v: &Vec<(u16, u16, String)>, s: &str| v.iter().find(|r| r.2.starts_with(s)).map(|r| (r.0, r.1));
+    let v = runs(&|ch| ch == 'ä');
+    assert_eq!(at(&v, "a"), Some((0, 1)));
+    assert_eq!(at(&v, "漢"), Some((1, 2)));
+    assert_eq!(at(&v, "b ä"), Some((3, 3)), "a one-cell glyph may stay in the run");
+    assert_eq!(at(&v, "\u{1F600}"), Some((6, 2)));
+    assert_eq!(at(&v, "c"), Some((8, 12)));
+    // a glyph the font draws at another width is placed alone, at its column
+    let v = runs(&|_| false);
+    assert_eq!(at(&v, "ä"), Some((5, 1)));
+    assert_eq!(at(&v, "c"), Some((8, 12)));
+    assert_eq!(v.iter().map(|r| r.1).sum::<u16>(), 20, "every cell once");
+}
+
+#[test]
+fn whois_referrals_stay_public() {
+    use crate::nettools::referral_allowed;
+    assert!(referral_allowed("whois.verisign-grs.com"));
+    assert!(referral_allowed("whois.arin.net:43"));
+    assert!(referral_allowed("8.8.8.8"));
+    assert!(!referral_allowed("whois.example.net:4444"), "only port 43");
+    for bad in [
+        "127.0.0.1",
+        "10.1.2.3",
+        "192.168.0.1:43",
+        "172.16.0.1",
+        "169.254.169.254",
+        "100.64.0.1",
+        "0.0.0.0",
+        "[::1]",
+        "fe80::1",
+        "[fc00::5]:43",
+        "[::ffff:127.0.0.1]",
+        "localhost",
+    ] {
+        assert!(!referral_allowed(bad), "{bad}");
+    }
+}
+
+#[test]
+fn capture_buffer_size_is_checked() {
+    use crate::embed::pixel_buffer_len;
+    assert_eq!(pixel_buffer_len(10, 2), Some(80));
+    assert_eq!(pixel_buffer_len(16_384, 16_384), Some(16_384 * 16_384 * 4));
+    assert_eq!(pixel_buffer_len(0, 5), None);
+    assert_eq!(pixel_buffer_len(-3, 5), None);
+    assert_eq!(pixel_buffer_len(16_385, 1), None);
+    assert_eq!(pixel_buffer_len(i32::MAX, i32::MAX), None, "would overflow i32");
+}
+
+#[test]
+fn tools_folder_is_worked_out_once() {
+    let a = crate::programs::tools_dir();
+    assert_eq!(a, crate::programs::tools_dir());
+}
+
+// ---- window: tab strip, tab contents, screenshots (code review 2026-11-18)
+
+#[test]
+fn tab_screenshot_area_is_cut_to_the_picture() {
+    // C7: the area comes from an earlier frame; ColorImage::region panicked when it reached
+    // past the picture or was turned around
+    use crate::app::{crop_image, rgba_fits};
+    use eframe::egui::{Color32, ColorImage, Pos2, Rect};
+    let (w, h) = (4usize, 3usize);
+    let pixels: Vec<Color32> = (0..w * h).map(|i| Color32::from_rgb(i as u8, 0, 0)).collect();
+    let img = ColorImage::new([w, h], pixels);
+    let red = |c: &ColorImage| c.pixels.iter().map(|p| p.r()).collect::<Vec<u8>>();
+    let r = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1, y1));
+    // inside
+    let part = crop_image(&img, r(1.0, 1.0, 3.0, 3.0), 1.0).unwrap();
+    assert_eq!(part.size, [2, 2]);
+    assert_eq!(red(&part), vec![5, 6, 9, 10]);
+    // half outside (window got smaller): cut to the picture
+    let part = crop_image(&img, r(2.0, 1.0, 40.0, 30.0), 1.0).unwrap();
+    assert_eq!(part.size, [2, 2]);
+    assert_eq!(red(&part), vec![6, 7, 10, 11]);
+    // negative start, scaled by pixels per point
+    let part = crop_image(&img, r(-5.0, -5.0, 1.0, 0.5), 2.0).unwrap();
+    assert_eq!(part.size, [2, 1]);
+    assert_eq!(red(&part), vec![0, 1]);
+    // nothing left: None instead of a panic
+    assert!(crop_image(&img, r(10.0, 10.0, 20.0, 20.0), 1.0).is_none(), "outside");
+    assert!(crop_image(&img, Rect { min: Pos2::new(3.0, 2.0), max: Pos2::new(1.0, 1.0) }, 1.0).is_none(), "turned around");
+    assert!(crop_image(&img, r(1.0, 1.0, 1.0, 3.0), 1.0).is_none(), "no width");
+    assert!(crop_image(&img, r(f32::NAN, 0.0, f32::NAN, 2.0), 1.0).is_none(), "NaN");
+    assert!(crop_image(&img, r(0.0, 0.0, 4.0, 3.0), f32::NAN).is_none(), "NaN scale");
+    // a whole-window area at a large scale is the whole picture
+    assert_eq!(crop_image(&img, r(0.0, 0.0, 100.0, 100.0), 3.0).unwrap().size, [4, 3]);
+    // a picture whose pixels don't fit its size is not cut at all
+    let mut broken = ColorImage::new([2, 2], vec![Color32::BLACK; 4]);
+    broken.pixels.pop();
+    assert!(crop_image(&broken, r(0.0, 0.0, 2.0, 2.0), 1.0).is_none());
+    // RGBA buffers from the system capture: size and length must agree
+    assert!(rgba_fits(2, 3, 24));
+    assert!(!rgba_fits(2, 3, 23));
+    assert!(!rgba_fits(0, 3, 0));
+    assert!(!rgba_fits(usize::MAX, 2, 0), "overflow");
+}
+
+#[test]
+fn close_requests_by_tab_id() {
+    use crate::app::plan_closes;
+    // B5: two requests in one frame (control channel and Ctrl+Shift+W) both apply
+    let order = [0, 10, 11, 12, 13];
+    let (remove, active) = plan_closes(&order, 4, &[11, 13]);
+    assert_eq!(remove, vec![4, 2], "highest first");
+    assert_eq!(active, 2, "the active tab was closed: its left neighbour (id 12, now at 2)");
+    // a request made before two tabs swapped places still closes the tab it meant
+    let swapped = [0, 10, 12, 11, 13];
+    let (remove, active) = plan_closes(&swapped, 1, &[11]);
+    assert_eq!(remove, vec![3]);
+    assert_eq!(active, 1, "a tab to the left stays active");
+    // the active tab right of a closed one stays the active tab
+    let (_, active) = plan_closes(&order, 3, &[10]);
+    assert_eq!(active, 2, "id 12 moved from 3 to 2");
+    // never the start page, every tab once, unknown ids ignored
+    let (remove, active) = plan_closes(&order, 0, &[0, 12, 12, 99]);
+    assert_eq!(remove, vec![3]);
+    assert_eq!(active, 0);
+    // everything but the start page
+    let (remove, active) = plan_closes(&order, 4, &[10, 11, 12, 13]);
+    assert_eq!(remove, vec![4, 3, 2, 1]);
+    assert_eq!(active, 0);
+    assert_eq!(plan_closes(&order, 2, &[]), (vec![], 2));
+}
+
+#[test]
+fn snippet_for_multi_tabs_uses_each_tabs_connection() {
+    // B1: a saved command sent to all "Multi" tabs fills in each tab's own host, user and name
+    use crate::app::snippet_bytes;
+    use crate::launch::Creds;
+    use crate::model::Entry;
+    let cmd = "ping -c1 {host} # {user}@{name}";
+    let a = Entry { name: "web01".into(), host: " 10.0.0.1 ".into(), ..Default::default() };
+    let b = Entry { name: "db01".into(), host: "10.0.0.2".into(), ..Default::default() };
+    let ca = Creds { user: "alice".into(), password: "secret-a".into(), ..Default::default() };
+    let cb = Creds { user: "bob".into(), password: "secret-b".into(), ..Default::default() };
+    assert_eq!(snippet_bytes(cmd, &a, &ca), b"ping -c1 10.0.0.1 # alice@web01\r".to_vec());
+    assert_eq!(snippet_bytes(cmd, &b, &cb), b"ping -c1 10.0.0.2 # bob@db01\r".to_vec());
+    // the password is never a placeholder
+    assert!(!String::from_utf8_lossy(&snippet_bytes("{password}", &a, &ca)).contains("secret"));
+}
+
+#[test]
+fn dns_late_answer_does_not_overwrite_a_newer_query() {
+    // B2: every query gets its own result slot
+    use crate::app::fresh_dns_slot;
+    use std::sync::{Arc, Mutex};
+    type Slot = Arc<Mutex<Option<Result<Vec<String>, String>>>>;
+    let mut shown: Slot = Default::default();
+    let first = fresh_dns_slot(&mut shown);
+    let second = fresh_dns_slot(&mut shown);
+    *second.lock().unwrap() = Some(Ok(vec!["2001:db8::1".into()]));
+    // the first lookup answers late
+    *first.lock().unwrap() = Some(Ok(vec!["192.0.2.1".into()]));
+    assert_eq!(shown.lock().unwrap().clone(), Some(Ok(vec!["2001:db8::1".to_string()])));
+    // a new query starts empty, even while an older lookup still runs
+    let _third = fresh_dns_slot(&mut shown);
+    assert!(shown.lock().unwrap().is_none());
+}
+
+#[test]
+fn output_lines_and_transfer_rows() {
+    // P7: the colour of a ping line; P8: which remote rows the list shows
+    use crate::app::{LineTone, line_tone, visible_rows};
+    assert_eq!(line_tone("64 bytes from 10.0.0.1: icmp_seq=1 ttl=64 time=0.3 ms"), LineTone::Good);
+    assert_eq!(line_tone("Reply from 10.0.0.1: bytes=32 time<1ms TTL=128"), LineTone::Good);
+    assert_eq!(line_tone("Antwort von 10.0.0.1: Bytes=32 Zeit<1ms TTL=128"), LineTone::Good);
+    assert_eq!(line_tone("Request timed out."), LineTone::Bad);
+    assert_eq!(line_tone("Destination host unreachable."), LineTone::Bad);
+    assert_eq!(line_tone("Zeitüberschreitung der Anforderung."), LineTone::Bad);
+    assert_eq!(line_tone("Pinging 10.0.0.1 with 32 bytes of data:"), LineTone::Normal);
+    let item = |name: &str| crate::transfer::RemoteItem {
+        name: name.into(),
+        is_dir: false,
+        is_link: false,
+        size: 0,
+        modified: String::new(),
+        perms: String::new(),
+    };
+    let items = vec![item(".ssh"), item("a.txt"), item(".bashrc"), item("b")];
+    assert_eq!(visible_rows(&items, false), vec![1, 3]);
+    assert_eq!(visible_rows(&items, true), vec![0, 1, 2, 3]);
+    assert!(visible_rows(&[], false).is_empty());
+}
+
+#[test]
+fn repaint_only_as_often_as_needed() {
+    // P10: no four frames a second for as long as something runs
+    use crate::app::keep_alive_interval;
+    use std::time::Duration;
+    assert_eq!(keep_alive_interval(true, true), Some(Duration::from_millis(250)), "a window to put into its tab");
+    assert_eq!(keep_alive_interval(false, true), Some(Duration::from_secs(1)));
+    assert_eq!(keep_alive_interval(false, false), None);
+}
+
+#[test]
+fn playback_survives_odd_times() {
+    use crate::playback::{Player, parse_cast};
+    let text = "{\"version\":2,\"width\":80,\"height\":24}\n[-5.0,\"o\",\"a\"]\n[-1.0,\"o\",\"b\"]\n[\"x\",\"o\",\"c\"]\n";
+    let cast = parse_cast(text).unwrap();
+    assert!(cast.events.iter().all(|(t, _)| t.is_finite() && *t >= 0.0));
+    let mut p = Player::from_cast(std::path::Path::new("x.cast"), cast, false);
+    assert_eq!(p.duration(), 0.0);
+    for t in [3.0, -2.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0] {
+        p.seek(t);
+    }
+    assert!(p.screen_text().starts_with("ab"));
+    // times going back are kept in order
+    let cast = parse_cast("{\"version\":2}\n[2.0,\"o\",\"x\"]\n[1.0,\"o\",\"y\"]\n").unwrap();
+    assert_eq!(cast.events.iter().map(|e| e.0).collect::<Vec<_>>(), vec![2.0, 2.0]);
+}
+
+#[test]
+fn playback_seeks_back_from_keyframes() {
+    use crate::playback::{Player, parse_cast};
+    let mut text = String::from("{\"version\":2,\"width\":80,\"height\":24}\n");
+    for i in 0..600 {
+        let chunk = format!("line {i:04} {}\r\n", "x".repeat(1000));
+        text += &serde_json::json!([i as f64 * 0.1, "o", chunk]).to_string();
+        text.push('\n');
+    }
+    let path = std::path::Path::new("k.cast");
+    let mut p = Player::from_cast(path, parse_cast(&text).unwrap(), false);
+    p.seek(1000.0);
+    assert!(p.keyframes() > 0);
+    p.seek(41.05);
+    let mut fresh = Player::from_cast(path, parse_cast(&text).unwrap(), false);
+    fresh.seek(41.05);
+    assert_eq!(p.screen_text(), fresh.screen_text());
+    assert!(p.screen_text().contains("line 0410"));
+}
+
+#[test]
+fn recording_files_have_a_size_limit() {
+    use crate::playback::read_cast_file;
+    let path = std::env::temp_dir().join(format!("admincraft-big-{}.cast", std::process::id()));
+    std::fs::write(&path, "x".repeat(2000)).unwrap();
+    assert!(read_cast_file(&path, 1000).is_err());
+    assert_eq!(read_cast_file(&path, 1 << 20).unwrap().len(), 2000);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn scan_ranges_and_threads_are_bounded() {
+    use crate::netscan::{MAX_CONNECTS, parse_targets, scan_plan};
+    use std::net::Ipv4Addr;
+    assert_eq!(parse_targets("255.255.255.0/24").unwrap().len(), 254);
+    assert_eq!(parse_targets("255.255.255.254/31").unwrap().len(), 2);
+    assert_eq!(parse_targets("255.255.255.255/32").unwrap(), vec![Ipv4Addr::new(255, 255, 255, 255)]);
+    assert_eq!(parse_targets("255.255.0.0/16").unwrap().len(), 65534);
+    assert_eq!(parse_targets("0.0.0.0/32").unwrap().len(), 1);
+    for (t, p) in [(65536, 65535), (65536, 5), (1, 1), (10, 0), (0, 0), (300, 16), (64, 3)] {
+        let (w, k) = scan_plan(t, p);
+        assert!(w >= 1 && k >= 1 && w * k <= MAX_CONNECTS, "{t} {p}: {w}x{k}");
+    }
+}
+
+#[test]
+fn snmp_numbers_and_answers_are_checked() {
+    use crate::nettools::{decode_oid, encode_get, encode_oid, match_answer};
+    use std::net::SocketAddr;
+    assert!(encode_oid("2.18446744073709551615").is_err(), "first arcs overflow");
+    assert_eq!(decode_oid(&encode_oid("2.100.3").unwrap()).unwrap(), "2.100.3");
+    let mut long = vec![0xffu8; 10];
+    long.push(0x7f);
+    assert!(decode_oid(&long).is_err(), "arc larger than 64 bits");
+    let asked: SocketAddr = "192.0.2.1:161".parse().unwrap();
+    let pkt = encode_get("public", 7, 0xa2, &["1.3.6.1.2.1.1.5.0"]).unwrap();
+    assert!(match_answer(asked, asked, &pkt, 7).is_some_and(|r| r.is_ok()));
+    assert!(match_answer(asked, "192.0.2.1:5000".parse().unwrap(), &pkt, 7).is_none(), "another port");
+    assert!(match_answer(asked, "192.0.2.9:161".parse().unwrap(), &pkt, 7).is_none(), "another sender");
+    assert!(match_answer(asked, asked, &pkt, 8).is_none(), "another request");
+    assert!(match_answer(asked, asked, &[0x30, 0x05, 0x02], 7).is_none(), "a damaged packet is skipped");
+}
+
+// ------------------------------------------------------------------ code review 2026-11-18: tools and control channel
+
+/// Waits up to `secs` seconds for `f` to become true.
+fn wait_for(secs: u64, f: impl Fn() -> bool) -> bool {
+    let t0 = std::time::Instant::now();
+    while t0.elapsed() < std::time::Duration::from_secs(secs) {
+        if f() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    f()
+}
+
+#[test]
+fn control_file_is_private_on_windows() {
+    use crate::control::control_file_for;
+    use std::path::Path;
+    let local = if cfg!(windows) { Path::new(r"C:\Users\tom\AppData\Local") } else { Path::new("/home/tom/.local") };
+    let data = if cfg!(windows) { Path::new(r"E:\AdminCraft\AdminCraftData") } else { Path::new("/media/usb/AdminCraftData") };
+    let f = control_file_for(data, Some(local), true).unwrap();
+    assert!(f.starts_with(local.join("AdminCraft")), "in the user's own folder: {}", f.display());
+    assert!(!f.starts_with(data), "not in the (portable, maybe shared) data folder");
+    let name = f.file_name().unwrap().to_string_lossy().to_string();
+    assert!(name.starts_with("control-") && name.ends_with(".json"), "{name}");
+    // client and window find the same file; another data folder gets its own
+    assert_eq!(control_file_for(data, Some(local), true), Some(f.clone()));
+    assert_ne!(control_file_for(&data.join("other"), Some(local), true), Some(f));
+    // without a private folder: no control channel rather than a readable token
+    assert_eq!(control_file_for(data, None, true), None);
+    assert_eq!(control_file_for(data, Some(Path::new("relative")), true), None);
+    // Linux / macOS: in the data folder, written with mode 0600
+    assert_eq!(control_file_for(data, Some(local), false), Some(data.join("control.json")));
+}
+
+#[test]
+fn control_request_line_has_one_deadline() {
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    // a client sending one byte at a time, never a line break
+    let slow = std::thread::spawn(move || {
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        for _ in 0..20 {
+            if c.write_all(b"x").is_err() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    });
+    let (mut s, _) = listener.accept().unwrap();
+    let t0 = std::time::Instant::now();
+    let r = crate::control::read_line(&mut s, t0 + std::time::Duration::from_millis(600), 1 << 20);
+    assert!(r.is_err(), "the line never ended");
+    assert!(t0.elapsed() < std::time::Duration::from_millis(1500), "deadline for the whole line, not per read: {:?}", t0.elapsed());
+    drop(s);
+    let _ = slow.join();
+    // a long line without a break is refused, not collected without end
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let big = std::thread::spawn(move || {
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        let _ = c.write_all(&vec![b'a'; 10_000]);
+        let _ = rx.recv();
+    });
+    let (mut s, _) = listener.accept().unwrap();
+    assert!(crate::control::read_line(&mut s, std::time::Instant::now() + std::time::Duration::from_secs(5), 4096).is_err());
+    let _ = tx.send(());
+    let _ = big.join();
+}
+
+#[test]
+fn control_channel_limits_connections_and_stops() {
+    use std::io::{Read, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel::<crate::control::Request>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let handle = crate::control::accept_loop(listener, "secret".into(), tx, Arc::new(|| {}), stop.clone()).unwrap();
+    // idle clients hold every slot
+    let idle: Vec<std::net::TcpStream> = (0..crate::control::MAX_CONNECTIONS).map(|_| std::net::TcpStream::connect(addr).unwrap()).collect();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let mut extra = std::net::TcpStream::connect(addr).unwrap();
+    extra.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
+    let mut b = [0u8; 16];
+    match extra.read(&mut b) {
+        Ok(n) => assert_eq!(n, 0, "closed right away"),
+        Err(e) => assert!(!matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut), "closed right away, not kept: {e}"),
+    }
+    drop(idle);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // a real request gets through again and carries a deadline
+    let client = std::thread::spawn(move || {
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        writeln!(c, "{}", serde_json::json!({"token": "secret", "cmd": "status", "args": {}})).unwrap();
+        crate::control::read_line(&mut c, std::time::Instant::now() + std::time::Duration::from_secs(10), 1 << 20).unwrap()
+    });
+    let req = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(req.cmd, "status");
+    assert!(!req.expired());
+    assert!(req.deadline <= std::time::Instant::now() + std::time::Duration::from_secs(21));
+    req.reply.send(serde_json::json!({"ok": true})).unwrap();
+    assert!(client.join().unwrap().contains("\"ok\":true"));
+    // a request whose client was already told "no answer" is skipped by the window
+    let (reply, _wait) = std::sync::mpsc::channel();
+    let old = crate::control::Request {
+        cmd: "close_tab".into(),
+        args: serde_json::json!({}),
+        reply,
+        deadline: std::time::Instant::now() - std::time::Duration::from_millis(1),
+    };
+    assert!(old.expired());
+    // switching the channel off ends the listener
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = std::net::TcpStream::connect(addr);
+    assert!(wait_for(5, || handle.is_finished()), "the accept loop ended");
+    assert!(std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)).is_err(), "the port is closed");
+}
+
+#[test]
+fn agent_screenshot_files_are_new_files_only() {
+    let dir = std::env::temp_dir().join(format!("admincraft-shots-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let a = crate::control::new_shot_file(&dir, 2);
+    let b = crate::control::new_shot_file(&dir, 2);
+    assert_ne!(a, b, "every picture gets its own name");
+    assert!(a.starts_with(&dir) && a.to_string_lossy().ends_with(".png"));
+    let rgba = vec![255u8; 2 * 2 * 4];
+    crate::control::save_png_new(&a, 2, 2, &rgba).unwrap();
+    assert!(std::fs::read(&a).unwrap().starts_with(b"\x89PNG"));
+    // an existing file is never replaced
+    let before = std::fs::read(&a).unwrap();
+    assert!(crate::control::save_png_new(&a, 1, 1, &[0, 0, 0, 0]).is_err());
+    assert_eq!(std::fs::read(&a).unwrap(), before);
+    // a buffer of the wrong size is an error, not a panic in the encoder
+    assert!(crate::control::save_png_new(&b, 3, 3, &rgba).is_err());
+    #[cfg(unix)]
+    {
+        // a link placed beforehand is not followed
+        let target = dir.join("victim.txt");
+        std::fs::write(&target, "keep").unwrap();
+        let link = dir.join("link.png");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(crate::control::save_png_new(&link, 2, 2, &rgba).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_screenshot_reads_only_png_files() {
+    use crate::agent::read_png;
+    let dir = std::env::temp_dir().join(format!("admincraft-readpng-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[0u8; 100]);
+    let good = dir.join("a.png");
+    std::fs::write(&good, &png).unwrap();
+    let not_png_name = dir.join("a.txt");
+    std::fs::write(&not_png_name, &png).unwrap();
+    let not_png_data = dir.join("b.png");
+    std::fs::write(&not_png_data, "secret token").unwrap();
+    assert_eq!(read_png(&good.to_string_lossy(), 1 << 20), Some(png));
+    assert_eq!(read_png(&not_png_name.to_string_lossy(), 1 << 20), None, "only .png names");
+    assert_eq!(read_png(&not_png_data.to_string_lossy(), 1 << 20), None, "only PNG contents");
+    assert_eq!(read_png(&good.to_string_lossy(), 50), None, "size cap");
+    assert_eq!(read_png(&dir.to_string_lossy(), 1 << 20), None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn agent_targets_are_no_tool_options() {
+    use crate::tools::valid_target;
+    for ok in ["web01", "10.0.0.1", "fe80::1%eth0", "host.example.com"] {
+        assert!(valid_target(ok), "{ok}");
+    }
+    for bad in ["-t", "-n 1000 host", "host -t", "a\tb", "a\nb", "host\u{0}", ""] {
+        assert!(!valid_target(bad), "{bad:?}");
+    }
+}
+
+#[test]
+fn port_scan_prefers_ipv4_and_has_a_time_cap() {
+    use std::net::SocketAddr;
+    let v6: SocketAddr = "[::1]:80".parse().unwrap();
+    let v4: SocketAddr = "127.0.0.1:80".parse().unwrap();
+    let v4b: SocketAddr = "10.0.0.1:80".parse().unwrap();
+    assert_eq!(crate::tools::prefer_ipv4(vec![v6, v4, v4b]), vec![v4, v4b, v6]);
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let ip = std::net::IpAddr::from([127, 0, 0, 1]);
+    let ports = vec![port, port.wrapping_add(1).max(1)];
+    let r = crate::agent::port_scan_addr(ip, &ports, std::time::Duration::from_millis(300), std::time::Duration::from_secs(30));
+    assert_eq!(r["checked"], 2);
+    assert_eq!(r["complete"], true);
+    assert!(r["open"].as_array().unwrap().iter().any(|o| o["port"] == port));
+    // the time is up before the first port: nothing more is started
+    let r = crate::agent::port_scan_addr(ip, &ports, std::time::Duration::from_millis(300), std::time::Duration::ZERO);
+    assert_eq!(r["checked"], 0);
+    assert_eq!(r["complete"], false);
+    // no worker threads: the calling thread does the work
+    let found = std::sync::Mutex::new(Vec::new());
+    let n = crate::tools::scan_ports(ip, &[port], std::time::Duration::from_millis(300), 0, &|| false, &|p, ok| {
+        if ok {
+            found.lock().unwrap().push(p)
+        }
+    });
+    assert_eq!(n, 1);
+    assert_eq!(*found.lock().unwrap(), vec![port]);
+}
+
+#[test]
+fn command_output_is_capped() {
+    use crate::tools::{MAX_LINES, push_line};
+    let mut lines = Vec::new();
+    for i in 0..20_000 {
+        push_line(&mut lines, format!("line {i}"));
+        assert!(lines.len() <= MAX_LINES + 500);
+    }
+    assert!(lines.len() >= MAX_LINES);
+    assert_eq!(lines.last().map(String::as_str), Some("line 19999"), "the newest lines stay");
+}
+
+/// A command that runs for about 30 s.
+fn long_command() -> (String, Vec<String>) {
+    if cfg!(windows) { ("ping".into(), vec!["-n".into(), "30".into(), "127.0.0.1".into()]) } else { ("sleep".into(), vec!["30".into()]) }
+}
+
+#[test]
+fn command_runner_runs_are_separate_and_reaped() {
+    let (prog, args) = long_command();
+    let ctx = eframe::egui::Context::default();
+    let mut runner = crate::tools::CmdRunner::default();
+    runner.start(&prog, &args, ctx.clone());
+    let first = runner.running.clone();
+    assert!(first.load(std::sync::atomic::Ordering::SeqCst));
+    // a new run stops the old one; the old one ending doesn't switch off the new one
+    runner.start(&prog, &args, ctx.clone());
+    assert!(wait_for(10, || !first.load(std::sync::atomic::Ordering::SeqCst)), "the first program was killed and waited for");
+    assert!(runner.is_running(), "the second run is still running");
+    runner.stop();
+    assert!(wait_for(10, || !runner.is_running()), "stop kills, the reader thread reaps");
+}
+
+#[test]
+fn command_runner_stops_when_dropped() {
+    let (prog, args) = long_command();
+    let mut runner = crate::tools::CmdRunner::default();
+    runner.start(&prog, &args, eframe::egui::Context::default());
+    let running = runner.running.clone();
+    assert!(running.load(std::sync::atomic::Ordering::SeqCst));
+    drop(runner);
+    assert!(wait_for(10, || !running.load(std::sync::atomic::Ordering::SeqCst)), "a closed tab ends a continuous ping");
+}
+
+#[test]
+fn tunnel_error_output_keeps_the_last_lines() {
+    let text: String = (0..50).map(|i| if i % 7 == 0 { "\n".to_string() } else { format!("line {i}\n") }).collect();
+    let tail = std::sync::Mutex::new(crate::extra::ErrTail::default());
+    crate::extra::drain_stderr(std::io::Cursor::new(text.into_bytes()), &tail);
+    let t = tail.lock().unwrap();
+    assert!(t.done);
+    assert_eq!(t.lines.len(), crate::extra::TAIL_LINES);
+    assert_eq!(t.lines.back().map(String::as_str), Some("line 48"), "the last non-empty line");
+    drop(t);
+    // a very long line without a break doesn't grow without end
+    let tail = std::sync::Mutex::new(crate::extra::ErrTail::default());
+    crate::extra::drain_stderr(std::io::Cursor::new(vec![b'x'; 100_000]), &tail);
+    assert!(tail.lock().unwrap().lines.iter().all(|l| l.len() <= 4096));
+}
+
+#[test]
+fn scan_rows_are_built_only_when_the_scan_changes() {
+    let built = std::cell::Cell::new(0);
+    let mut cache = None;
+    let build = || {
+        built.set(built.get() + 1);
+        vec![1, 2, 3]
+    };
+    for _ in 0..10 {
+        let rows = crate::extra::cached(&mut cache, (1usize, 5usize, false, 0u64), build);
+        assert_eq!(*rows, vec![1, 2, 3]);
+    }
+    assert_eq!(built.get(), 1, "the same scan state: no new rows per frame");
+    crate::extra::cached(&mut cache, (1, 6, false, 0), build);
+    crate::extra::cached(&mut cache, (1, 6, true, 0), build);
+    crate::extra::cached(&mut cache, (1, 6, true, 1), build);
+    assert_eq!(built.get(), 4, "progress, end and a new baseline build again");
+}
+
+#[test]
+fn totp_refuses_what_it_cannot_compute() {
+    use crate::admintools::parse_otp;
+    let s = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    assert!(parse_otp(&format!("otpauth://totp/x?secret={s}&algorithm=SHA1")).is_some());
+    assert!(parse_otp(&format!("OTPAUTH://TOTP/x?secret={s}&algorithm=sha1")).is_some());
+    assert!(parse_otp(&format!("otpauth://totp/x?secret={s}")).is_some());
+    assert!(parse_otp(s).is_some(), "a bare key");
+    assert_eq!(parse_otp(&format!("otpauth://totp/x?secret={s}&algorithm=SHA256")), None, "no wrong codes");
+    assert_eq!(parse_otp(&format!("otpauth://totp/x?secret={s}&algorithm=SHA512")), None);
+    assert_eq!(parse_otp(&format!("otpauth://hotp/x?secret={s}&counter=5")), None, "counter-based codes");
+}
+
+#[test]
+fn mcp_initialize_answers_a_supported_version() {
+    use crate::agent::{MCP_VERSIONS, mcp_version};
+    assert_eq!(mcp_version(Some("2024-11-05")), "2024-11-05");
+    assert_eq!(mcp_version(Some("1999-01-01")), MCP_VERSIONS[0]);
+    assert_eq!(mcp_version(None), MCP_VERSIONS[0]);
+    let mut out = Vec::new();
+    crate::agent::handle(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"evil-9"}}"#, &mut out);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["result"]["protocolVersion"], MCP_VERSIONS[0]);
+    // ports are checked, not cut down to another port (70000 as u16 = 4464)
+    let e = crate::agent::call("check_certificate", &serde_json::json!({"host": "example.invalid", "port": 70000})).unwrap_err();
+    assert!(e.contains("65535"), "{e}");
+    assert!(crate::agent::call("check_certificate", &serde_json::json!({"host": "example.invalid", "port": 0})).is_err());
+}
+
+// ---------------------------------------------------------------- code review 2026-11-18, app part 1
+
+#[test]
+fn file_app_url_has_no_password_and_brackets_ipv6() {
+    // S4: the function has no password parameter, so nothing secret can reach the command line
+    use crate::app::file_app_url;
+    assert_eq!(file_app_url("sftp", "root", "10.0.0.5", 0, ""), "sftp://root@10.0.0.5");
+    assert_eq!(file_app_url("sftp", "a b@c", " srv ", 2222, "/var/www"), "sftp://a%20b%40c@srv:2222/var/www");
+    assert_eq!(file_app_url("ftp", "", "fe80::1", 21, ""), "ftp://[fe80::1]:21");
+    assert_eq!(file_app_url("sftp", "", "fe80::1%eth0", 0, ""), "sftp://[fe80::1%25eth0]");
+    assert_eq!(file_app_url("scp", "u", "[::1]", 22, ""), "scp://u@[::1]:22", "already bracketed");
+}
+
+#[test]
+fn duplicate_is_not_tied_to_the_keepass_entry() {
+    // D4
+    let e = crate::model::Entry { id: 7, name: "web".into(), kp_id: "abc-uuid".into(), host: "h".into(), ..Default::default() };
+    let copy = crate::app::duplicate_entry(&e, 8);
+    assert_eq!(copy.id, 8);
+    assert!(copy.kp_id.is_empty());
+    assert_eq!(copy.host, "h");
+    assert_eq!(copy.name, "web (copy)");
+}
+
+#[test]
+fn showing_a_port_does_not_change_it() {
+    // D11: port 0 (= default) and odd tunnel ports from a data file stay as they are when drawn
+    let ctx = eframe::egui::Context::default();
+    let (mut port, mut tport, mut tport2) = (0u16, 0u16, 65535u16);
+    for _ in 0..2 {
+        ctx.run_ui(Default::default(), |ui| {
+            ui.add(crate::app::port_edit(&mut port));
+            ui.add(crate::app::tunnel_port_edit(&mut tport));
+            ui.add(crate::app::tunnel_port_edit(&mut tport2));
+        })
+        .drop_without_applying_deltas();
+    }
+    assert_eq!(port, 0);
+    assert_eq!(tport, 0);
+    assert_eq!(tport2, 65535);
+}
+
+#[test]
+fn power_command_only_goes_to_the_new_tab() {
+    // D12: tabs are (id, terminal running); the id counter was 5 before the session was started
+    use crate::app::power_tab;
+    assert_eq!(power_tab(5, &[(0, false), (3, true), (4, true)]), None, "no new tab: never the last old one");
+    assert_eq!(power_tab(5, &[(0, false), (3, true), (5, false)]), None, "new tab, session failed");
+    assert_eq!(power_tab(5, &[(0, false), (3, true), (5, true)]), Some(2));
+    assert_eq!(power_tab(5, &[(0, false), (5, true), (3, true)]), Some(1), "found by id, not position");
+}
+
+#[test]
+fn tunnel_runs_follow_their_tunnel() {
+    // D17
+    use crate::app::{TunnelSpec, tunnel_moves};
+    let spec = |l: u16, h: &str, r: u16| TunnelSpec { local_port: l, remote_host: h.into(), remote_port: r };
+    let a = spec(8080, "localhost", 80);
+    let b = spec(8443, "10.0.0.1", 443);
+    let runs = vec![((1, 0), a.clone()), ((1, 1), b.clone()), ((2, 0), a.clone())];
+    // connection 1: the first tunnel was removed, b is now at 0; connection 2 is gone
+    let mut moves = tunnel_moves(&runs, |id| if id == 1 { Some(vec![b.clone()]) } else { None });
+    moves.sort();
+    assert_eq!(moves, vec![((1, 0), None), ((1, 1), Some((1, 0))), ((2, 0), None)]);
+    // unchanged list: everything stays
+    let moves = tunnel_moves(&runs[..2], |_| Some(vec![a.clone(), b.clone()]));
+    assert!(moves.iter().all(|(f, t)| Some(*f) == *t));
+    // an edited port: the old run doesn't belong to the row any more
+    let moves = tunnel_moves(&runs[..1], |_| Some(vec![spec(9090, "localhost", 80)]));
+    assert_eq!(moves, vec![((1, 0), None)]);
+    // two equal tunnels: each run keeps its own row
+    let moves = tunnel_moves(&[((1, 0), a.clone()), ((1, 1), a.clone())], |_| Some(vec![a.clone(), a.clone()]));
+    assert_eq!(moves.len(), 2);
+    assert!(moves.iter().all(|(f, t)| Some(*f) == *t));
+}
+
+#[test]
+fn tree_with_repeated_ids_stays_small() {
+    // C3 / P4: 30 nested folders, each twice under the same id, used to draw 2^30 rows
+    use crate::model::Entry;
+    let mut entries = Vec::new();
+    for level in 0..30u64 {
+        for _ in 0..2 {
+            entries.push(Entry {
+                id: level + 1,
+                parent: if level == 0 { None } else { Some(level) },
+                folder: true,
+                expanded: true,
+                ..Default::default()
+            });
+        }
+    }
+    let rows = crate::app::tree_rows(&entries);
+    assert_eq!(rows.len(), 30);
+    assert_eq!(rows.iter().map(|r| r.1).max(), Some(29));
+    // an entry that is its own parent, and a loop, are never reached from the top
+    entries.push(Entry { id: 100, parent: Some(100), folder: true, ..Default::default() });
+    entries.push(Entry { id: 101, parent: Some(102), folder: true, ..Default::default() });
+    entries.push(Entry { id: 102, parent: Some(101), folder: true, ..Default::default() });
+    assert_eq!(crate::app::tree_rows(&entries).len(), 30);
+}
+
+#[test]
+fn tree_rows_keep_order_depth_and_collapsed_folders() {
+    use crate::model::Entry;
+    let f = |id, parent, expanded| Entry { id, parent, folder: true, expanded, ..Default::default() };
+    let c = |id, parent| Entry { id, parent, ..Default::default() };
+    let entries = vec![f(1, None, true), c(2, Some(1)), f(3, Some(1), false), c(4, Some(3)), c(5, None), c(6, Some(1))];
+    let ids: Vec<(u64, usize)> = crate::app::tree_rows(&entries).into_iter().map(|(i, d)| (entries[i].id, d)).collect();
+    assert_eq!(ids, vec![(1, 0), (2, 1), (3, 1), (6, 1), (5, 0)]);
+    // depth is limited as before (32 levels below the top)
+    let deep: Vec<Entry> = (0..40u64).map(|i| f(i + 1, if i == 0 { None } else { Some(i) }, true)).collect();
+    assert_eq!(crate::app::tree_rows(&deep).len(), 33);
+}
+
+#[test]
+fn search_finds_connections_only() {
+    // P6
+    use crate::model::Entry;
+    let entries = vec![
+        Entry { id: 1, folder: true, name: "Web".into(), ..Default::default() },
+        Entry { id: 2, name: "web01".into(), ..Default::default() },
+        Entry { id: 3, name: "db".into(), host: "WEB-db.lan".into(), ..Default::default() },
+        Entry { id: 4, name: "x".into(), description: "nothing".into(), ..Default::default() },
+    ];
+    assert_eq!(crate::app::search_hits(&entries, "web"), vec![2, 3]);
+    assert!(crate::app::search_hits(&entries, "zzz").is_empty());
+}
+
+#[test]
+fn monitoring_reports_only_changes() {
+    // P19
+    use std::collections::HashMap;
+    let mut prev = HashMap::new();
+    let mut cur: HashMap<u64, Option<bool>> = HashMap::from([(1, Some(true)), (2, None)]);
+    assert!(crate::app::status_changes(&cur, &mut prev).is_empty(), "first look: nothing to compare");
+    cur.insert(1, Some(false));
+    cur.insert(2, Some(true));
+    assert_eq!(crate::app::status_changes(&cur, &mut prev), vec![(1, false)]);
+    assert!(crate::app::status_changes(&cur, &mut prev).is_empty(), "told once");
+    cur.insert(1, None); // a check running again keeps the last known state
+    assert!(crate::app::status_changes(&cur, &mut prev).is_empty());
+    assert_eq!(prev.get(&1), Some(&Some(false)));
+}
+
+#[test]
+fn shortcuts_off_while_locked_or_in_a_dialog() {
+    // C14
+    use crate::app::shortcut_allowed;
+    assert!(shortcut_allowed(false, false, false));
+    assert!(!shortcut_allowed(true, false, false));
+    assert!(!shortcut_allowed(false, true, false));
+    assert!(shortcut_allowed(true, true, true), "F1 always");
+}
+
+#[test]
+fn open_connect_picks_a_connection_not_a_folder() {
+    // B14
+    use crate::model::Entry;
+    let entries = vec![
+        Entry { id: 1, folder: true, name: "Servers".into(), ..Default::default() },
+        Entry { id: 2, name: "web servers proxy".into(), ..Default::default() },
+        Entry { id: 3, name: "servers".into(), ..Default::default() },
+    ];
+    assert_eq!(crate::app::find_connection(&entries, "Servers"), Some(3), "exact name first, never the folder");
+    assert_eq!(crate::app::find_connection(&entries, "proxy"), Some(2));
+    assert_eq!(crate::app::find_connection(&entries, ""), None);
+    assert_eq!(crate::app::find_connection(&entries, "  "), None);
+    assert_eq!(crate::app::find_connection(&entries[..1], "serv"), None);
+}
+
+// ------------------------------------------------------------------ code review 2026-11-18: storage
+
+/// An empty folder of its own for one test.
+fn review_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("admincraft-review-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// An empty KeePass database with this password.
+fn empty_kdbx(dir: &std::path::Path, password: &str) -> String {
+    let path = dir.join("list.kdbx");
+    let db = keepass::Database::new();
+    let mut f = std::fs::File::create(&path).unwrap();
+    db.save(&mut f, keepass::DatabaseKey::new().with_password(password)).unwrap();
+    path.to_str().unwrap().to_string()
+}
+
+#[test]
+fn reload_with_master_password_takes_a_colleagues_change() {
+    // D1
+    let dir = review_dir("d1");
+    let mut a = temp_store("d1a");
+    a.path = dir.join("connections.json");
+    a.set_master("Team-1");
+    assert!(a.last_error.is_none());
+    let mut b = temp_store("d1b");
+    b.path = a.path.clone();
+    b.vault = None;
+    assert!(b.reload_from_disk_for_test());
+    assert!(b.unlock("Team-1"));
+    let i = b.index_of(3).unwrap();
+    b.data.entries[i].name = "changed by b".into();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    b.save();
+    assert!(b.last_error.is_none(), "{:?}", b.last_error);
+    assert!(a.reload_if_changed(), "a colleague's change arrives with a master password too");
+    assert_eq!(a.get(3).unwrap().name, "changed by b");
+    // seen while locked: not used up, read after unlocking
+    a.vault = None;
+    b.data.entries[i].name = "second change".into();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    b.save();
+    assert!(!a.reload_if_changed());
+    assert!(a.unlock("Team-1"));
+    assert!(a.reload_if_changed());
+    assert_eq!(a.get(3).unwrap().name, "second change");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn webdav_save_drops_an_older_server_copy() {
+    // D2
+    use crate::model::RemoteState;
+    let dir = review_dir("d2");
+    let mut s = temp_store("d2");
+    s.path = dir.join("connections-webdav.json");
+    // no address: the upload fails at once, without any network
+    s.remote = Some(crate::remote::RemoteConfig::default());
+    s.remote_state.lock().unwrap().fetched = Some("fetched before the save".into());
+    s.save();
+    {
+        let st = s.remote_state.lock().unwrap();
+        assert!(st.fetched.is_none(), "a copy fetched before the save is older than the list");
+        assert_eq!(st.saves, 1);
+    }
+    // a poll that started before a save (or while an upload is on its way) is thrown away
+    let mut st = RemoteState { saves: 1, ..Default::default() };
+    st.poll_done(0, Ok(Some("old".into())));
+    assert!(st.fetched.is_none());
+    st.uploading = true;
+    st.poll_done(1, Ok(Some("old".into())));
+    assert!(st.fetched.is_none());
+    st.uploading = false;
+    st.poll_done(1, Ok(Some("new".into())));
+    assert_eq!(st.fetched.as_deref(), Some("new"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_list_with_entries_replaces_nothing() {
+    // D3
+    use crate::kdbx::{self, Key};
+    let dir = review_dir("d3");
+    let ps = empty_kdbx(&dir, "kp-d3");
+    let key = Key { password: "kp-d3".into(), keyfile: String::new() };
+    kdbx::store_password(&ps, &key, "printer", "admin", "pw1", "http://10.0.1.50/").unwrap();
+    let mut s = temp_store("d3");
+    s.path = dir.join("connections.json");
+    let count = s.data.entries.len();
+    s.data.settings.keepass_path = ps.clone();
+    let msg = s.use_keepass(key.clone()).unwrap();
+    assert_eq!(s.data.entries.len(), count + 1, "{msg}");
+    assert!(s.path.with_extension("json.before-keepass").exists(), "backup of the list as it was");
+    let back = kdbx::load(&ps, &key).unwrap();
+    assert_eq!(back.len(), count + 1);
+    assert_eq!(back.iter().find(|e| e.name == "printer").unwrap().password, "pw1");
+    assert!(back.iter().any(|e| e.name.starts_with("web01 – L")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn copies_never_share_a_keepass_entry() {
+    // D4
+    use crate::kdbx::{self, Key};
+    use crate::model::Entry;
+    let dir = review_dir("d4");
+    let ps = empty_kdbx(&dir, "kp-d4");
+    let key = Key { password: "kp-d4".into(), keyfile: String::new() };
+    let mut list = vec![Entry { id: 1, name: "original".into(), host: "10.0.0.1".into(), ..Default::default() }];
+    kdbx::save(&ps, &key, &mut list, &Default::default()).unwrap();
+    assert!(!list[0].kp_id.is_empty());
+    let known = list.iter().map(|e| e.kp_id.clone()).collect();
+    let copy = Entry { id: 2, name: "copy".into(), ..list[0].clone() };
+    list.push(copy);
+    kdbx::save(&ps, &key, &mut list, &known).unwrap();
+    assert_ne!(list[0].kp_id, list[1].kp_id);
+    let mut names: Vec<String> = kdbx::load(&ps, &key).unwrap().into_iter().map(|e| e.name).collect();
+    names.sort();
+    assert_eq!(names, vec!["copy".to_string(), "original".to_string()]);
+    // export and import don't carry KeePass ids
+    let mut s = temp_store("d4");
+    s.data.entries[0].kp_id = "some-keepass-id".into();
+    let f = dir.join("export.json");
+    crate::sharing::export(&s, None, crate::sharing::PwMode::Without, "", &f).unwrap();
+    let (entries, pws) = crate::sharing::read(&std::fs::read_to_string(&f).unwrap(), "").unwrap();
+    assert!(entries.iter().all(|e| e.kp_id.is_empty()));
+    let with_id = vec![Entry { id: 1, kp_id: "x".into(), ..Default::default() }];
+    let mut other = temp_store("d4b");
+    let before = other.data.entries.len();
+    crate::sharing::merge(&mut other, with_id, pws, "Import");
+    assert!(other.data.entries[before..].iter().all(|e| e.kp_id.is_empty()));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_unreadable_list_is_never_replaced_by_the_sample() {
+    // D5
+    let dir = review_dir("d5");
+    let p = dir.join("connections.json");
+    let damaged = vec![0xff, 0xfe, 0x00, 0x41];
+    std::fs::write(&p, &damaged).unwrap();
+    let s = Store::open_at(p.clone(), None, None, false);
+    assert!(s.read_only && s.last_error.is_some());
+    assert_eq!(std::fs::read(&p).unwrap(), damaged);
+    // really missing: the sample list is made and saved
+    let q = dir.join("new.json");
+    let s = Store::open_at(q.clone(), None, None, false);
+    assert!(!s.read_only && q.exists() && !s.data.entries.is_empty());
+    // WebDAV unreachable and no local copy: no sample that would go up over the server's list
+    let r = dir.join("dav.json");
+    let s = Store::open_at(r.clone(), Some(crate::remote::RemoteConfig::default()), Some(Err("offline".into())), false);
+    assert!(s.read_only && !r.exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn webdav_answer_is_checked_before_it_replaces_the_local_copy() {
+    // D6
+    let dir = review_dir("d6");
+    let p = dir.join("connections-webdav.json");
+    let local = serde_json::to_string(&sample_data()).unwrap();
+    std::fs::write(&p, &local).unwrap();
+    let s = Store::open_at(p.clone(), Some(crate::remote::RemoteConfig::default()), Some(Ok(Some("<html>login</html>".into()))), false);
+    assert!(s.read_only && s.last_error.is_some());
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), local);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn shared_folder_save_does_not_overwrite_a_colleague() {
+    // D7
+    let dir = review_dir("d7");
+    let p = dir.join("connections.json");
+    let mut a = temp_store("d7a");
+    a.path = p.clone();
+    a.save();
+    assert!(a.last_error.is_none());
+    let mut b = temp_store("d7b");
+    b.path = p.clone();
+    assert!(b.reload_from_disk_for_test());
+    b.data.entries[0].name = "theirs".into();
+    b.save();
+    assert!(b.last_error.is_none(), "{:?}", b.last_error);
+    a.data.entries[1].name = "ours".into();
+    a.save();
+    let disk = std::fs::read_to_string(&p).unwrap();
+    assert!(disk.contains("\"theirs\"") && !disk.contains("\"ours\""), "the colleague's list stays");
+    assert!(a.last_error.is_some());
+    assert_eq!(a.data.entries[0].name, "theirs", "reloaded");
+    let names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    let side = names.iter().find(|n| n.contains("conflict-")).expect("our version is kept");
+    assert!(std::fs::read_to_string(dir.join(side)).unwrap().contains("\"ours\""));
+    assert!(!names.iter().any(|n| n.ends_with(".tmp")), "no temporary file left: {names:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn sealed_list_in_keepass_asks_for_keepass_after_the_master_password() {
+    // D8
+    use crate::kdbx::Key;
+    let dir = review_dir("d8");
+    let ps = empty_kdbx(&dir, "kp-d8");
+    let mut s = temp_store("d8");
+    s.path = dir.join("connections.json");
+    s.data.settings.keepass_path = ps;
+    s.use_keepass(Key { password: "kp-d8".into(), keyfile: String::new() }).unwrap();
+    let n = s.data.entries.len();
+    s.data.settings.encrypt_file = true;
+    s.set_master("M-d8");
+    assert!(s.last_error.is_none(), "{:?}", s.last_error);
+    let mut t = temp_store("d8b");
+    t.path = s.path.clone();
+    t.vault = None;
+    assert!(t.reload_from_disk_for_test());
+    assert!(t.locked());
+    assert!(t.unlock("M-d8"));
+    assert!(t.locked() && t.waiting_for_keepass(), "KeePass is asked for");
+    assert!(t.data.entries.is_empty());
+    assert!(t.unlock("kp-d8"));
+    assert!(!t.locked());
+    assert_eq!(t.data.entries.len(), n);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_save_keeps_entries_added_in_keepass_meanwhile() {
+    // D9
+    use crate::kdbx::{self, Key};
+    let dir = review_dir("d9");
+    let ps = empty_kdbx(&dir, "kp-d9");
+    let key = Key { password: "kp-d9".into(), keyfile: String::new() };
+    let mut s = temp_store("d9");
+    s.path = dir.join("connections.json");
+    s.data.settings.keepass_path = ps.clone();
+    s.use_keepass(key.clone()).unwrap();
+    let count = s.data.entries.len();
+    // added in KeePass; AdminCraft saves before it reloads
+    kdbx::store_password(&ps, &key, "added in KeePass", "u", "p", "ssh://10.9.9.9").unwrap();
+    s.data.entries[0].name = "renamed".into();
+    s.save();
+    let back = kdbx::load(&ps, &key).unwrap();
+    assert!(back.iter().any(|e| e.name == "added in KeePass"), "never seen, so never deleted");
+    assert!(back.iter().any(|e| e.name == "renamed"));
+    // deleted in AdminCraft: removed from KeePass (it was known)
+    let leaf = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;
+    s.remove(leaf);
+    s.save();
+    let back = kdbx::load(&ps, &key).unwrap();
+    assert_eq!(back.len(), count);
+    assert!(!back.iter().any(|e| e.name.starts_with("web01 – L")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unchanged_keepass_list_is_not_written_again() {
+    // C11 / P15
+    use crate::kdbx::Key;
+    let dir = review_dir("c11");
+    let ps = empty_kdbx(&dir, "kp-c11");
+    let mut s = temp_store("c11");
+    s.path = dir.join("connections.json");
+    s.data.settings.keepass_path = ps.clone();
+    s.use_keepass(Key { password: "kp-c11".into(), keyfile: String::new() }).unwrap();
+    let before = std::fs::read(&ps).unwrap();
+    s.data.settings.dark = !s.data.settings.dark;
+    s.save();
+    assert_eq!(std::fs::read(&ps).unwrap(), before, "a settings change doesn't touch KeePass");
+    s.data.entries[1].name = "changed".into();
+    s.save();
+    assert_ne!(std::fs::read(&ps).unwrap(), before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unchanged_list_saves_byte_for_byte() {
+    // P14
+    let dir = review_dir("p14");
+    let mut s = temp_store("p14");
+    s.path = dir.join("connections.json");
+    let i = s.index_of(4).unwrap();
+    s.data.entries[i].password = "pw-1".into();
+    s.save();
+    let first = std::fs::read(&s.path).unwrap();
+    s.save();
+    assert_eq!(std::fs::read(&s.path).unwrap(), first);
+    // a changed password is encrypted anew and opens to the new one
+    let old = s.data.entries[i].password_enc.clone();
+    s.data.entries[i].password = "pw-2".into();
+    s.save();
+    let new = s.data.entries[i].password_enc.clone().unwrap();
+    assert_ne!(Some(new.clone()), old);
+    assert_eq!(s.vault.as_ref().unwrap().decrypt(&new).as_deref(), Some("pw-2"));
+    // the whole list sealed with the master password
+    s.data.settings.encrypt_file = true;
+    s.set_master("M-p14");
+    let sealed = std::fs::read(&s.path).unwrap();
+    s.save();
+    assert_eq!(std::fs::read(&s.path).unwrap(), sealed);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn parent_loops_and_repeated_ids_cannot_hang_or_double() {
+    // C2 (and repeated ids, C3/D14)
+    use crate::model::{DataFile, Entry};
+    let mut s = temp_store("c2");
+    s.data.entries = vec![
+        Entry { id: 1, parent: Some(2), folder: true, ..Default::default() },
+        Entry { id: 2, parent: Some(1), folder: true, ..Default::default() },
+        Entry { id: 3, parent: Some(2), ..Default::default() },
+        Entry { id: 4, ..Default::default() },
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        s.remove(1);
+        let _ = tx.send(s.data.entries.iter().map(|e| e.id).collect::<Vec<_>>());
+    });
+    let left = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("remove must not loop");
+    assert_eq!(left, vec![4]);
+    // an import with a loop, an entry that is its own parent and a repeated id
+    let mut other = temp_store("c2b");
+    let before = other.data.entries.len();
+    let imported = vec![
+        Entry { id: 7, parent: Some(8), folder: true, name: "x".into(), ..Default::default() },
+        Entry { id: 8, parent: Some(7), folder: true, name: "y".into(), ..Default::default() },
+        Entry { id: 9, parent: Some(9), name: "self".into(), ..Default::default() },
+        Entry { id: 7, name: "twin".into(), ..Default::default() },
+    ];
+    let (fid, _) = crate::sharing::merge(&mut other, imported, Default::default(), "Import");
+    let new: Vec<Entry> = other.data.entries[before + 1..].to_vec();
+    let ids: std::collections::HashSet<u64> = new.iter().map(|e| e.id).collect();
+    assert_eq!(ids.len(), 4, "every imported entry gets its own id");
+    for e in &new {
+        assert_ne!(e.parent, Some(e.id));
+        assert!(other.is_descendant(e.id, fid), "{} ends up in the import folder", e.name);
+    }
+    // a damaged data file: the twin gets a new id, the loop is broken
+    let dir = review_dir("c2");
+    let mut s = temp_store("c2c");
+    s.path = dir.join("connections.json");
+    let d = DataFile {
+        entries: vec![
+            Entry { id: 5, name: "a".into(), ..Default::default() },
+            Entry { id: 5, name: "b".into(), ..Default::default() },
+            Entry { id: 6, parent: Some(6), ..Default::default() },
+        ],
+        ..Default::default()
+    };
+    std::fs::write(&s.path, serde_json::to_string(&d).unwrap()).unwrap();
+    assert!(s.reload_from_disk_for_test());
+    let ids: std::collections::HashSet<u64> = s.data.entries.iter().map(|e| e.id).collect();
+    assert_eq!(ids.len(), 3);
+    assert_eq!(s.get(6).unwrap().parent, None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn ids_never_overflow() {
+    // D14
+    use crate::model::Entry;
+    let mut s = temp_store("d14");
+    s.data.entries.push(Entry { id: u64::MAX, ..Default::default() });
+    let old: std::collections::HashSet<u64> = s.data.entries.iter().map(|e| e.id).collect();
+    let a = s.next_id();
+    let b = s.next_id();
+    assert!(a != b && !old.contains(&a) && !old.contains(&b));
+    s.data.entries.push(Entry { id: a, ..Default::default() });
+    let c = s.next_id();
+    assert!(c != a && c != b && !old.contains(&c));
+}
+
+#[test]
+fn imports_keep_protocol_hostname_and_ipv6() {
+    // D15
+    use crate::kdbx::{parse_url, url_of};
+    let xml = r#"<mrng:Connections Name="Connections" KdfIterations="1000" FullFileEncryption="false" Protected="">
+  <Node Name="raw" Type="Connection" Protocol="RAW" Hostname="10.0.0.1" Port="5000" />
+  <Node Name="rl" Type="Connection" Protocol="RLOGIN" Hostname="10.0.0.2" Port="513" />
+</mrng:Connections>"#;
+    let imp = crate::import::import_mremoteng(xml, "", 10, None).unwrap();
+    assert_eq!(imp.entries[0].protocol, Protocol::Raw);
+    assert_eq!(imp.entries[1].protocol, Protocol::Rlogin);
+    let cfg = "Host web\n  HostName %h.corp.local\nHost odd\n  HostName 100%%.example\n";
+    let v = crate::import::import_ssh_config(cfg, 1, None);
+    assert_eq!(v[0].host, "web.corp.local");
+    assert_eq!(v[1].host, "100%.example");
+    let e = crate::model::Entry { protocol: Protocol::Https, host: "fe80::1".into(), port: 443, ..Default::default() };
+    assert_eq!(url_of(&e), "https://[fe80::1]/");
+    assert_eq!(parse_url(&url_of(&e)), Some((Protocol::Https, "fe80::1".into(), 443)));
+    let e = crate::model::Entry { protocol: Protocol::Ssh, host: "2001:db8::5".into(), port: 2222, ..Default::default() };
+    assert_eq!(url_of(&e), "ssh://[2001:db8::5]:2222");
+    assert_eq!(parse_url(&url_of(&e)), Some((Protocol::Ssh, "2001:db8::5".into(), 2222)));
+    assert_eq!(parse_url("2001:db8::5"), Some((Protocol::Ssh, "2001:db8::5".into(), 22)));
+}
+
+#[test]
+fn mremoteng_kdf_iterations_are_limited() {
+    // C8
+    for n in ["4000000000", "0", "1000001", "lots"] {
+        let xml = format!(
+            r#"<mrng:Connections Name="Connections" KdfIterations="{n}" Protected=""><Node Name="a" Type="Connection" Protocol="SSH2" Hostname="h" /></mrng:Connections>"#
+        );
+        let err = crate::import::import_mremoteng(&xml, "", 1, None).err().unwrap_or_else(|| panic!("{n} accepted"));
+        assert!(err.contains("KdfIterations"), "{err}");
+    }
+}
+
+#[test]
+fn keepass_host_lookup_needs_the_whole_host() {
+    // S3
+    use crate::model::KeePassRef;
+    use keepass::db::fields;
+    let mut db = keepass::Database::new();
+    let bin;
+    {
+        let mut root = db.root_mut();
+        {
+            let mut g = root.add_group();
+            g.name = "Trash".into();
+            bin = g.id();
+            let mut e = g.add_entry();
+            e.set_unprotected(fields::TITLE, "deleted 10.0.0.99");
+            e.set_protected(fields::PASSWORD, "old");
+        }
+        {
+            let mut g = root.add_group();
+            g.name = "Recycle Bin".into();
+            let mut e = g.add_entry();
+            e.set_unprotected(fields::TITLE, "kept");
+        }
+        {
+            let mut e = root.add_entry();
+            e.set_unprotected(fields::TITLE, "fw 10.0.0.10");
+            e.set_protected(fields::PASSWORD, "pw-fw");
+        }
+        {
+            let mut e = root.add_entry();
+            e.set_unprotected(fields::TITLE, "root@10.0.0.2 shell");
+        }
+    }
+    db.meta.recyclebin_uuid = Some(bin.uuid());
+    let dir = review_dir("s3");
+    let path = dir.join("s3.kdbx");
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        db.save(&mut f, keepass::DatabaseKey::new().with_password("kp-s3")).unwrap();
+    }
+    let mut v = crate::keepass_vault::KeePassVault::default();
+    v.open(path.to_str().unwrap(), "kp-s3", "").unwrap();
+    assert!(v.find(&KeePassRef::Host("10.0.0.1".into())).is_none(), "10.0.0.10 is another host");
+    assert_eq!(v.find(&KeePassRef::Host("10.0.0.10".into())).unwrap().password, "pw-fw");
+    assert_eq!(v.find(&KeePassRef::Host("10.0.0.2".into())).unwrap().title, "root@10.0.0.2 shell");
+    assert!(v.find(&KeePassRef::Host("10.0.0.99".into())).is_none(), "the recycle bin is skipped");
+    assert!(v.entries.iter().any(|e| e.title == "kept"), "a group is skipped by being the bin, not by its name");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_key_never_shows_its_password() {
+    // S20
+    let k = crate::kdbx::Key { password: "s3cret-pw".into(), keyfile: "key.keyx".into() };
+    let shown = format!("{k:?}");
+    assert!(!shown.contains("s3cret-pw") && shown.contains("key.keyx"), "{shown}");
+}
+
+#[test]
+fn exit_waits_for_the_last_webdav_upload_but_not_forever() {
+    use std::time::{Duration, Instant};
+    let s = temp_store("upload-wait");
+    assert!(s.wait_for_upload(Duration::from_secs(1)), "nothing to send: no wait");
+    s.remote_state.lock().unwrap().uploading = true;
+    let state = s.remote_state.clone();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        state.lock().unwrap().uploading = false;
+    });
+    assert!(s.wait_for_upload(Duration::from_secs(5)), "the upload finished in time");
+    t.join().unwrap();
+    s.remote_state.lock().unwrap().pending_upload = Some("text".into());
+    let started = Instant::now();
+    assert!(!s.wait_for_upload(Duration::from_millis(200)), "a stuck upload doesn't keep the program open");
+    assert!(started.elapsed() < Duration::from_secs(2));
+}

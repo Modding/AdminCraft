@@ -33,10 +33,16 @@ impl Drop for SecretFile {
     }
 }
 
-/// The folder for password files. Windows: the user's own temporary folder. Linux and macOS:
+/// The folder for password files. Windows: inside the user's own temporary folder. Linux and macOS:
 /// a folder only this user can open – the per-user runtime folder when there is one, else
 /// `admincraft-<uid>` in the temporary folder. A shared `/tmp/admincraft` would belong to whoever
 /// made it first: the next user could not write there, and its owner could swap the files.
+/// Also the place for other files that must not lie in a shared temporary folder (temporary
+/// browser profiles, `.rdp` files, sftp scripts).
+pub fn private_temp_dir() -> Result<PathBuf, String> {
+    dir()
+}
+
 #[cfg(not(unix))]
 fn dir() -> Result<PathBuf, String> {
     let d = std::env::temp_dir().join("admincraft");
@@ -168,9 +174,11 @@ pub fn process_ended(pid: u32) {
     running().lock().unwrap_or_else(|e| e.into_inner()).remove(&pid);
 }
 
-/// AdminCraft closes: every password file goes.
+/// AdminCraft closes: every password file goes, and so does every Remote Desktop login still
+/// waiting in the Credential Manager for its removal.
 pub fn remove_all() {
     running().lock().unwrap_or_else(|e| e.into_inner()).clear();
+    crate::wincred::forget_pending();
 }
 
 /// At start: removes password files a crashed AdminCraft left behind (older than a day, so the
