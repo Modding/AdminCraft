@@ -79,10 +79,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             name: windows-x64-portable
             ext: zip
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            name: linux-x86_64
-            ext: tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
             name: macos-aarch64
@@ -102,12 +98,6 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-      - name: Linux packages
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
-            libxrandr-dev libxi-dev libgl1-mesa-dev
       - name: Build
         shell: bash
         run: cargo build --release --locked --target "$TARGET"
@@ -133,8 +123,67 @@ jobs:
           path: admincraft-${{ needs.version.outputs.version }}-${{ matrix.name }}.${{ matrix.ext }}
           if-no-files-found: error
 
+  # Linux is built inside an older Ubuntu: a program links the glibc of the system it is built
+  # on and refuses to start on any older one. Built on ubuntu-latest (26.04) it needed glibc 2.43
+  # and did not start on Ubuntu 24.04 LTS or Debian 13. Ubuntu 22.04 (glibc 2.35) covers
+  # Ubuntu 22.04+, Debian 12+, Mint 21+ and Fedora 36+. The image stays available after the
+  # ubuntu-22.04 runner is retired.
+  build-linux:
+    needs: version
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TARGET: x86_64-unknown-linux-gnu
+      NAME: linux-x86_64
+      GLIBC_MAX: "2.35"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Build tools and libraries
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl build-essential pkg-config \
+            libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+      - name: Build
+        run: cargo build --release --locked --target "$TARGET"
+      # Guards the comment above: fails when the program asks for a newer glibc than GLIBC_MAX.
+      - name: Check the glibc it needs
+        run: |
+          bin="target/${TARGET}/release/admincraft"
+          need=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -n1)
+          echo "needs glibc $need (allowed: $GLIBC_MAX)"
+          if [ "$(printf '%s\n%s\n' "$need" "$GLIBC_MAX" | sort -V | tail -n1)" != "$GLIBC_MAX" ]; then
+            echo "::error::The Linux program needs glibc $need, newer than $GLIBC_MAX."
+            objdump -T "$bin" | grep -E "GLIBC_$need\b" || true
+            exit 1
+          fi
+      - name: Package
+        run: |
+          dir="admincraft-${VERSION}-${NAME}"
+          mkdir "$dir"
+          cp "target/${TARGET}/release/admincraft" "$dir/admincraft"
+          cp README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
+          tar -czf "$dir.tar.gz" "$dir"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-x86_64
+          path: admincraft-${{ needs.version.outputs.version }}-linux-x86_64.tar.gz
+          if-no-files-found: error
+
   publish:
-    needs: [version, build]
+    needs: [version, build, build-linux]
     if: needs.version.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 15

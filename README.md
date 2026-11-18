@@ -192,6 +192,7 @@ none — a PuTTY, Remote Desktop or VNC window embedded in the tab — `screensh
 Versions follow semantic versioning (`0.x.y`) like the other Craft apps. Each release
 **AdminCraft vX.Y.Z** (tag `vX.Y.Z`) offers `admincraft-X.Y.Z-windows-x64-portable.zip`,
 `admincraft-X.Y.Z-linux-x86_64.tar.gz`, `admincraft-X.Y.Z-macos-aarch64.tar.gz` and `SHA256SUMS.txt`.
+The Linux program needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Mint 21, Fedora 36 and later).
 How a release is made: [AGENTS.md](AGENTS.md#versions-and-releases).
 
 ## Roadmap
