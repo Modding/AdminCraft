@@ -30,12 +30,12 @@ Found by reading the code and the release files; nothing was run on a Linux or m
 
 Open:
 
-1. **Check the Linux release's glibc in the next nightly dry run.** Built on `ubuntu-latest`
+1. **Start the Linux release on Ubuntu 22.04 or Debian 12.** Built on `ubuntu-latest`
    (Ubuntu 26.04) the program linked `atan2f@GLIBC_2.43` and didn't start on Ubuntu 24.04 LTS,
    Debian 13, Fedora 43 or RHEL. Since #10 it is built in the `build-linux` job inside
-   `ubuntu:22.04` (glibc 2.35), and a step fails the build when it needs more. Look at that step
-   ("Check the glibc it needs") in the first dry run, and if possible start the program on
-   Ubuntu 22.04 or Debian 12.
+   `ubuntu:22.04`; the release v0.1.0-alpha.6 needs glibc 2.35 (its "Check the glibc it needs"
+   step, and `GLIBC_2.35` as the highest version in the binary). Not yet started on such a
+   system.
 2. **Try the fixes below on real machines:** OpenSSH in its own window on macOS (the Terminal
    shows only `/bin/sh …/pw-….txt`, the file is gone afterwards, the password is typed by
    AdminCraft); FreeRDP 2 (Debian 12) and 3 (`xfreerdp3`, Homebrew) with *Connect local drives*;
