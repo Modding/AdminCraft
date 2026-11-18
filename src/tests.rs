@@ -2117,3 +2117,470 @@ fn open_connect_picks_a_connection_not_a_folder() {
     assert_eq!(crate::app::find_connection(&entries, "  "), None);
     assert_eq!(crate::app::find_connection(&entries[..1], "serv"), None);
 }
+
+// ------------------------------------------------------------------ code review 2026-11-18: storage
+
+/// An empty folder of its own for one test.
+fn review_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("admincraft-review-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// An empty KeePass database with this password.
+fn empty_kdbx(dir: &std::path::Path, password: &str) -> String {
+    let path = dir.join("list.kdbx");
+    let db = keepass::Database::new();
+    let mut f = std::fs::File::create(&path).unwrap();
+    db.save(&mut f, keepass::DatabaseKey::new().with_password(password)).unwrap();
+    path.to_str().unwrap().to_string()
+}
+
+#[test]
+fn reload_with_master_password_takes_a_colleagues_change() {
+    // D1
+    let dir = review_dir("d1");
+    let mut a = temp_store("d1a");
+    a.path = dir.join("connections.json");
+    a.set_master("Team-1");
+    assert!(a.last_error.is_none());
+    let mut b = temp_store("d1b");
+    b.path = a.path.clone();
+    b.vault = None;
+    assert!(b.reload_from_disk_for_test());
+    assert!(b.unlock("Team-1"));
+    let i = b.index_of(3).unwrap();
+    b.data.entries[i].name = "changed by b".into();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    b.save();
+    assert!(b.last_error.is_none(), "{:?}", b.last_error);
+    assert!(a.reload_if_changed(), "a colleague's change arrives with a master password too");
+    assert_eq!(a.get(3).unwrap().name, "changed by b");
+    // seen while locked: not used up, read after unlocking
+    a.vault = None;
+    b.data.entries[i].name = "second change".into();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    b.save();
+    assert!(!a.reload_if_changed());
+    assert!(a.unlock("Team-1"));
+    assert!(a.reload_if_changed());
+    assert_eq!(a.get(3).unwrap().name, "second change");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn webdav_save_drops_an_older_server_copy() {
+    // D2
+    use crate::model::RemoteState;
+    let dir = review_dir("d2");
+    let mut s = temp_store("d2");
+    s.path = dir.join("connections-webdav.json");
+    // no address: the upload fails at once, without any network
+    s.remote = Some(crate::remote::RemoteConfig::default());
+    s.remote_state.lock().unwrap().fetched = Some("fetched before the save".into());
+    s.save();
+    {
+        let st = s.remote_state.lock().unwrap();
+        assert!(st.fetched.is_none(), "a copy fetched before the save is older than the list");
+        assert_eq!(st.saves, 1);
+    }
+    // a poll that started before a save (or while an upload is on its way) is thrown away
+    let mut st = RemoteState { saves: 1, ..Default::default() };
+    st.poll_done(0, Ok(Some("old".into())));
+    assert!(st.fetched.is_none());
+    st.uploading = true;
+    st.poll_done(1, Ok(Some("old".into())));
+    assert!(st.fetched.is_none());
+    st.uploading = false;
+    st.poll_done(1, Ok(Some("new".into())));
+    assert_eq!(st.fetched.as_deref(), Some("new"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_list_with_entries_replaces_nothing() {
+    // D3
+    use crate::kdbx::{self, Key};
+    let dir = review_dir("d3");
+    let ps = empty_kdbx(&dir, "kp-d3");
+    let key = Key { password: "kp-d3".into(), keyfile: String::new() };
+    kdbx::store_password(&ps, &key, "printer", "admin", "pw1", "http://10.0.1.50/").unwrap();
+    let mut s = temp_store("d3");
+    s.path = dir.join("connections.json");
+    let count = s.data.entries.len();
+    s.data.settings.keepass_path = ps.clone();
+    let msg = s.use_keepass(key.clone()).unwrap();
+    assert_eq!(s.data.entries.len(), count + 1, "{msg}");
+    assert!(s.path.with_extension("json.before-keepass").exists(), "backup of the list as it was");
+    let back = kdbx::load(&ps, &key).unwrap();
+    assert_eq!(back.len(), count + 1);
+    assert_eq!(back.iter().find(|e| e.name == "printer").unwrap().password, "pw1");
+    assert!(back.iter().any(|e| e.name.starts_with("web01 – L")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn copies_never_share_a_keepass_entry() {
+    // D4
+    use crate::kdbx::{self, Key};
+    use crate::model::Entry;
+    let dir = review_dir("d4");
+    let ps = empty_kdbx(&dir, "kp-d4");
+    let key = Key { password: "kp-d4".into(), keyfile: String::new() };
+    let mut list = vec![Entry { id: 1, name: "original".into(), host: "10.0.0.1".into(), ..Default::default() }];
+    kdbx::save(&ps, &key, &mut list, &Default::default()).unwrap();
+    assert!(!list[0].kp_id.is_empty());
+    let known = list.iter().map(|e| e.kp_id.clone()).collect();
+    let copy = Entry { id: 2, name: "copy".into(), ..list[0].clone() };
+    list.push(copy);
+    kdbx::save(&ps, &key, &mut list, &known).unwrap();
+    assert_ne!(list[0].kp_id, list[1].kp_id);
+    let mut names: Vec<String> = kdbx::load(&ps, &key).unwrap().into_iter().map(|e| e.name).collect();
+    names.sort();
+    assert_eq!(names, vec!["copy".to_string(), "original".to_string()]);
+    // export and import don't carry KeePass ids
+    let mut s = temp_store("d4");
+    s.data.entries[0].kp_id = "some-keepass-id".into();
+    let f = dir.join("export.json");
+    crate::sharing::export(&s, None, crate::sharing::PwMode::Without, "", &f).unwrap();
+    let (entries, pws) = crate::sharing::read(&std::fs::read_to_string(&f).unwrap(), "").unwrap();
+    assert!(entries.iter().all(|e| e.kp_id.is_empty()));
+    let with_id = vec![Entry { id: 1, kp_id: "x".into(), ..Default::default() }];
+    let mut other = temp_store("d4b");
+    let before = other.data.entries.len();
+    crate::sharing::merge(&mut other, with_id, pws, "Import");
+    assert!(other.data.entries[before..].iter().all(|e| e.kp_id.is_empty()));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_unreadable_list_is_never_replaced_by_the_sample() {
+    // D5
+    let dir = review_dir("d5");
+    let p = dir.join("connections.json");
+    let damaged = vec![0xff, 0xfe, 0x00, 0x41];
+    std::fs::write(&p, &damaged).unwrap();
+    let s = Store::open_at(p.clone(), None, None, false);
+    assert!(s.read_only && s.last_error.is_some());
+    assert_eq!(std::fs::read(&p).unwrap(), damaged);
+    // really missing: the sample list is made and saved
+    let q = dir.join("new.json");
+    let s = Store::open_at(q.clone(), None, None, false);
+    assert!(!s.read_only && q.exists() && !s.data.entries.is_empty());
+    // WebDAV unreachable and no local copy: no sample that would go up over the server's list
+    let r = dir.join("dav.json");
+    let s = Store::open_at(r.clone(), Some(crate::remote::RemoteConfig::default()), Some(Err("offline".into())), false);
+    assert!(s.read_only && !r.exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn webdav_answer_is_checked_before_it_replaces_the_local_copy() {
+    // D6
+    let dir = review_dir("d6");
+    let p = dir.join("connections-webdav.json");
+    let local = serde_json::to_string(&sample_data()).unwrap();
+    std::fs::write(&p, &local).unwrap();
+    let s = Store::open_at(p.clone(), Some(crate::remote::RemoteConfig::default()), Some(Ok(Some("<html>login</html>".into()))), false);
+    assert!(s.read_only && s.last_error.is_some());
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), local);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn shared_folder_save_does_not_overwrite_a_colleague() {
+    // D7
+    let dir = review_dir("d7");
+    let p = dir.join("connections.json");
+    let mut a = temp_store("d7a");
+    a.path = p.clone();
+    a.save();
+    assert!(a.last_error.is_none());
+    let mut b = temp_store("d7b");
+    b.path = p.clone();
+    assert!(b.reload_from_disk_for_test());
+    b.data.entries[0].name = "theirs".into();
+    b.save();
+    assert!(b.last_error.is_none(), "{:?}", b.last_error);
+    a.data.entries[1].name = "ours".into();
+    a.save();
+    let disk = std::fs::read_to_string(&p).unwrap();
+    assert!(disk.contains("\"theirs\"") && !disk.contains("\"ours\""), "the colleague's list stays");
+    assert!(a.last_error.is_some());
+    assert_eq!(a.data.entries[0].name, "theirs", "reloaded");
+    let names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    let side = names.iter().find(|n| n.contains("conflict-")).expect("our version is kept");
+    assert!(std::fs::read_to_string(dir.join(side)).unwrap().contains("\"ours\""));
+    assert!(!names.iter().any(|n| n.ends_with(".tmp")), "no temporary file left: {names:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn sealed_list_in_keepass_asks_for_keepass_after_the_master_password() {
+    // D8
+    use crate::kdbx::Key;
+    let dir = review_dir("d8");
+    let ps = empty_kdbx(&dir, "kp-d8");
+    let mut s = temp_store("d8");
+    s.path = dir.join("connections.json");
+    s.data.settings.keepass_path = ps;
+    s.use_keepass(Key { password: "kp-d8".into(), keyfile: String::new() }).unwrap();
+    let n = s.data.entries.len();
+    s.data.settings.encrypt_file = true;
+    s.set_master("M-d8");
+    assert!(s.last_error.is_none(), "{:?}", s.last_error);
+    let mut t = temp_store("d8b");
+    t.path = s.path.clone();
+    t.vault = None;
+    assert!(t.reload_from_disk_for_test());
+    assert!(t.locked());
+    assert!(t.unlock("M-d8"));
+    assert!(t.locked() && t.waiting_for_keepass(), "KeePass is asked for");
+    assert!(t.data.entries.is_empty());
+    assert!(t.unlock("kp-d8"));
+    assert!(!t.locked());
+    assert_eq!(t.data.entries.len(), n);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_save_keeps_entries_added_in_keepass_meanwhile() {
+    // D9
+    use crate::kdbx::{self, Key};
+    let dir = review_dir("d9");
+    let ps = empty_kdbx(&dir, "kp-d9");
+    let key = Key { password: "kp-d9".into(), keyfile: String::new() };
+    let mut s = temp_store("d9");
+    s.path = dir.join("connections.json");
+    s.data.settings.keepass_path = ps.clone();
+    s.use_keepass(key.clone()).unwrap();
+    let count = s.data.entries.len();
+    // added in KeePass; AdminCraft saves before it reloads
+    kdbx::store_password(&ps, &key, "added in KeePass", "u", "p", "ssh://10.9.9.9").unwrap();
+    s.data.entries[0].name = "renamed".into();
+    s.save();
+    let back = kdbx::load(&ps, &key).unwrap();
+    assert!(back.iter().any(|e| e.name == "added in KeePass"), "never seen, so never deleted");
+    assert!(back.iter().any(|e| e.name == "renamed"));
+    // deleted in AdminCraft: removed from KeePass (it was known)
+    let leaf = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;
+    s.remove(leaf);
+    s.save();
+    let back = kdbx::load(&ps, &key).unwrap();
+    assert_eq!(back.len(), count);
+    assert!(!back.iter().any(|e| e.name.starts_with("web01 – L")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unchanged_keepass_list_is_not_written_again() {
+    // C11 / P15
+    use crate::kdbx::Key;
+    let dir = review_dir("c11");
+    let ps = empty_kdbx(&dir, "kp-c11");
+    let mut s = temp_store("c11");
+    s.path = dir.join("connections.json");
+    s.data.settings.keepass_path = ps.clone();
+    s.use_keepass(Key { password: "kp-c11".into(), keyfile: String::new() }).unwrap();
+    let before = std::fs::read(&ps).unwrap();
+    s.data.settings.dark = !s.data.settings.dark;
+    s.save();
+    assert_eq!(std::fs::read(&ps).unwrap(), before, "a settings change doesn't touch KeePass");
+    s.data.entries[1].name = "changed".into();
+    s.save();
+    assert_ne!(std::fs::read(&ps).unwrap(), before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unchanged_list_saves_byte_for_byte() {
+    // P14
+    let dir = review_dir("p14");
+    let mut s = temp_store("p14");
+    s.path = dir.join("connections.json");
+    let i = s.index_of(4).unwrap();
+    s.data.entries[i].password = "pw-1".into();
+    s.save();
+    let first = std::fs::read(&s.path).unwrap();
+    s.save();
+    assert_eq!(std::fs::read(&s.path).unwrap(), first);
+    // a changed password is encrypted anew and opens to the new one
+    let old = s.data.entries[i].password_enc.clone();
+    s.data.entries[i].password = "pw-2".into();
+    s.save();
+    let new = s.data.entries[i].password_enc.clone().unwrap();
+    assert_ne!(Some(new.clone()), old);
+    assert_eq!(s.vault.as_ref().unwrap().decrypt(&new).as_deref(), Some("pw-2"));
+    // the whole list sealed with the master password
+    s.data.settings.encrypt_file = true;
+    s.set_master("M-p14");
+    let sealed = std::fs::read(&s.path).unwrap();
+    s.save();
+    assert_eq!(std::fs::read(&s.path).unwrap(), sealed);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn parent_loops_and_repeated_ids_cannot_hang_or_double() {
+    // C2 (and repeated ids, C3/D14)
+    use crate::model::{DataFile, Entry};
+    let mut s = temp_store("c2");
+    s.data.entries = vec![
+        Entry { id: 1, parent: Some(2), folder: true, ..Default::default() },
+        Entry { id: 2, parent: Some(1), folder: true, ..Default::default() },
+        Entry { id: 3, parent: Some(2), ..Default::default() },
+        Entry { id: 4, ..Default::default() },
+    ];
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        s.remove(1);
+        let _ = tx.send(s.data.entries.iter().map(|e| e.id).collect::<Vec<_>>());
+    });
+    let left = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("remove must not loop");
+    assert_eq!(left, vec![4]);
+    // an import with a loop, an entry that is its own parent and a repeated id
+    let mut other = temp_store("c2b");
+    let before = other.data.entries.len();
+    let imported = vec![
+        Entry { id: 7, parent: Some(8), folder: true, name: "x".into(), ..Default::default() },
+        Entry { id: 8, parent: Some(7), folder: true, name: "y".into(), ..Default::default() },
+        Entry { id: 9, parent: Some(9), name: "self".into(), ..Default::default() },
+        Entry { id: 7, name: "twin".into(), ..Default::default() },
+    ];
+    let (fid, _) = crate::sharing::merge(&mut other, imported, Default::default(), "Import");
+    let new: Vec<Entry> = other.data.entries[before + 1..].to_vec();
+    let ids: std::collections::HashSet<u64> = new.iter().map(|e| e.id).collect();
+    assert_eq!(ids.len(), 4, "every imported entry gets its own id");
+    for e in &new {
+        assert_ne!(e.parent, Some(e.id));
+        assert!(other.is_descendant(e.id, fid), "{} ends up in the import folder", e.name);
+    }
+    // a damaged data file: the twin gets a new id, the loop is broken
+    let dir = review_dir("c2");
+    let mut s = temp_store("c2c");
+    s.path = dir.join("connections.json");
+    let d = DataFile {
+        entries: vec![
+            Entry { id: 5, name: "a".into(), ..Default::default() },
+            Entry { id: 5, name: "b".into(), ..Default::default() },
+            Entry { id: 6, parent: Some(6), ..Default::default() },
+        ],
+        ..Default::default()
+    };
+    std::fs::write(&s.path, serde_json::to_string(&d).unwrap()).unwrap();
+    assert!(s.reload_from_disk_for_test());
+    let ids: std::collections::HashSet<u64> = s.data.entries.iter().map(|e| e.id).collect();
+    assert_eq!(ids.len(), 3);
+    assert_eq!(s.get(6).unwrap().parent, None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn ids_never_overflow() {
+    // D14
+    use crate::model::Entry;
+    let mut s = temp_store("d14");
+    s.data.entries.push(Entry { id: u64::MAX, ..Default::default() });
+    let old: std::collections::HashSet<u64> = s.data.entries.iter().map(|e| e.id).collect();
+    let a = s.next_id();
+    let b = s.next_id();
+    assert!(a != b && !old.contains(&a) && !old.contains(&b));
+    s.data.entries.push(Entry { id: a, ..Default::default() });
+    let c = s.next_id();
+    assert!(c != a && c != b && !old.contains(&c));
+}
+
+#[test]
+fn imports_keep_protocol_hostname_and_ipv6() {
+    // D15
+    use crate::kdbx::{parse_url, url_of};
+    let xml = r#"<mrng:Connections Name="Connections" KdfIterations="1000" FullFileEncryption="false" Protected="">
+  <Node Name="raw" Type="Connection" Protocol="RAW" Hostname="10.0.0.1" Port="5000" />
+  <Node Name="rl" Type="Connection" Protocol="RLOGIN" Hostname="10.0.0.2" Port="513" />
+</mrng:Connections>"#;
+    let imp = crate::import::import_mremoteng(xml, "", 10, None).unwrap();
+    assert_eq!(imp.entries[0].protocol, Protocol::Raw);
+    assert_eq!(imp.entries[1].protocol, Protocol::Rlogin);
+    let cfg = "Host web\n  HostName %h.corp.local\nHost odd\n  HostName 100%%.example\n";
+    let v = crate::import::import_ssh_config(cfg, 1, None);
+    assert_eq!(v[0].host, "web.corp.local");
+    assert_eq!(v[1].host, "100%.example");
+    let e = crate::model::Entry { protocol: Protocol::Https, host: "fe80::1".into(), port: 443, ..Default::default() };
+    assert_eq!(url_of(&e), "https://[fe80::1]/");
+    assert_eq!(parse_url(&url_of(&e)), Some((Protocol::Https, "fe80::1".into(), 443)));
+    let e = crate::model::Entry { protocol: Protocol::Ssh, host: "2001:db8::5".into(), port: 2222, ..Default::default() };
+    assert_eq!(url_of(&e), "ssh://[2001:db8::5]:2222");
+    assert_eq!(parse_url(&url_of(&e)), Some((Protocol::Ssh, "2001:db8::5".into(), 2222)));
+    assert_eq!(parse_url("2001:db8::5"), Some((Protocol::Ssh, "2001:db8::5".into(), 22)));
+}
+
+#[test]
+fn mremoteng_kdf_iterations_are_limited() {
+    // C8
+    for n in ["4000000000", "0", "1000001", "lots"] {
+        let xml = format!(
+            r#"<mrng:Connections Name="Connections" KdfIterations="{n}" Protected=""><Node Name="a" Type="Connection" Protocol="SSH2" Hostname="h" /></mrng:Connections>"#
+        );
+        let err = crate::import::import_mremoteng(&xml, "", 1, None).err().unwrap_or_else(|| panic!("{n} accepted"));
+        assert!(err.contains("KdfIterations"), "{err}");
+    }
+}
+
+#[test]
+fn keepass_host_lookup_needs_the_whole_host() {
+    // S3
+    use crate::model::KeePassRef;
+    use keepass::db::fields;
+    let mut db = keepass::Database::new();
+    let bin;
+    {
+        let mut root = db.root_mut();
+        {
+            let mut g = root.add_group();
+            g.name = "Trash".into();
+            bin = g.id();
+            let mut e = g.add_entry();
+            e.set_unprotected(fields::TITLE, "deleted 10.0.0.99");
+            e.set_protected(fields::PASSWORD, "old");
+        }
+        {
+            let mut g = root.add_group();
+            g.name = "Recycle Bin".into();
+            let mut e = g.add_entry();
+            e.set_unprotected(fields::TITLE, "kept");
+        }
+        {
+            let mut e = root.add_entry();
+            e.set_unprotected(fields::TITLE, "fw 10.0.0.10");
+            e.set_protected(fields::PASSWORD, "pw-fw");
+        }
+        {
+            let mut e = root.add_entry();
+            e.set_unprotected(fields::TITLE, "root@10.0.0.2 shell");
+        }
+    }
+    db.meta.recyclebin_uuid = Some(bin.uuid());
+    let dir = review_dir("s3");
+    let path = dir.join("s3.kdbx");
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        db.save(&mut f, keepass::DatabaseKey::new().with_password("kp-s3")).unwrap();
+    }
+    let mut v = crate::keepass_vault::KeePassVault::default();
+    v.open(path.to_str().unwrap(), "kp-s3", "").unwrap();
+    assert!(v.find(&KeePassRef::Host("10.0.0.1".into())).is_none(), "10.0.0.10 is another host");
+    assert_eq!(v.find(&KeePassRef::Host("10.0.0.10".into())).unwrap().password, "pw-fw");
+    assert_eq!(v.find(&KeePassRef::Host("10.0.0.2".into())).unwrap().title, "root@10.0.0.2 shell");
+    assert!(v.find(&KeePassRef::Host("10.0.0.99".into())).is_none(), "the recycle bin is skipped");
+    assert!(v.entries.iter().any(|e| e.title == "kept"), "a group is skipped by being the bin, not by its name");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_key_never_shows_its_password() {
+    // S20
+    let k = crate::kdbx::Key { password: "s3cret-pw".into(), keyfile: "key.keyx".into() };
+    let shown = format!("{k:?}");
+    assert!(!shown.contains("s3cret-pw") && shown.contains("key.keyx"), "{shown}");
+}

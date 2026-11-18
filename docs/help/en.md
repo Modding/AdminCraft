@@ -124,6 +124,8 @@ URL (e.g. `ssh://10.0.0.30:22`) and notes; folders become KeePass groups. You ca
 too; AdminCraft notices and reloads. An entry you make in that group in KeePass (with a URL such as
 `rdp://10.0.0.10`) shows up as a connection. At start AdminCraft asks for the KeePass master password.
 **Back to AdminCraft's own list** in the same place copies the list back.
+When the group already holds entries, nothing is replaced: your list stays, entries only KeePass has are
+added, and the list as it was is kept next to it (`….json.before-keepass`).
 
 **Save password in KeePass …** (on a connection with *Password from » KeePass*): type a password once;
 AdminCraft puts it into the group *AdminCraft* of your database and uses that entry from then on.
@@ -227,6 +229,8 @@ from the list.
 **Central list for the team** (Settings » Storage location): keep the list on a **network share** (SMB,
 e.g. `\\server\it\AdminCraft-Connections.json`) or a **WebDAV server** (Nextcloud, ownCloud, IIS).
 Protect it with the master password. When a colleague changes something, AdminCraft reloads it.
+When a colleague saved while you were editing, their list stays and yours is kept in a file next to it
+(`….conflict-….json`); the status bar names it.
 
 **Moving from other tools:** File » Import mRemoteNG file (`confCons.xml`, with passwords) and
 File » Import OpenSSH configuration (`~/.ssh/config`, including ProxyJump).

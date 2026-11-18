@@ -16,6 +16,9 @@ pub struct Imported {
     pub passwords_failed: usize,
 }
 
+/// mRemoteNG's default is 1000; more than this is no real file, only a way to hang the import.
+const MAX_KDF_ITERATIONS: u32 = 1_000_000;
+
 type MremoteGcm = aes_gcm::AesGcm<aes_gcm::aes::Aes256, aes_gcm::aead::consts::U16>;
 
 fn decrypt_mremote(text: &str, password: &str, iterations: u32) -> Option<String> {
@@ -51,7 +54,9 @@ fn protocol(s: &str) -> Protocol {
         "SSH1" | "SSH2" => Protocol::Ssh,
         "SFTP" => Protocol::Sftp,
         "FTP" | "FTPS" => Protocol::Ftp,
-        "TELNET" | "RLOGIN" | "RAW" => Protocol::Telnet,
+        "TELNET" => Protocol::Telnet,
+        "RLOGIN" => Protocol::Rlogin,
+        "RAW" => Protocol::Raw,
         "HTTP" => Protocol::Http,
         "HTTPS" => Protocol::Https,
         "POWERSHELL" => Protocol::PowerShell,
@@ -92,8 +97,15 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
             if a.get("FullFileEncryption").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false) {
                 return Err(tr("This file is fully encrypted. Please export it in mRemoteNG without \"full file encryption\".").into());
             }
-            if let Some(k) = a.get("KdfIterations").and_then(|v| v.parse().ok()) {
-                iterations = k;
+            // the file decides how long the key derivation runs: a huge number would hang the import
+            if let Some(v) = a.get("KdfIterations") {
+                match v.trim().parse::<u32>() {
+                    Ok(k) if (1..=MAX_KDF_ITERATIONS).contains(&k) => iterations = k,
+                    _ => {
+                        let shown: String = v.chars().take(20).collect();
+                        return Err(tf("The file asks for {0} key derivation rounds (KdfIterations); AdminCraft accepts 1 to 1000000.", &[&shown]));
+                    }
+                }
             }
             if let Some(p) = a.get("Protected")
                 && decrypt_mremote(p, &password, iterations).is_none()
@@ -111,7 +123,7 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
         let get = |k: &str| a.get(k).cloned().unwrap_or_default();
         let is_folder = get("Type").eq_ignore_ascii_case("Container");
         let id = next;
-        next += 1;
+        next = next.saturating_add(1);
         let mut entry = Entry {
             id,
             parent: *stack.last().unwrap_or(&parent),
@@ -159,6 +171,28 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
         return Err(tr("No mRemoteNG connections found in the file.").into());
     }
     Ok(out)
+}
+
+/// `HostName` in ssh_config may hold `%h` (the name given, i.e. the alias) and `%%` (a `%`).
+fn expand_hostname(value: &str, alias: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('h') => out.push_str(alias),
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
 }
 
 /// Reads the hosts of an OpenSSH client configuration (~/.ssh/config) as SSH connections.
@@ -221,11 +255,11 @@ pub fn import_ssh_config(text: &str, first_id: u64, parent: Option<u64>) -> Vec<
         .iter()
         .enumerate()
         .map(|(i, h)| Entry {
-            id: first_id + i as u64,
+            id: first_id.saturating_add(i as u64),
             parent,
             name: h.alias.clone(),
             protocol: Protocol::Ssh,
-            host: if h.host.is_empty() { h.alias.clone() } else { h.host.clone() },
+            host: if h.host.is_empty() { h.alias.clone() } else { expand_hostname(&h.host, &h.alias) },
             port: h.port,
             username: h.user.clone(),
             ssh_key: h.key.clone(),
@@ -242,7 +276,7 @@ pub fn import_ssh_config(text: &str, first_id: u64, parent: Option<u64>) -> Vec<
         let first = h.jump.split(',').next().unwrap_or("");
         let alias = first.rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("");
         match hosts.iter().position(|x| x.alias == alias) {
-            Some(j) if j != i => out[i].jump_host = Some(first_id + j as u64),
+            Some(j) if j != i => out[i].jump_host = Some(first_id.saturating_add(j as u64)),
             _ => out[i].extra_args = format!("-J {}", h.jump),
         }
     }

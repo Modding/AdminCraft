@@ -124,6 +124,8 @@ mot de passe, URL (p. ex. `ssh://10.0.0.30:22`) et notes ; les dossiers devienne
 pouvez aussi les modifier dans KeePass ; AdminCraft le remarque et recharge. Une entrée créée dans ce groupe
 dans KeePass (avec une URL comme `rdp://10.0.0.10`) apparaît comme connexion. Au démarrage, AdminCraft
 demande le mot de passe maître KeePass. **Revenir à la liste propre d'AdminCraft** au même endroit recopie la liste.
+Si le groupe contient déjà des entrées, rien n'est remplacé : votre liste reste, les entrées que seul KeePass
+possède sont ajoutées, et la liste telle qu'elle était est conservée à côté (`….json.before-keepass`).
 
 **Enregistrer le mot de passe dans KeePass …** (sur une connexion avec *Mot de passe depuis » KeePass*) :
 saisissez le mot de passe une fois ; AdminCraft le range dans le groupe *AdminCraft* de votre base et
@@ -230,6 +232,8 @@ dans la liste.
 **Liste centrale pour l'équipe** (Paramètres » Emplacement de stockage) : gardez la liste sur un **partage réseau** (SMB,
 p. ex. `\\server\it\AdminCraft-Connections.json`) ou un **serveur WebDAV** (Nextcloud, ownCloud, IIS).
 Protégez-la avec le mot de passe maître. Quand un collègue modifie quelque chose, AdminCraft la recharge.
+Si un collègue a enregistré pendant que vous modifiiez, sa liste reste et la vôtre est conservée dans un
+fichier à côté (`….conflict-….json`) ; la barre d'état l'indique.
 
 **Venir d'autres outils :** Fichier » Importer un fichier mRemoteNG (`confCons.xml`, avec les mots de passe) et
 Fichier » Importer la configuration OpenSSH (`~/.ssh/config`, ProxyJump compris).

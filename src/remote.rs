@@ -24,8 +24,11 @@ pub struct RemoteConfig {
     pub password_enc: String,
 }
 
-fn local_vault() -> Option<Vault> {
-    Vault::derive(LOCAL_KEY, b"admincraft-remote-salt").ok()
+/// Derived once per run (same key and parameters every time): every WebDAV request needs the
+/// password, and Argon2 for each of them only cost time.
+fn local_vault() -> Option<&'static Vault> {
+    static VAULT: std::sync::OnceLock<Option<Vault>> = std::sync::OnceLock::new();
+    VAULT.get_or_init(|| Vault::derive(LOCAL_KEY, b"admincraft-remote-salt").ok()).as_ref()
 }
 
 impl RemoteConfig {

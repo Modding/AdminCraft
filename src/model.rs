@@ -7,8 +7,9 @@ use aes_gcm::aead::{Aead, Generate, KeyInit};
 use base64::Engine as _;
 use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 const VERIFY_TEXT: &str = "admincraft-ok";
@@ -602,20 +603,29 @@ pub struct Store {
     pub last_error: Option<String>,
     /// When the file was last read or written by us (to notice changes by others).
     pub mtime: Option<std::time::SystemTime>,
-    /// Encrypted list waiting for the master password.
-    sealed_payload: Option<String>,
+    /// Encrypted list waiting for the master password: (payload, the file's whole text).
+    sealed_payload: Option<(String, String)>,
     /// The list lives on a WebDAV server (local copy in `path`).
     pub remote: Option<crate::remote::RemoteConfig>,
     /// Results of background uploads / downloads.
-    pub remote_state: std::sync::Arc<std::sync::Mutex<RemoteState>>,
-    /// Hash of the text last read or written (to see whether the server has something new).
+    pub remote_state: Arc<Mutex<RemoteState>>,
+    /// Hash of the text last read or written (to see whether the server has something new,
+    /// and whether someone else wrote the shared file since).
     text_hash: u64,
+    /// The plain JSON last sealed (or opened) and its sealed text: an unchanged list is written
+    /// byte for byte as before instead of with a fresh encryption.
+    sealed_cache: Option<(String, String)>,
     /// KeePass as connection list: the key once it was entered.
     pub kdbx_key: Option<crate::kdbx::Key>,
     /// KeePass as connection list, but its password wasn't entered yet.
     kdbx_waiting: bool,
     /// When the KeePass file was last read or written by us.
     kdbx_mtime: Option<std::time::SystemTime>,
+    /// KeePass ids (entries and groups) seen in the last load or save: only these may be deleted.
+    kdbx_known: HashSet<String>,
+    /// The list as last loaded from or saved to KeePass (without `password_enc`): an unchanged
+    /// list is not written again (no key derivation for a settings-only change).
+    kdbx_snapshot: Option<Vec<Entry>>,
 }
 
 #[derive(Default)]
@@ -625,6 +635,208 @@ pub struct RemoteState {
     pub last_ok: Option<std::time::SystemTime>,
     /// A newer list fetched from the server, waiting to be applied.
     pub fetched: Option<String>,
+    /// Counts saves: a server copy fetched by a request that started before the latest save is
+    /// older than what we have and is thrown away.
+    pub saves: u64,
+    /// The upload worker is running.
+    pub uploading: bool,
+    /// The newest text waiting for the upload worker.
+    pub pending_upload: Option<String>,
+    /// The newest text whose upload failed: sent again before the server is asked for news.
+    pub unsent: Option<String>,
+}
+
+impl RemoteState {
+    /// The answer of a poll that started at save count `started`.
+    pub fn poll_done(&mut self, started: u64, res: Result<Option<String>, String>) {
+        self.busy = false;
+        match res {
+            Ok(Some(t)) => {
+                // a save since the request started (or one still on its way to the server):
+                // what came back is older than our list
+                if self.saves == started && !self.uploading && self.pending_upload.is_none() && self.unsent.is_none() {
+                    self.fetched = Some(t);
+                }
+                self.last_error = None;
+            }
+            Ok(None) => self.last_error = None,
+            Err(e) => self.last_error = Some(e),
+        }
+    }
+}
+
+/// Sends `text` to the WebDAV server. One worker per store sends the texts in order and always
+/// the newest one waiting, so a quick second save never arrives before the first.
+fn queue_upload(state: &Arc<Mutex<RemoteState>>, r: crate::remote::RemoteConfig, text: String) {
+    {
+        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+        st.pending_upload = Some(text);
+        st.unsent = None;
+        if st.uploading {
+            return;
+        }
+        st.uploading = true;
+    }
+    let worker_state = state.clone();
+    let spawned = std::thread::Builder::new().name("webdav-upload".into()).spawn(move || {
+        loop {
+            let next = {
+                let mut st = worker_state.lock().unwrap_or_else(|e| e.into_inner());
+                match st.pending_upload.take() {
+                    Some(t) => t,
+                    None => {
+                        st.uploading = false;
+                        break;
+                    }
+                }
+            };
+            let res = crate::remote::upload(&r, &next);
+            let mut st = worker_state.lock().unwrap_or_else(|e| e.into_inner());
+            match res {
+                Ok(()) => {
+                    st.last_error = None;
+                    st.last_ok = Some(std::time::SystemTime::now());
+                }
+                Err(e) => {
+                    st.last_error = Some(e);
+                    if st.pending_upload.is_none() {
+                        st.unsent = Some(next);
+                    }
+                }
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+        st.uploading = false;
+        st.unsent = st.pending_upload.take();
+        st.last_error = Some(e.to_string());
+    }
+}
+
+/// Writes `text` to a temporary file next to `path` with a name no other instance uses, flushes
+/// it to the disk and renames it over `path`: a crash or a second writer never leaves half a file.
+pub fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut rnd = [0u8; 8];
+    let _ = getrandom::fill(&mut rnd);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let tag: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
+    let base = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "connections.json".into());
+    let tmp = path.with_file_name(format!("{base}.{}-{tag}{nanos:x}.tmp", std::process::id()));
+    let result = (|| -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result.map_err(|e| e.to_string())
+}
+
+/// A free id: above all ids in use and not below `next`; when the ids reach `u64::MAX`, the
+/// first unused one from `next` on. Moves `next` past the id it returns.
+fn take_free_id(entries: &[Entry], next: &mut u64) -> u64 {
+    let max = entries.iter().map(|e| e.id).max().unwrap_or(0);
+    let id = match max.checked_add(1) {
+        Some(above) => (*next).max(above),
+        None => {
+            let used: HashSet<u64> = entries.iter().map(|e| e.id).collect();
+            let start = (*next).max(1);
+            (start..u64::MAX).chain(1..start).find(|i| !used.contains(i)).unwrap_or(0)
+        }
+    };
+    *next = id.saturating_add(1);
+    id
+}
+
+/// An entry whose parent chain leads back to itself goes to `fallback` (so deleting or drawing
+/// it can't loop).
+pub fn break_parent_cycles(entries: &mut [Entry], fallback: Option<u64>) {
+    let mut parent_of: HashMap<u64, Option<u64>> = entries.iter().map(|e| (e.id, e.parent)).collect();
+    let limit = entries.len() + 1;
+    for e in entries.iter_mut() {
+        let me = e.id;
+        let mut cur = e.parent;
+        let mut steps = 0;
+        let mut looped = false;
+        while let Some(p) = cur {
+            if p == me {
+                looped = true;
+                break;
+            }
+            steps += 1;
+            if steps > limit {
+                // a loop further up: the entries on it are fixed when they come
+                break;
+            }
+            cur = parent_of.get(&p).copied().flatten();
+        }
+        if looped {
+            e.parent = fallback.filter(|&f| f != me);
+            parent_of.insert(me, e.parent);
+        }
+    }
+}
+
+/// The list as KeePass sees it (without what this PC encrypted).
+fn kdbx_snapshot_of(list: &[Entry]) -> Vec<Entry> {
+    list.iter().map(|e| Entry { password_enc: None, ..e.clone() }).collect()
+}
+
+fn same_as_snapshot(snapshot: &[Entry], list: &[Entry]) -> bool {
+    snapshot.len() == list.len()
+        && snapshot.iter().zip(list).all(|(a, b)| a.password_enc.is_none() && *a == Entry { password_enc: None, ..b.clone() })
+}
+
+fn kdbx_ids(list: &[Entry]) -> HashSet<String> {
+    list.iter().filter(|e| !e.kp_id.is_empty()).map(|e| e.kp_id.clone()).collect()
+}
+
+/// KeePass already holds connections and so does the list: ours stay as they are; theirs that
+/// aren't in ours (same KeePass id, or same kind, name and host) are added with new ids. A
+/// matching entry of ours takes over the KeePass id, so KeePass gets no copy of it.
+fn add_missing_from_keepass(ours: &mut Vec<Entry>, theirs: Vec<Entry>, next: &mut u64) -> usize {
+    let their_ids: HashSet<String> = kdbx_ids(&theirs);
+    let mut taken: HashSet<usize> = HashSet::new();
+    let mut map: HashMap<u64, u64> = HashMap::new();
+    let mut new: Vec<Entry> = Vec::new();
+    for t in &theirs {
+        let by_id = (!t.kp_id.is_empty()).then(|| ours.iter().position(|o| o.kp_id == t.kp_id)).flatten().filter(|i| !taken.contains(i));
+        let found = by_id.or_else(|| {
+            ours.iter().enumerate().position(|(i, o)| {
+                !taken.contains(&i)
+                    && (o.kp_id.is_empty() || !their_ids.contains(o.kp_id.as_str()))
+                    && o.folder == t.folder
+                    && o.name == t.name
+                    && o.host == t.host
+            })
+        });
+        match found.and_then(|i| ours.get_mut(i).map(|o| (i, o))) {
+            Some((i, o)) => {
+                taken.insert(i);
+                o.kp_id = t.kp_id.clone();
+                map.insert(t.id, o.id);
+            }
+            None => {
+                // `next` moves on with every id, so the new ones never repeat
+                let id = take_free_id(ours, next);
+                map.insert(t.id, id);
+                new.push(Entry { id, ..t.clone() });
+            }
+        }
+    }
+    for n in &mut new {
+        n.parent = n.parent.and_then(|p| map.get(&p).copied());
+        n.jump_host = n.jump_host.and_then(|j| map.get(&j).copied());
+    }
+    let added = new.len();
+    ours.extend(new);
+    break_parent_cycles(ours, None);
+    added
 }
 
 /// The whole list encrypted with the master password (names and hosts too).
@@ -716,6 +928,30 @@ impl Store {
     pub fn open(read_only: bool) -> Store {
         let remote = crate::remote::load_config();
         let path = if remote.is_some() { crate::remote::cache_path() } else { connections_file(!read_only) };
+        let server = remote.as_ref().map(crate::remote::fetch);
+        let mut store = Store::open_at(path, remote, server, read_only);
+        // command line / MCP server: the master password may come from the environment
+        if store.vault.is_none()
+            && let Ok(pw) = std::env::var("AC_MASTER")
+        {
+            store.unlock(&pw);
+        }
+        if store.kdbx_waiting
+            && let Ok(pw) = std::env::var("AC_KEEPASS")
+        {
+            store.unlock_keepass(&pw);
+        }
+        store
+    }
+
+    /// Opens the list in `path`. With WebDAV, `server` is the server's answer (`Ok(None)`: it has
+    /// no list yet).
+    pub fn open_at(
+        path: PathBuf,
+        remote: Option<crate::remote::RemoteConfig>,
+        server: Option<Result<Option<String>, String>>,
+        read_only: bool,
+    ) -> Store {
         let mut store = Store {
             path: path.clone(),
             data: DataFile::default(),
@@ -725,36 +961,49 @@ impl Store {
             mtime: None,
             last_error: None,
             sealed_payload: None,
-            remote: remote.clone(),
+            remote,
             remote_state: Default::default(),
             text_hash: 0,
+            sealed_cache: None,
             kdbx_key: None,
             kdbx_waiting: false,
             kdbx_mtime: None,
+            kdbx_known: HashSet::new(),
+            kdbx_snapshot: None,
         };
         // WebDAV: the server's list wins; without the server the local copy is used
-        let mut text = None;
-        if let Some(r) = &remote {
-            match crate::remote::fetch(r) {
-                Ok(Some(t)) => {
-                    if !read_only {
-                        let _ = std::fs::write(&path, &t);
+        let mut server_has_none = false;
+        match server {
+            Some(Ok(Some(t))) => {
+                match store.load_text(&t) {
+                    // the local copy is replaced only by a list that could be read
+                    Ok(()) => {
+                        if !read_only && let Err(e) = write_atomic(&path, &t) {
+                            store.last_error = Some(tf("Saving failed: {0}", &[&e]));
+                        }
                     }
-                    text = Some(t);
+                    Err(e) => {
+                        store.last_error = Some(tf("File could not be read: {0}", &[&e]));
+                        store.read_only = true;
+                    }
                 }
-                Ok(None) => {}
-                Err(e) => store.last_error = Some(tf("{0} – using the local copy.", &[&e])),
+                store.wait_for_keepass();
+                return store;
             }
+            Some(Ok(None)) => server_has_none = true,
+            Some(Err(e)) => store.last_error = Some(tf("{0} – using the local copy.", &[&e])),
+            None => {}
         }
-        let text = text.or_else(|| std::fs::read_to_string(&path).ok());
-        match text {
-            Some(text) => {
+        store.mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
                 if let Err(e) = store.load_text(&text) {
                     store.last_error = Some(tf("File could not be read: {0}", &[&e]));
                     store.read_only = true;
                 }
             }
-            None => {
+            // a new installation (with WebDAV: only when the server has no list either)
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && (store.remote.is_none() || server_has_none) => {
                 store.data = sample_data();
                 store.data.salt = B64.encode(new_salt());
                 let salt = store.salt();
@@ -763,21 +1012,29 @@ impl Store {
                     store.save();
                 }
             }
-        }
-        // command line / MCP server: the master password may come from the environment
-        if store.vault.is_none()
-            && let Ok(pw) = std::env::var("AC_MASTER")
-        {
-            store.unlock(&pw);
-        }
-        if store.kdbx_mode() {
-            store.data.entries.clear();
-            store.kdbx_waiting = true;
-            if let Ok(pw) = std::env::var("AC_KEEPASS") {
-                store.unlock_keepass(&pw);
+            // the list is there but can't be read now (network share away, no rights, damaged):
+            // never put the sample list in its place
+            Err(e) => {
+                let msg = tf("File could not be read: {0}", &[&e]);
+                store.last_error = Some(match store.last_error.take() {
+                    Some(before) => format!("{before} {msg}"),
+                    None => msg,
+                });
+                store.read_only = true;
+                let salt = store.salt();
+                store.vault = Vault::derive("", &salt).ok();
             }
         }
+        store.wait_for_keepass();
         store
+    }
+
+    /// KeePass as connection list: the connections come from KeePass once its password is given.
+    fn wait_for_keepass(&mut self) {
+        if self.kdbx_mode() && self.kdbx_key.is_none() && !self.kdbx_waiting {
+            self.data.entries.clear();
+            self.kdbx_waiting = true;
+        }
     }
 
     /// The connections live in a KeePass database (Settings » Password vault).
@@ -795,10 +1052,9 @@ impl Store {
         let key = crate::kdbx::Key { password: password.to_string(), keyfile: self.data.settings.keepass_keyfile.clone() };
         match crate::kdbx::load(&self.data.settings.keepass_path, &key) {
             Ok(list) => {
-                self.data.entries = list;
+                self.kdbx_loaded(list);
                 self.kdbx_key = Some(key);
                 self.kdbx_waiting = false;
-                self.kdbx_mtime = std::fs::metadata(self.data.settings.keepass_path.trim().trim_matches('"')).and_then(|m| m.modified()).ok();
                 self.last_error = None;
                 true
             }
@@ -809,19 +1065,43 @@ impl Store {
         }
     }
 
-    /// Switches to KeePass as connection list. When the database already holds AdminCraft
-    /// connections they are used; otherwise the current list is written into it.
+    /// The list as it is in KeePass now (just read or written).
+    fn kdbx_loaded(&mut self, list: Vec<Entry>) {
+        self.kdbx_known = kdbx_ids(&list);
+        self.kdbx_snapshot = Some(kdbx_snapshot_of(&list));
+        self.data.entries = list;
+        self.kdbx_mtime = std::fs::metadata(self.data.settings.keepass_path.trim().trim_matches('"')).and_then(|m| m.modified()).ok();
+    }
+
+    /// Switches to KeePass as connection list. An empty list takes the database's AdminCraft
+    /// connections; otherwise the list is written into the database, and connections the
+    /// database already holds but the list doesn't are added (nothing is replaced). The list as
+    /// it was is kept in a backup file first.
     pub fn use_keepass(&mut self, key: crate::kdbx::Key) -> Result<String, String> {
         let path = self.data.settings.keepass_path.clone();
         let there = crate::kdbx::load(&path, &key)?;
-        let msg = if there.is_empty() {
-            let mut list = self.data.entries.clone();
-            crate::kdbx::save(&path, &key, &mut list)?;
-            self.data.entries = list;
-            tf("{0} entries moved into the KeePass database (group \"AdminCraft\").", &[&self.data.entries.len()])
+        let msg = if self.data.entries.is_empty() {
+            let n = there.len();
+            self.kdbx_loaded(there);
+            tf("{0} entries loaded from the KeePass database.", &[&n])
         } else {
-            self.data.entries = there;
-            tf("{0} entries loaded from the KeePass database.", &[&self.data.entries.len()])
+            let mut backup = None;
+            let mut list = self.data.entries.clone();
+            let mut added = 0;
+            if !there.is_empty() {
+                backup = Some(self.backup_before_keepass()?);
+                added = add_missing_from_keepass(&mut list, there, &mut self.data.next_id);
+            }
+            // no KeePass id counts as known: this first save deletes nothing in the database
+            crate::kdbx::save(&path, &key, &mut list, &HashSet::new())?;
+            self.kdbx_loaded(list);
+            match backup {
+                Some(b) => tf(
+                    "{0} entries kept, {1} added from the KeePass database. The list as it was is in {2}.",
+                    &[&self.data.entries.len().saturating_sub(added), &added, &b.display()],
+                ),
+                None => tf("{0} entries moved into the KeePass database (group \"AdminCraft\").", &[&self.data.entries.len()]),
+            }
         };
         self.data.settings.keepass_db = true;
         self.kdbx_key = Some(key);
@@ -830,24 +1110,38 @@ impl Store {
         Ok(msg)
     }
 
+    /// Writes the list as it is now and copies it next to itself before KeePass takes over.
+    fn backup_before_keepass(&mut self) -> Result<PathBuf, String> {
+        self.save();
+        if let Some(e) = self.last_error.clone() {
+            return Err(e);
+        }
+        let to = self.path.with_extension("json.before-keepass");
+        std::fs::copy(&self.path, &to).map_err(|e| tf("Backup failed: {0}", &[&e]))?;
+        Ok(to)
+    }
+
     /// Back to AdminCraft's own file: the connections now open are kept there.
     pub fn stop_using_keepass(&mut self) {
         self.data.settings.keepass_db = false;
         self.kdbx_key = None;
         self.kdbx_waiting = false;
+        self.kdbx_known.clear();
+        self.kdbx_snapshot = None;
         self.save();
     }
 
     /// Reads a list (plain, or sealed with the master password). A vault that still fits is
-    /// kept, so a reload doesn't ask for the password again.
+    /// kept, so a reload doesn't ask for the password again (nor derives the key again).
     fn load_text(&mut self, text: &str) -> Result<(), String> {
         self.text_hash = hash_text(text);
+        self.sealed_cache = None;
         if let Ok(sealed) = serde_json::from_str::<SealedFile>(text)
             && sealed.format == SEALED_FORMAT
         {
             let keep = self.vault.clone().filter(|v| self.data.salt == sealed.salt && v.decrypt(&sealed.verifier).as_deref() == Some(VERIFY_TEXT));
             self.data = DataFile { salt: sealed.salt, master: true, verifier: sealed.verifier, ..Default::default() };
-            self.sealed_payload = Some(sealed.payload);
+            self.sealed_payload = Some((sealed.payload, text.to_string()));
             self.vault = None;
             if let Some(v) = keep {
                 self.open_sealed(v)?;
@@ -855,30 +1149,56 @@ impl Store {
             return Ok(());
         }
         let data = serde_json::from_str::<DataFile>(text).map_err(|e| e.to_string())?;
-        let keep =
-            self.vault.clone().filter(|v| data.salt == self.data.salt && (!data.master || v.decrypt(&data.verifier).as_deref() == Some(VERIFY_TEXT)));
+        let keep = self.vault.clone().filter(|v| {
+            data.salt == self.data.salt
+                && if data.master {
+                    v.decrypt(&data.verifier).as_deref() == Some(VERIFY_TEXT)
+                } else {
+                    // the vault of a list without master password comes from the empty one
+                    !self.data.master
+                }
+        });
         self.sealed_payload = None;
         self.data = data;
         if !self.data.master {
-            let salt = self.salt();
-            self.vault = Vault::derive("", &salt).ok();
+            self.vault = match keep {
+                Some(v) => Some(v),
+                None => Vault::derive("", &self.salt()).ok(),
+            };
         } else {
             self.vault = keep;
         }
         if self.vault.is_some() {
             self.decrypt_all();
         }
+        self.repair_ids();
         Ok(())
     }
 
     fn open_sealed(&mut self, v: Vault) -> Result<(), String> {
-        let Some(payload) = self.sealed_payload.take() else { return Ok(()) };
+        let Some((payload, text)) = self.sealed_payload.take() else { return Ok(()) };
         let json = v.decrypt(&payload).ok_or_else(|| tr("The encrypted list doesn't match the master password.").to_string())?;
         let data = serde_json::from_str::<DataFile>(&json).map_err(|e| e.to_string())?;
         self.data = data;
         self.vault = Some(v);
         self.decrypt_all();
+        self.sealed_cache = Some((json, text));
+        self.repair_ids();
         Ok(())
+    }
+
+    /// A damaged or hand-edited file: a repeated id gets a new one (nothing is dropped), and an
+    /// entry whose parents lead back to itself goes to the top level.
+    fn repair_ids(&mut self) {
+        let mut seen = HashSet::new();
+        let repeated: Vec<usize> = self.data.entries.iter().enumerate().filter(|(_, e)| !seen.insert(e.id)).map(|(i, _)| i).collect();
+        for i in repeated {
+            let id = self.next_id();
+            if let Some(e) = self.data.entries.get_mut(i) {
+                e.id = id;
+            }
+        }
+        break_parent_cycles(&mut self.data.entries, None);
     }
 
     /// Someone else (a colleague on the shared list) saved the file: read it again.
@@ -895,11 +1215,15 @@ impl Store {
             self.kdbx_mtime = Some(m);
             return match crate::kdbx::load(&path, &key) {
                 Ok(list) if list != self.data.entries => {
-                    self.data.entries = list;
+                    self.kdbx_loaded(list);
                     true
                 }
                 _ => false,
             };
+        }
+        // while locked nothing is taken: the change is read after unlocking
+        if self.locked() {
+            return false;
         }
         if self.remote.is_some() {
             return self.apply_fetched();
@@ -922,15 +1246,22 @@ impl Store {
             return false;
         }
         let before = (self.data.salt.clone(), self.data.master);
-        let backup = std::mem::take(&mut self.data);
+        // what `load_text` compares (salt, master, check text) stays, so the vault can be kept
+        let placeholder =
+            DataFile { salt: self.data.salt.clone(), master: self.data.master, verifier: self.data.verifier.clone(), ..Default::default() };
+        let backup = std::mem::replace(&mut self.data, placeholder);
         let vault = self.vault.clone();
+        let hash = self.text_hash;
+        let cache = self.sealed_cache.take();
         match self.load_text(text) {
             Ok(()) if self.vault.is_some() && (self.data.salt.clone(), self.data.master) == before => true,
             _ => {
-                // another key or unreadable: keep ours
+                // another key or unreadable: keep ours (and remember that the file isn't ours)
                 self.data = backup;
                 self.vault = vault;
                 self.sealed_payload = None;
+                self.text_hash = hash;
+                self.sealed_cache = cache;
                 false
             }
         }
@@ -946,26 +1277,35 @@ impl Store {
     pub fn poll_remote(&self) {
         let Some(r) = self.remote.clone() else { return };
         let state = self.remote_state.clone();
-        {
+        let (started, unsent) = {
             let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-            if st.busy {
+            // busy, or our own change is still on its way: the server's copy is older than ours
+            if st.busy || st.uploading || st.pending_upload.is_some() {
                 return;
             }
-            st.busy = true;
-        }
-        std::thread::spawn(move || {
-            let res = crate::remote::fetch(&r);
-            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-            st.busy = false;
-            match res {
-                Ok(Some(t)) => {
-                    st.fetched = Some(t);
-                    st.last_error = None;
+            match st.unsent.take() {
+                Some(t) => (0, Some(t)),
+                None => {
+                    st.busy = true;
+                    (st.saves, None)
                 }
-                Ok(None) => st.last_error = None,
-                Err(e) => st.last_error = Some(e),
             }
+        };
+        // an upload failed: send it again before asking the server for news
+        if let Some(t) = unsent {
+            if !self.read_only {
+                queue_upload(&state, r, t);
+            }
+            return;
+        }
+        let worker_state = state.clone();
+        let spawned = std::thread::Builder::new().name("webdav-poll".into()).spawn(move || {
+            let res = crate::remote::fetch(&r);
+            worker_state.lock().unwrap_or_else(|e| e.into_inner()).poll_done(started, res);
         });
+        if spawned.is_err() {
+            state.lock().unwrap_or_else(|e| e.into_inner()).busy = false;
+        }
     }
 
     fn apply_fetched(&mut self) -> bool {
@@ -973,8 +1313,12 @@ impl Store {
         match fetched {
             Some(t) => {
                 let changed = self.replace_if_same_key(&t);
-                if changed && !self.read_only {
-                    let _ = std::fs::write(&self.path, &t);
+                // the local copy only takes a list that could be read
+                if changed
+                    && !self.read_only
+                    && let Err(e) = write_atomic(&self.path, &t)
+                {
+                    self.last_error = Some(tf("Saving failed: {0}", &[&e]));
                 }
                 changed
             }
@@ -1004,6 +1348,8 @@ impl Store {
                 self.last_error = Some(e);
                 return false;
             }
+            // the settings were sealed too: only now it shows that KeePass holds the list
+            self.wait_for_keepass();
         } else {
             self.vault = Some(vault);
             self.decrypt_all();
@@ -1045,8 +1391,15 @@ impl Store {
         }
         let Some(v) = self.vault.clone() else { return };
         for e in &mut self.data.entries {
-            // if encrypting should ever fail, the stored password stays as it was
-            e.password_enc = if e.password.is_empty() { None } else { v.encrypt(&e.password).ok().or_else(|| e.password_enc.take()) };
+            e.password_enc = if e.password.is_empty() {
+                None
+            } else if e.password_enc.as_deref().and_then(|p| v.decrypt(p)).as_deref() == Some(e.password.as_str()) {
+                // unchanged: the same text again, so an unchanged list is an unchanged file
+                e.password_enc.take()
+            } else {
+                // changed: encrypted anew (fresh nonce); should that ever fail, the stored one stays
+                v.encrypt(&e.password).ok().or_else(|| e.password_enc.take())
+            };
         }
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -1062,63 +1415,107 @@ impl Store {
             && !self.kdbx_waiting
             && let Some(key) = self.kdbx_key.clone()
         {
-            let path = self.data.settings.keepass_path.clone();
-            match crate::kdbx::save(&path, &key, &mut self.data.entries) {
-                Ok(()) => self.kdbx_mtime = std::fs::metadata(path.trim().trim_matches('"')).and_then(|m| m.modified()).ok(),
-                Err(e) => kdbx_error = Some(e),
+            // the list as KeePass already has it: no key derivation, no write
+            let unchanged = self.kdbx_snapshot.as_deref().is_some_and(|s| same_as_snapshot(s, &self.data.entries));
+            if !unchanged {
+                let path = self.data.settings.keepass_path.clone();
+                match crate::kdbx::save(&path, &key, &mut self.data.entries, &self.kdbx_known) {
+                    Ok(()) => {
+                        self.kdbx_known = kdbx_ids(&self.data.entries);
+                        self.kdbx_snapshot = Some(kdbx_snapshot_of(&self.data.entries));
+                        self.kdbx_mtime = std::fs::metadata(path.trim().trim_matches('"')).and_then(|m| m.modified()).ok();
+                    }
+                    Err(e) => kdbx_error = Some(e),
+                }
             }
         }
         let kept = if kdbx { std::mem::take(&mut self.data.entries) } else { Vec::new() };
-        let tmp = self.path.with_extension("json.tmp");
-        let text = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string()).and_then(|json| {
-            // whole list encrypted with the master password (names and hosts too)
-            if self.data.settings.encrypt_file && self.data.master {
-                let sealed = SealedFile {
-                    format: SEALED_FORMAT.into(),
-                    version: 1,
-                    salt: self.data.salt.clone(),
-                    verifier: self.data.verifier.clone(),
-                    payload: v.encrypt(&json)?,
-                };
-                serde_json::to_string_pretty(&sealed).map_err(|e| e.to_string())
-            } else {
-                Ok(json)
-            }
-        });
-        let result = text.clone().and_then(|json| {
-            std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
-            std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
-        });
+        let text = self.file_text(&v);
         if kdbx {
             self.data.entries = kept;
         }
+        let text = match text {
+            Ok(t) => t,
+            Err(e) => {
+                self.last_error = Some(tf("Saving failed: {0}", &[&e]));
+                return;
+            }
+        };
+        // a shared folder: someone else wrote the file since we read or wrote it
+        if !kdbx && self.remote.is_none() && self.changed_on_disk() {
+            self.keep_theirs(&text);
+            return;
+        }
+        let result = write_atomic(&self.path, &text);
         self.last_error = result.err().map(|e| tf("Saving failed: {0}", &[&e])).or(kdbx_error);
         self.mtime = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok();
-        if let Ok(t) = text {
-            self.text_hash = hash_text(&t);
-            // WebDAV: upload in the background
-            if let Some(r) = self.remote.clone() {
-                let state = self.remote_state.clone();
-                std::thread::spawn(move || {
-                    let res = crate::remote::upload(&r, &t);
-                    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-                    match res {
-                        Ok(()) => {
-                            st.last_error = None;
-                            st.last_ok = Some(std::time::SystemTime::now());
-                        }
-                        Err(e) => st.last_error = Some(e),
-                    }
-                });
+        self.text_hash = hash_text(&text);
+        // WebDAV: a server copy fetched before this save is older; upload in the background
+        if let Some(r) = self.remote.clone() {
+            {
+                let mut st = self.remote_state.lock().unwrap_or_else(|e| e.into_inner());
+                st.fetched = None;
+                st.saves = st.saves.wrapping_add(1);
             }
+            queue_upload(&self.remote_state, r, text);
         }
     }
 
+    /// The file's text: the list as JSON, or sealed with the master password (names and hosts
+    /// too). An unchanged list is sealed as before, so the file doesn't change.
+    fn file_text(&mut self, v: &Vault) -> Result<String, String> {
+        let json = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string())?;
+        if !(self.data.settings.encrypt_file && self.data.master) {
+            return Ok(json);
+        }
+        if let Some((j, sealed)) = &self.sealed_cache
+            && *j == json
+        {
+            return Ok(sealed.clone());
+        }
+        let sealed = SealedFile {
+            format: SEALED_FORMAT.into(),
+            version: 1,
+            salt: self.data.salt.clone(),
+            verifier: self.data.verifier.clone(),
+            payload: v.encrypt(&json)?,
+        };
+        let text = serde_json::to_string_pretty(&sealed).map_err(|e| e.to_string())?;
+        self.sealed_cache = Some((json, text.clone()));
+        Ok(text)
+    }
+
+    /// The file differs from what we last read or wrote (or can't be read as text).
+    fn changed_on_disk(&self) -> bool {
+        match std::fs::read(&self.path) {
+            Ok(bytes) => String::from_utf8(bytes).map(|t| hash_text(&t) != self.text_hash).unwrap_or(true),
+            // no file: nothing of anyone else's to lose
+            Err(_) => false,
+        }
+    }
+
+    /// Someone else saved the shared list in the meantime: their file stays. Ours is kept in a
+    /// file next to it, and the list on screen becomes theirs (when it can be read with our key).
+    fn keep_theirs(&mut self, ours: &str) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let side = self.path.with_extension(format!("conflict-{secs}.json"));
+        if let Err(e) = write_atomic(&side, ours) {
+            // ours stays on screen and is saved again next time
+            self.last_error =
+                Some(tf("The list was changed elsewhere in the meantime and was not overwritten; your version could not be kept: {0}", &[&e]));
+            return;
+        }
+        let reloaded = std::fs::read_to_string(&self.path).map(|t| self.replace_if_same_key(&t)).unwrap_or(false);
+        self.mtime = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok();
+        self.last_error = Some(if reloaded {
+            tf("The list was changed elsewhere in the meantime and has been reloaded. Your version was kept in {0}.", &[&side.display()])
+        } else {
+            tf("The list was changed elsewhere in the meantime and was not overwritten. Your version was kept in {0}.", &[&side.display()])
+        });
+    }
+
     pub fn next_id(&mut self) -> u64 {
-        let max = self.data.entries.iter().map(|e| e.id).max().unwrap_or(0);
-        let id = self.data.next_id.max(max + 1);
-        self.data.next_id = id + 1;
-        id
+        take_free_id(&self.data.entries, &mut self.data.next_id)
     }
 
     pub fn index_of(&self, id: u64) -> Option<usize> {
@@ -1221,12 +1618,15 @@ impl Store {
 
     /// Removes an entry and everything below it.
     pub fn remove(&mut self, id: u64) {
-        let mut doomed = vec![id];
-        let mut i = 0;
-        while i < doomed.len() {
-            let cur = doomed[i];
-            doomed.extend(self.data.entries.iter().filter(|e| e.parent == Some(cur)).map(|e| e.id));
-            i += 1;
+        // every id once: parents that loop (a damaged file) can't make this run forever
+        let mut doomed: HashSet<u64> = HashSet::from([id]);
+        let mut todo = vec![id];
+        while let Some(cur) = todo.pop() {
+            for e in self.data.entries.iter().filter(|e| e.parent == Some(cur)) {
+                if doomed.insert(e.id) {
+                    todo.push(e.id);
+                }
+            }
         }
         self.data.entries.retain(|e| !doomed.contains(&e.id));
     }

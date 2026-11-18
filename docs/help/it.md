@@ -124,6 +124,8 @@ URL (ad es. `ssh://10.0.0.30:22`) e note; le cartelle diventano gruppi KeePass. 
 KeePass; AdminCraft se ne accorge e ricarica. Una voce creata in KeePass in quel gruppo (con un URL come
 `rdp://10.0.0.10`) compare come connessione. All'avvio AdminCraft chiede la password principale di KeePass.
 **Torna all'elenco proprio di AdminCraft** nello stesso punto ricopia l'elenco.
+Se il gruppo contiene già delle voci, nulla viene sostituito: il tuo elenco resta, le voci che ha solo KeePass
+vengono aggiunte e l'elenco com'era viene conservato accanto (`….json.before-keepass`).
 
 **Salva password in KeePass …** (su una connessione con *Password da » KeePass*): digita la password una
 volta; AdminCraft la mette nel gruppo *AdminCraft* del database e da allora usa quella voce.
@@ -229,6 +231,8 @@ dall'elenco.
 **Elenco centrale per il team** (Impostazioni » Posizione di archiviazione): tieni l'elenco su una **condivisione di rete** (SMB,
 es. `\\server\it\AdminCraft-Connections.json`) o su un **server WebDAV** (Nextcloud, ownCloud, IIS).
 Proteggilo con la password principale. Quando un collega cambia qualcosa, AdminCraft lo ricarica.
+Se un collega ha salvato mentre stavi modificando, il suo elenco resta e il tuo viene conservato in un file
+accanto (`….conflict-….json`); la barra di stato lo indica.
 
 **Passare da altri strumenti:** File » Importa file mRemoteNG (`confCons.xml`, con le password) e
 File » Importa configurazione OpenSSH (`~/.ssh/config`, incluso ProxyJump).
