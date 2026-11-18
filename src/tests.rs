@@ -1012,3 +1012,272 @@ fn scan_names_and_traceroute_outside_windows() {
     assert_eq!(trace_cmd("h", false, false), ("traceroute".to_string(), vec!["-n".to_string(), "h".to_string()]));
     assert_eq!(trace_cmd("h", false, true).0, "tracepath", "Linux without traceroute");
 }
+
+fn review_hop(host: &str, user: &str, password: &str) -> crate::transfer::Hop {
+    crate::transfer::Hop { host: host.into(), user: user.into(), port: 22, password: password.into() }
+}
+
+fn review_endpoint(kind: crate::transfer::Kind, target: crate::transfer::Hop) -> crate::transfer::Endpoint {
+    crate::transfer::Endpoint {
+        kind,
+        target,
+        key_file: String::new(),
+        jumps: Vec::new(),
+        tls: false,
+        check_cert: true,
+        tool: crate::transfer::Tool::Putty,
+        progs: crate::transfer::Progs::default(),
+    }
+}
+
+#[test]
+fn askpass_answers_only_the_host_the_prompt_names() {
+    use crate::transfer::askpass_answer;
+    let hops = vec![review_hop("bastion", "jump", "J"), review_hop("10.0.0.4", "admin", "A"), review_hop("10.0.0.40", "root", "T")];
+    // keyboard-interactive prompts name the login in brackets
+    assert_eq!(askpass_answer("(jump@bastion) Password: ", &hops), Some("J"));
+    assert_eq!(askpass_answer("(root@10.0.0.40) Password:", &hops), Some("T"));
+    assert_eq!(askpass_answer("root@10.0.0.40's password: ", &hops), Some("T"));
+    // whole host names: 10.0.0.4 is not 10.0.0.40
+    assert_eq!(askpass_answer("x@10.0.0.4's password: ", &hops), Some("A"));
+    // with jump hosts a prompt naming no known host gets nothing (no guessing)
+    assert_eq!(askpass_answer("Password: ", &hops), None);
+    assert_eq!(askpass_answer("(root@other) Password: ", &hops), None);
+    // a single host keeps the fallback
+    let one = vec![review_hop("db", "root", "T")];
+    assert_eq!(askpass_answer("Password: ", &one), Some("T"));
+    let v6 = vec![review_hop("bastion", "jump", "J"), review_hop("fe80::1", "root", "V")];
+    assert_eq!(askpass_answer("root@fe80::1's password: ", &v6), Some("V"));
+}
+
+#[test]
+fn ftp_download_names_stay_inside_the_folder() {
+    use crate::transfer::is_plain_name;
+    for ok in ["file.txt", "my file", " lead", "ü.bin", ".hidden"] {
+        assert!(is_plain_name(ok), "{ok}");
+    }
+    for bad in ["", ".", "..", "../x", "..\\x", "C:\\x", "C:x", "/etc/passwd", "a/b", "a\\b", "a\0b", "a\nb", "x:stream"] {
+        assert!(!is_plain_name(bad), "{bad:?}");
+    }
+}
+
+#[test]
+fn ftp_download_goes_through_a_part_file() {
+    use crate::transfer::write_via_part;
+    use std::io::Write;
+    let dir = std::env::temp_dir().join(format!("admincraft-part-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("data.bin");
+    std::fs::write(&file, b"old").unwrap();
+    // an aborted download leaves the old file as it was and no part file
+    let r = write_via_part(&file, |f| {
+        f.write_all(b"half").unwrap();
+        Err("connection lost".into())
+    });
+    assert!(r.is_err());
+    assert_eq!(std::fs::read(&file).unwrap(), b"old");
+    assert!(!dir.join("data.bin.part").exists());
+    // a finished one replaces it
+    write_via_part(&file, |f| f.write_all(b"new").map_err(|e| e.to_string())).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"new");
+    assert!(!dir.join("data.bin.part").exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn host_or_user_can_not_become_an_option() {
+    use crate::launch::{Creds, check_login, launch};
+    use crate::model::{Entry, Settings};
+    assert!(check_login("10.0.0.1", "root").is_ok());
+    assert!(check_login(" fe80::1 ", "DOMAIN\\John Smith").is_ok());
+    assert!(check_login("-oProxyCommand=calc", "root").is_err());
+    assert!(check_login("host\r\nusername:s:x", "root").is_err());
+    assert!(check_login("a b", "root").is_err());
+    assert!(check_login("host", "-oProxyCommand=calc").is_err());
+    assert!(check_login("host", "root\nx").is_err());
+    let settings = Settings::default();
+    let c = Creds { user: "root".into(), ..Default::default() };
+    for (protocol, host) in [(Protocol::Ssh, "-oProxyCommand=calc"), (Protocol::Rdp, "h\r\nusername:s:evil"), (Protocol::Telnet, "-l")] {
+        let e = Entry { host: host.into(), protocol, ..Default::default() };
+        assert!(launch(&e, &c, &settings, &[], (0, 0)).is_err(), "{protocol:?}");
+    }
+    // file transfer: target and jump hosts
+    let mut ep = review_endpoint(crate::transfer::Kind::Sftp, review_hop("db", "root", ""));
+    assert!(crate::transfer::check_endpoint(&ep).is_ok());
+    ep.jumps.push(review_hop("-oProxyCommand=x", "j", ""));
+    assert!(crate::transfer::check_endpoint(&ep).is_err());
+}
+
+#[test]
+fn sftp_batch_refuses_control_characters() {
+    use crate::transfer::{local_q, q};
+    assert_eq!(q("/srv/my \"file\"").unwrap(), r#""/srv/my \"file\"""#);
+    assert!(q("x\n!rm -rf ~").is_err(), "a line break would start a new sftp command");
+    assert!(q("x\ry").is_err());
+    assert!(local_q(std::path::Path::new("dir\nput x")).is_err());
+}
+
+#[test]
+fn putty_proxy_command_escapes_values() {
+    use crate::launch::{ProxyPassword, putty_proxy_command};
+    use std::path::Path;
+    let pc =
+        putty_proxy_command(Path::new(r"C:\Users\tom\plink.exe"), 2222, "ad min", ProxyPassword::File(Path::new(r"C:\Temp\pw-1.txt")), "jump", true);
+    assert_eq!(pc, r#""C:\\Users\\tom\\plink.exe" -batch -ssh -P 2222 -l "ad min" -pwfile "C:\\Temp\\pw-1.txt" -nc %host:%port "jump""#);
+    // an old plink with the password: quotes, % and a trailing backslash survive PuTTY's escapes
+    let pc = putty_proxy_command(Path::new("plink"), 22, "", ProxyPassword::Plain("a\"b%c\\"), "jump", true);
+    assert!(pc.contains(r#" -pw "a\\"b%%c\\\\" "#), "{pc}");
+    // elsewhere /bin/sh runs it: single quotes
+    let pc = putty_proxy_command(Path::new("/usr/bin/plink"), 22, "o'neil", ProxyPassword::None, "jump", false);
+    assert_eq!(pc, r#"'/usr/bin/plink' -batch -ssh -P 22 -l 'o'\\''neil' -nc %host:%port 'jump'"#);
+}
+
+#[test]
+fn temporary_browser_profile_in_the_private_folder() {
+    use crate::launch::web_profile_dir;
+    use crate::model::{BrowserFamily, WebProfile};
+    let private = crate::secretfile::private_temp_dir().unwrap();
+    let tmp = web_profile_dir(BrowserFamily::Chromium, WebProfile::Temporary, 5).unwrap();
+    assert_eq!(tmp, private.join("web-chromium-5"));
+}
+
+#[cfg(windows)]
+#[test]
+fn rdp_login_leaves_an_existing_entry_and_goes_at_exit() {
+    use crate::wincred::{clean_up_later, exists, forget_pending, store, user_of};
+    let target = format!("AdminCraftTest/keep-{}", std::process::id());
+    assert_eq!(store(&target, "first", "a"), Ok(false));
+    assert_eq!(store(&target, "second", "b"), Ok(true), "there before: left alone");
+    assert_eq!(user_of(&target).as_deref(), Some("first"));
+    // AdminCraft closing removes what is still waiting for its removal
+    clean_up_later(Some(target.clone()), Vec::new());
+    forget_pending();
+    assert!(!exists(&target));
+}
+
+#[test]
+fn scp_through_putty_takes_the_key_and_refuses_jump_hosts() {
+    use crate::transfer::{plink_args, pscp_args};
+    let mut ep = review_endpoint(crate::transfer::Kind::Scp, review_hop("db", "root", ""));
+    ep.key_file = " C:\\keys\\id.ppk ".into();
+    let a = plink_args(&ep, Vec::new(), "pwd").unwrap();
+    assert!(a.windows(2).any(|w| w == ["-i", "C:\\keys\\id.ppk"]), "{a:?}");
+    let a = pscp_args(&ep, Vec::new(), false, "a", "b").unwrap();
+    assert!(a.windows(2).any(|w| w == ["-i", "C:\\keys\\id.ppk"]), "{a:?}");
+    ep.jumps.push(review_hop("bastion", "j", ""));
+    assert!(plink_args(&ep, Vec::new(), "pwd").is_err());
+    assert!(pscp_args(&ep, Vec::new(), false, "a", "b").is_err());
+}
+
+#[test]
+fn transfer_tab_says_when_putty_is_old() {
+    use crate::transfer::old_putty_note;
+    let dir = std::env::temp_dir().join(format!("admincraft-oldputty-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (old, new) = (dir.join("pscp-old.exe"), dir.join("pscp-new.exe"));
+    std::fs::write(&old, b"MZ..-pw..").unwrap();
+    std::fs::write(&new, b"MZ..-pw..-pwfile..").unwrap();
+    let mut ep = review_endpoint(crate::transfer::Kind::Sftp, review_hop("db", "root", "pw"));
+    ep.progs.psftp = Some(old.clone());
+    assert!(old_putty_note(&ep).is_some());
+    ep.progs.psftp = Some(new.clone());
+    assert!(old_putty_note(&ep).is_none());
+    ep.kind = crate::transfer::Kind::Scp;
+    ep.progs.pscp = Some(new);
+    ep.progs.plink = Some(old);
+    assert!(old_putty_note(&ep).is_some(), "the listing goes through the old plink");
+    ep.target.password.clear();
+    assert!(old_putty_note(&ep).is_none(), "no password, nothing on the command line");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn closed_transfer_tab_drops_queued_jobs() {
+    use crate::transfer::{Job, next_job};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cancel = AtomicBool::new(false);
+    tx.send(Job::Mkdir("/a".into())).unwrap();
+    tx.send(Job::Mkdir("/b".into())).unwrap();
+    assert!(next_job(&rx, &cancel).is_some());
+    cancel.store(true, Ordering::SeqCst);
+    assert!(next_job(&rx, &cancel).is_none(), "the tab is gone: the rest is not run");
+}
+
+#[test]
+fn ftp_server_that_says_nothing_times_out() {
+    use std::time::{Duration, Instant};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // accepts, then never answers
+    let keep = std::thread::spawn(move || {
+        if let Ok((socket, _)) = listener.accept() {
+            std::thread::sleep(Duration::from_secs(1));
+            drop(socket);
+        }
+    });
+    let mut target = review_hop("127.0.0.1", "u", "p");
+    target.port = port;
+    let ep = review_endpoint(crate::transfer::Kind::Ftp, target);
+    let start = Instant::now();
+    let r = crate::transfer::ftp_connect_with(&ep, Duration::from_secs(2), Duration::from_millis(300));
+    assert!(r.is_err());
+    assert!(start.elapsed() < Duration::from_secs(2), "the read timeout ends the wait");
+    let _ = keep.join();
+}
+
+#[test]
+fn listings_keep_leading_spaces_and_skip_echoed_commands() {
+    use crate::transfer::{parse_ls_line, parse_scp_listing, scp_list_command};
+    let f = parse_ls_line("-rw-r--r--    1 demo     users      379 Sep 19  2023   two spaces").unwrap();
+    assert_eq!(f.name, "  two spaces");
+    let f = parse_ls_line("-rw-r--r--+ 1 demo users 5 Jan  1 12:00 acl").unwrap();
+    assert_eq!(f.name, "acl");
+    assert!(parse_ls_line(r#"sftp> rm "/srv/a b c d e f g h i j""#).is_none());
+    assert!(parse_ls_line(r#"psftp> rm "/srv/a b c d e f g h i j""#).is_none());
+    assert!(parse_ls_line("total 12").is_none());
+    // SCP listing: works without sh-only syntax; the line after the mark is the folder
+    let cmd = scp_list_command("/srv/it's here");
+    assert_eq!(cmd, r#"cd '/srv/it'\''s here' && echo AdminCraft-folder: && pwd && env LC_ALL=C ls -la"#);
+    assert!(!cmd.contains("$(") && !cmd.contains("cd --"));
+    assert!(scp_list_command("-x").starts_with("cd './-x' && "));
+    assert_eq!(scp_list_command(""), "echo AdminCraft-folder: && pwd && env LC_ALL=C ls -la");
+    let (dir, items) = parse_scp_listing("AdminCraft-folder:\n/srv/data\ntotal 8\n-rw-r--r-- 1 u g 5 Jan  1 12:00 a.txt\n");
+    assert_eq!(dir.as_deref(), Some("/srv/data"));
+    assert_eq!(items.len(), 1);
+}
+
+#[test]
+fn ipv6_addresses_in_brackets_where_a_colon_follows() {
+    use crate::transfer::{bracket_host, ftp_addrs, jump_arg, remote_spec};
+    assert_eq!(bracket_host("::1"), "[::1]");
+    assert_eq!(bracket_host("[::1]"), "[::1]");
+    assert_eq!(bracket_host("db.lan"), "db.lan");
+    assert_eq!(remote_spec(&review_hop("fe80::1", "root", ""), "/tmp"), "root@[fe80::1]:/tmp");
+    let mut ep = review_endpoint(crate::transfer::Kind::Sftp, review_hop("db", "root", ""));
+    let mut j = review_hop("2001:db8::5", "jump", "");
+    j.port = 2222;
+    ep.jumps = vec![j, review_hop("::2", "", "")];
+    assert_eq!(jump_arg(&ep).as_deref(), Some("jump@[2001:db8::5]:2222,[::2]"));
+    for h in ["::1", "[::1]"] {
+        let a = ftp_addrs(h, 21).unwrap();
+        assert!(a.iter().all(|a| a.is_ipv6() && a.port() == 21), "{h}");
+    }
+}
+
+#[test]
+fn capture_buffer_size_is_checked() {
+    use crate::embed::pixel_buffer_len;
+    assert_eq!(pixel_buffer_len(10, 2), Some(80));
+    assert_eq!(pixel_buffer_len(16_384, 16_384), Some(16_384 * 16_384 * 4));
+    assert_eq!(pixel_buffer_len(0, 5), None);
+    assert_eq!(pixel_buffer_len(-3, 5), None);
+    assert_eq!(pixel_buffer_len(16_385, 1), None);
+    assert_eq!(pixel_buffer_len(i32::MAX, i32::MAX), None, "would overflow i32");
+}
+
+#[test]
+fn tools_folder_is_worked_out_once() {
+    let a = crate::programs::tools_dir();
+    assert_eq!(a, crate::programs::tools_dir());
+}

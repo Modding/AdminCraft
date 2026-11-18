@@ -150,7 +150,9 @@ pub fn web_profile_dir(family: BrowserFamily, choice: WebProfile, id: u64) -> Op
     let kind = if family == BrowserFamily::Firefox { "firefox" } else { "chromium" };
     match choice {
         WebProfile::Kept => Some(crate::model::data_dir(false).join("browser").join(format!("{kind}-{id}"))),
-        WebProfile::Temporary => Some(std::env::temp_dir().join("admincraft").join(format!("web-{kind}-{id}"))),
+        // a folder only this user can open: a shared temporary folder lets others read or swap
+        // the profile (None when there is no such folder; the caller refuses to go on then)
+        WebProfile::Temporary => crate::secretfile::private_temp_dir().ok().map(|d| d.join(format!("web-{kind}-{id}"))),
         WebProfile::Normal => None,
     }
 }
@@ -193,17 +195,38 @@ pub fn open_url(url: &str) -> Result<(), String> {
     } else {
         Command::new("xdg-open").arg(url).spawn()
     };
-    r.map(|_| ()).map_err(|e| tf("Could not open {0}: {1}", &[&url, &e]))
+    r.map(programs::reap_in_background).map_err(|e| tf("Could not open {0}: {1}", &[&url, &e]))
 }
 
 pub fn open_folder(path: &std::path::Path) {
-    let _ = if cfg!(windows) {
+    let r = if cfg!(windows) {
         Command::new("explorer").arg(path).spawn()
     } else if cfg!(target_os = "macos") {
         Command::new("open").arg(path).spawn()
     } else {
         Command::new("xdg-open").arg(path).spawn()
     };
+    if let Ok(child) = r {
+        programs::reap_in_background(child);
+    }
+}
+
+/// Host and user go onto other programs' command lines and into `.rdp` files: a host or user
+/// starting with "-" would be read as an option there (`-oProxyCommand=…`), and a line break
+/// would add lines to the file. Refused before anything is started.
+pub fn check_login(host: &str, user: &str) -> Result<(), String> {
+    let host = host.trim();
+    if host.starts_with('-') || host.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(tf("Host name not allowed: it may not start with \"-\" or contain spaces or control characters ({0}).", &[&host.escape_debug()]));
+    }
+    check_user(user)
+}
+
+fn check_user(user: &str) -> Result<(), String> {
+    if user.starts_with('-') || user.chars().any(char::is_control) {
+        return Err(tf("User name not allowed: it may not start with \"-\" or contain control characters ({0}).", &[&user.escape_debug()]));
+    }
+    Ok(())
 }
 
 fn user_host(user: &str, host: &str) -> String {
@@ -242,6 +265,13 @@ fn pw_rules(e: &Entry, c: &Creds, jumps: &[JumpHop]) -> Vec<PwRule> {
 pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_px: (u32, u32)) -> Result<Launch, String> {
     if e.protocol.needs_host() && e.host.trim().is_empty() {
         return Err(tr("No host entered.").into());
+    }
+    if e.protocol.needs_host() {
+        check_login(&e.host, &c.user)?;
+        check_user(&c.domain)?;
+    }
+    for j in jumps {
+        check_login(&j.entry.host, &j.creds.user)?;
     }
     let single_pw = if c.password.is_empty() {
         Vec::new()
@@ -348,6 +378,9 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
                 // an own profile per connection makes a new browser process whose window can be
                 // taken into the tab; the normal profile opens in the browser already running
                 let profile = web_profile_dir(family, settings.web_profile, e.id);
+                if profile.is_none() && settings.web_profile == WebProfile::Temporary {
+                    return Err(tr("No private folder for the temporary browser profile.").into());
+                }
                 if let Some(dir) = &profile {
                     std::fs::create_dir_all(dir).map_err(|err| tf("Browser profile folder could not be made: {0}", &[&err]))?;
                 }
@@ -655,25 +688,19 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
         1 => {
             let plink = programs::find("plink", settings).ok_or(tr("A jump host with PuTTY needs plink.exe (put it into the programs folder)."))?;
             let j = &jumps[0];
-            let mut pc = format!("\"{0}\" -batch -ssh -P {1}", plink.display(), effective_port(&j.entry));
-            if !j.creds.user.is_empty() {
-                pc.push_str(&format!(" -l {}", j.creds.user));
-            }
             // the jump host's password: plink reads its file again on every reconnect, so the
             // file stays until PuTTY ends
             let (_, pw_file) = crate::secretfile::putty_password(&plink, &j.creds.password)?;
-            match pw_file {
-                Some(file) => {
-                    pc.push_str(&format!(" -pwfile \"{}\"", file.path().display()));
-                    secrets.push(file);
-                }
+            let password = match &pw_file {
+                Some(file) => ProxyPassword::File(file.path()),
                 None if !j.creds.password.is_empty() => {
                     old_putty = true;
-                    pc.push_str(&format!(" -pw \"{}\"", j.creds.password.replace('"', "\\\"")));
+                    ProxyPassword::Plain(&j.creds.password)
                 }
-                None => {}
-            }
-            pc.push_str(&format!(" -nc %host:%port {0}", j.entry.host.trim()));
+                None => ProxyPassword::None,
+            };
+            let pc = putty_proxy_command(&plink, effective_port(&j.entry), &j.creds.user, password, j.entry.host.trim(), cfg!(windows));
+            secrets.extend(pw_file);
             args.push("-proxycmd".into());
             args.push(pc);
         }
@@ -687,11 +714,71 @@ fn launch_putty(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop]) ->
     Ok(Launch::Process { child, label: tf("PuTTY: {0}", &[&(user_host(&c.user, &e.host))]) + note(old_putty), embed })
 }
 
+/// How plink in PuTTY's proxy command gets the jump host's password.
+pub enum ProxyPassword<'a> {
+    None,
+    File(&'a Path),
+    /// PuTTY older than 0.77 (the tab says so).
+    Plain(&'a str),
+}
+
+/// One value inside PuTTY's `-proxycmd`: quoted for whatever runs the command (Windows'
+/// argument rules, or `/bin/sh` elsewhere), then with PuTTY's own escapes doubled – PuTTY reads
+/// `\t`, `\n`, `\x…` and `%host` in that text, so `C:\Users\tom\…` or a `%` in a password would
+/// change otherwise.
+pub fn proxy_word(s: &str, windows: bool) -> String {
+    let quoted = if windows { windows_quote(s) } else { format!("'{}'", s.replace('\'', "'\\''")) };
+    quoted.replace('\\', "\\\\").replace('%', "%%")
+}
+
+/// Quotes one argument by the rules Windows programs split their command line with:
+/// backslashes count only in front of a quote.
+fn windows_quote(s: &str) -> String {
+    let mut out = String::from("\"");
+    let mut backslashes = 0usize;
+    for ch in s.chars() {
+        if ch == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        if ch == '"' {
+            out.push_str(&"\\".repeat(backslashes * 2 + 1));
+        } else {
+            out.push_str(&"\\".repeat(backslashes));
+        }
+        out.push(ch);
+        backslashes = 0;
+    }
+    out.push_str(&"\\".repeat(backslashes * 2));
+    out.push('"');
+    out
+}
+
+/// The proxy command PuTTY runs to reach the target through one jump host with plink
+/// (`%host:%port` stay PuTTY's own placeholders for the target).
+pub fn putty_proxy_command(plink: &Path, port: u16, user: &str, password: ProxyPassword, jump_host: &str, windows: bool) -> String {
+    let w = |s: &str| proxy_word(s, windows);
+    let mut pc = format!("{0} -batch -ssh -P {1}", w(&plink.display().to_string()), port);
+    if !user.is_empty() {
+        pc.push_str(&format!(" -l {}", w(user)));
+    }
+    match password {
+        ProxyPassword::File(f) => pc.push_str(&format!(" -pwfile {}", w(&f.display().to_string()))),
+        ProxyPassword::Plain(p) => pc.push_str(&format!(" -pw {}", w(p))),
+        ProxyPassword::None => {}
+    }
+    pc.push_str(&format!(" -nc %host:%port {}", w(jump_host)));
+    pc
+}
+
 // ------------------------------------------------------------------ RDP
 
 fn rdp_file(e: &Entry, c: &Creds, size: Option<(u32, u32)>) -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("admincraft");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // host and user come from the connection: a line break would add settings to the file
+    check_login(&e.host, &c.user)?;
+    check_user(&c.domain)?;
+    // a folder only this user can open (the file names host and user)
+    let dir = crate::secretfile::private_temp_dir()?;
     let safe: String = e.name.chars().map(|ch| if ch.is_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' }).collect();
     let path = dir.join(format!("{}.rdp", if safe.is_empty() { "connection".into() } else { safe }));
     let o = &e.rdp;
@@ -732,12 +819,15 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
             let target = format!("TERMSRV/{host}");
             // through the Windows API, so the password is on no command line; removed again
             // once Remote Desktop has read it (unless the entry was there before)
-            let stored = crate::wincred::store(&target, &c.full_user(), &c.password);
-            let ok = stored.is_ok();
-            if stored == Ok(false) {
-                forget = Some(target);
-            }
-            note = if ok { tr(" – login passed").into() } else { tr(" – login could not be passed").into() };
+            // a login the person stored for this host is left as it is, and used
+            note = match crate::wincred::store(&target, &c.full_user(), &c.password) {
+                Ok(false) => {
+                    forget = Some(target);
+                    tr(" – login passed").into()
+                }
+                Ok(true) => tr(" – login not passed: the Credential Manager already has one for this host, that one is used").into(),
+                Err(_) => tr(" – login could not be passed").into(),
+            };
         }
         let mut args = vec![file.display().to_string()];
         if e.rdp.admin_session {
@@ -750,7 +840,8 @@ fn launch_rdp(e: &Entry, c: &Creds, settings: &Settings, tab_px: (u32, u32)) -> 
         Ok(Launch::Process { child, label: tf("Remote desktop: {0}{1}", &[&host, &note]), embed: classes })
     } else if cfg!(target_os = "macos") && programs::find("rdp", settings).is_none() {
         let file = rdp_file(e, c, None)?;
-        Command::new("open").arg(&file).spawn().map_err(|err| tf("Could not open .rdp file: {0}", &[&err]))?;
+        let child = Command::new("open").arg(&file).spawn().map_err(|err| tf("Could not open .rdp file: {0}", &[&err]))?;
+        programs::reap_in_background(child);
         Ok(Launch::Done(tf("RDP file opened (Windows App / Microsoft Remote Desktop): {0}", &[&host])))
     } else {
         if let Some(prog) = programs::find("rdp", settings) {
@@ -841,7 +932,8 @@ fn launch_vnc(e: &Entry, c: &Creds, settings: &Settings) -> Result<Launch, Strin
     }
     if cfg!(target_os = "macos") {
         let url = if c.user.is_empty() { format!("vnc://{host}:{port}") } else { format!("vnc://{}@{host}:{port}", c.user) };
-        Command::new("open").arg(&url).spawn().map_err(|err| err.to_string())?;
+        let child = Command::new("open").arg(&url).spawn().map_err(|err| err.to_string())?;
+        programs::reap_in_background(child);
         return Ok(Launch::Done(tf("Screen Sharing opened: {0}", &[&host])));
     }
     if !cfg!(windows)
