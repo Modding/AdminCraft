@@ -19,16 +19,22 @@ const SHOT_FRAMES: u32 = 6;
 const TYPE_LIMIT: usize = 4000;
 
 fn save_png(file: &std::path::Path, w: usize, h: usize, rgba: &[u8]) -> Result<Value, String> {
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    // the encoder panics on a buffer that doesn't fit the size
+    // the encoder panics on a buffer that doesn't fit the size; an empty picture is refused too
     if !rgba_fits(w, h, rgba.len()) {
         return Err("the picture is empty or damaged".into());
     }
-    let (w32, h32) = (u32::try_from(w).map_err(|e| e.to_string())?, u32::try_from(h).map_err(|e| e.to_string())?);
-    image::save_buffer(file, rgba, w32, h32, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())?;
+    crate::control::save_png_new(file, w, h, rgba)?;
     Ok(json!({ "file": file.display().to_string(), "width": w, "height": h }))
+}
+
+/// A ping, traceroute or DNS target from an agent: no option of the system tool (`-…`) and no
+/// spaces or control characters.
+fn agent_target(target: &str) -> Result<(), String> {
+    if target.is_empty() || crate::tools::valid_target(target) {
+        Ok(())
+    } else {
+        Err("the target must be a host name or address (no leading '-', spaces or control characters)".into())
+    }
 }
 
 impl AdminApp {
@@ -52,7 +58,8 @@ impl AdminApp {
                 return;
             }
             Some(p) => PathBuf::from(p),
-            None => std::env::temp_dir().join("admincraft").join(format!("tab-{}-{i}.png", std::process::id())),
+            // the data folder (this user's), not the temporary folder all users share
+            None => crate::control::new_shot_file(&crate::model::data_dir(false).join("screenshots"), i),
         };
         self.active = i;
         self.agent_shot = Some(AgentShot { reply: r.reply, tab: i, file, frames: 0 });
@@ -138,6 +145,10 @@ impl AdminApp {
             }
         }
         for r in reqs {
+            // the client was already told that the window did not answer: don't do it late
+            if r.expired() {
+                continue;
+            }
             if r.cmd == "screenshot" {
                 // answered some frames later, when the tab is on the screen
                 self.start_agent_shot(r, ctx);
@@ -215,7 +226,10 @@ impl AdminApp {
     }
 
     fn tab_index(&self, args: &Value) -> Result<usize, String> {
-        let i = args["index"].as_u64().map(|i| i as usize).unwrap_or(self.active);
+        let i = match args["index"].as_u64() {
+            Some(i) => usize::try_from(i).map_err(|_| format!("no tab {i} (there are {})", self.tabs.len()))?,
+            None => self.active,
+        };
         if i < self.tabs.len() { Ok(i) } else { Err(format!("no tab {i} (there are {})", self.tabs.len())) }
     }
 
@@ -312,7 +326,12 @@ impl AdminApp {
             }
             "open_tool" => {
                 let target = args["target"].as_str().unwrap_or("").trim().to_string();
-                match args["tool"].as_str().unwrap_or("") {
+                let tool = args["tool"].as_str().unwrap_or("");
+                // these start a system program with the target as its argument
+                if matches!(tool, "ping" | "traceroute" | "dns") {
+                    agent_target(&target)?;
+                }
+                match tool {
                     "ping" => self.open_ping(target, PingMode::Ping, ctx),
                     "traceroute" => self.open_ping(target, PingMode::Trace, ctx),
                     // a person presses "Scan" / "Query" in the tab; for an agent the tool starts
@@ -351,10 +370,14 @@ impl AdminApp {
                         self.open_cert(target);
                         if let Some(Tab { kind: TabKind::Cert(c), .. }) = self.tabs.last_mut() {
                             let (h, slot, c2) = (c.host.clone(), c.result.clone(), ctx.clone());
-                            std::thread::spawn(move || {
-                                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(crate::admintools::check_cert(&h, 443));
+                            let slot2 = slot.clone();
+                            let started = std::thread::Builder::new().name("cert-check".into()).spawn(move || {
+                                *slot2.lock().unwrap_or_else(|e| e.into_inner()) = Some(crate::admintools::check_cert(&h, 443));
                                 c2.request_repaint();
                             });
+                            if let Err(e) = started {
+                                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(Err(tf("No thread could be started: {0}", &[&e])));
+                            }
                         }
                     }
                     "help" => self.open_help(None),

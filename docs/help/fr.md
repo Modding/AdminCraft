@@ -341,8 +341,9 @@ admincraft cli window type 2 uptime     taper dans un terminal ou un PuTTY inté
 
 Le serveur MCP offre la même chose sous forme d'outils `window_…`. Taper dans les terminaux n'est possible
 qu'après l'avoir autorisé dans les paramètres, et chaque saisie est affichée dans la fenêtre. Seuls les
-programmes de cet ordinateur pouvant lire le dossier de données peuvent se connecter ; les mots de passe ne
-sont jamais transmis.
+programmes de cet ordinateur qui tournent sous votre propre compte utilisateur peuvent se connecter ; les
+mots de passe ne sont jamais transmis. Une capture d'écran sans nom de fichier va dans le dossier
+`screenshots` du dossier de données ; un fichier existant n'est jamais écrasé.
 
 ## Questions et problèmes
 

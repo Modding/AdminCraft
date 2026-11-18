@@ -5,8 +5,8 @@
 use crate::model::{Entry, Store};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::net::ToSocketAddrs;
+use std::time::{Duration, Instant};
 
 /// Tool name, description, JSON schema of its arguments.
 pub(crate) fn tool_list() -> Vec<(&'static str, &'static str, Value)> {
@@ -120,26 +120,76 @@ fn s<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty())
 }
 
+/// Longest time one MCP port scan may take; the MCP server answers nothing else meanwhile.
+const PORT_SCAN_LIMIT: Duration = Duration::from_secs(120);
+/// Threads checking ports at once.
+const PORT_SCAN_WORKERS: usize = 128;
+
 fn port_scan(host: &str, ports: &[u16], timeout: Duration) -> Result<Value, String> {
-    let addr = (host, 0).to_socket_addrs().map_err(|e| e.to_string())?.next().ok_or("no address")?.ip();
-    let open: Vec<u16> = std::thread::scope(|sc| {
-        let chunks: Vec<Vec<u16>> = ports.chunks(ports.len().div_ceil(64).max(1)).map(|c| c.to_vec()).collect();
-        let hs: Vec<_> = chunks
-            .into_iter()
-            .map(|c| {
-                sc.spawn(move || {
-                    c.into_iter().filter(|&p| TcpStream::connect_timeout(&SocketAddr::new(addr, p), timeout).is_ok()).collect::<Vec<u16>>()
-                })
-            })
-            .collect();
-        let mut v: Vec<u16> = hs.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect();
-        v.sort_unstable();
-        v
-    });
-    Ok(json!({
-        "host": host, "address": addr.to_string(), "checked": ports.len(),
+    let addrs = crate::tools::prefer_ipv4((host, 0).to_socket_addrs().map_err(|e| e.to_string())?.collect());
+    let addr = addrs.first().ok_or("no address")?.ip();
+    let mut v = port_scan_addr(addr, ports, timeout, PORT_SCAN_LIMIT);
+    v["host"] = json!(host);
+    Ok(v)
+}
+
+/// Checks the ports of one address: the threads take the next port from a shared index and stop
+/// taking new ones after `limit` (a scan of all ports can't block the MCP server for an hour).
+pub(crate) fn port_scan_addr(addr: std::net::IpAddr, ports: &[u16], timeout: Duration, limit: Duration) -> Value {
+    let deadline = Instant::now() + limit;
+    let open = std::sync::Mutex::new(Vec::new());
+    let found = |p: u16, ok: bool| {
+        if ok {
+            open.lock().unwrap_or_else(|e| e.into_inner()).push(p);
+        }
+    };
+    let checked = crate::tools::scan_ports(addr, ports, timeout, PORT_SCAN_WORKERS, &|| Instant::now() >= deadline, &found);
+    let mut open = open.into_inner().unwrap_or_else(|e| e.into_inner());
+    open.sort_unstable();
+    json!({
+        "address": addr.to_string(), "checked": checked, "complete": checked >= ports.len(),
         "open": open.iter().map(|p| json!({"port": p, "service": crate::tools::well_known(*p)})).collect::<Vec<_>>()
-    }))
+    })
+}
+
+/// A port given by an agent: 1 to 65535, never cut down to another port.
+fn port_arg(args: &Value, key: &str, default: u16) -> Result<u16, String> {
+    match args.get(key).filter(|v| !v.is_null()) {
+        None => Ok(default),
+        Some(v) => {
+            v.as_u64().and_then(|p| u16::try_from(p).ok()).filter(|p| *p != 0).ok_or_else(|| format!("{key} must be a number from 1 to 65535"))
+        }
+    }
+}
+
+/// MCP protocol versions this server speaks, newest first.
+pub(crate) const MCP_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
+
+/// The version to answer `initialize` with: the client's when we speak it, else our newest
+/// (the client then decides whether it can work with that).
+pub(crate) fn mcp_version(requested: Option<&str>) -> &'static str {
+    let newest = MCP_VERSIONS.first().copied().unwrap_or("2025-06-18");
+    requested.and_then(|r| MCP_VERSIONS.iter().copied().find(|v| *v == r)).unwrap_or(newest)
+}
+
+/// Longest screenshot handed back to an agent.
+pub(crate) const PNG_LIMIT: u64 = 20 << 20;
+
+/// Reads the picture the window named, only when it really is a PNG file of sensible size (the
+/// answer names a file; this must not become a way to read any other file).
+pub(crate) fn read_png(path: &str, limit: u64) -> Option<Vec<u8>> {
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if !path.to_ascii_lowercase().ends_with(".png") {
+        return None;
+    }
+    let f = std::fs::File::open(path).ok()?;
+    let meta = f.metadata().ok()?;
+    if !meta.is_file() || meta.len() > limit {
+        return None;
+    }
+    let mut data = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(f, limit + 1), &mut data).ok()?;
+    (data.len() as u64 <= limit && data.starts_with(SIGNATURE)).then_some(data)
 }
 
 /// Runs one tool. Errors become `{"error": …}` for the caller.
@@ -227,7 +277,7 @@ pub fn call(name: &str, args: &Value) -> Result<Value, String> {
         }
         "check_certificate" => {
             let host = s(args, "host").ok_or("host missing")?;
-            let port = args.get("port").and_then(|v| v.as_u64()).unwrap_or(443) as u16;
+            let port = port_arg(args, "port", 443)?;
             let c = crate::admintools::check_cert(host, port)?;
             Ok(json!({
                 "subject": c.subject, "issuer": c.issuer, "names": c.names, "valid_from": c.not_before, "valid_until": c.not_after,
@@ -346,7 +396,7 @@ pub fn handle(line: &str, out: &mut impl Write) {
     }
     match method {
         "initialize" => {
-            let proto = req.pointer("/params/protocolVersion").and_then(|v| v.as_str()).unwrap_or("2025-06-18").to_string();
+            let proto = mcp_version(req.pointer("/params/protocolVersion").and_then(|v| v.as_str()));
             reply(
                 out,
                 &id,
@@ -369,7 +419,7 @@ pub fn handle(line: &str, out: &mut impl Write) {
             let result = call(name, &args);
             // a screenshot goes back as a picture, not as the name of a file
             let picture = match (&result, name) {
-                (Ok(v), "window_screenshot") => v["file"].as_str().and_then(|f| std::fs::read(f).ok()),
+                (Ok(v), "window_screenshot") => v["file"].as_str().and_then(|f| read_png(f, PNG_LIMIT)),
                 _ => None,
             };
             let (text, is_error) = match result {

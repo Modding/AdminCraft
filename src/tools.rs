@@ -5,7 +5,7 @@
 use crate::i18n::{t as tr, tf};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs, UdpSocket};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -33,10 +33,46 @@ fn decode(bytes: &[u8]) -> String {
     }
 }
 
+/// Lines a command's output keeps; older ones are dropped (a continuous ping runs for days).
+pub const MAX_LINES: usize = 5000;
+/// Dropped together, so the list isn't moved for every new line.
+const DROP_CHUNK: usize = 500;
+/// Longest single line kept from a command's output.
+const MAX_LINE_BYTES: u64 = 64 * 1024;
+
+/// Adds a line and keeps at most about `MAX_LINES` (between `MAX_LINES` and
+/// `MAX_LINES + DROP_CHUNK`): the oldest are dropped in chunks.
+pub fn push_line(lines: &mut Vec<String>, line: String) {
+    lines.push(line);
+    if lines.len() > MAX_LINES + DROP_CHUNK {
+        let extra = lines.len() - MAX_LINES;
+        lines.drain(..extra);
+    }
+}
+
+/// Reads output line by line into `lines` until the pipe ends.
+fn pump(pipe: impl Read, lines: &Mutex<Vec<String>>, ctx: &eframe::egui::Context) {
+    let mut reader = BufReader::new(pipe);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match (&mut reader).take(MAX_LINE_BYTES).read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                let line = decode(&buf).trim_end().to_string();
+                push_line(&mut lines.lock().unwrap_or_else(|e| e.into_inner()), line);
+                ctx.request_repaint();
+            }
+        }
+    }
+}
+
 /// Runs a system command and collects its output line by line.
 pub struct CmdRunner {
     pub lines: Arc<Mutex<Vec<String>>>,
+    /// The current run's flag; every run gets its own (an old run ending doesn't switch off a new one).
     pub running: Arc<AtomicBool>,
+    /// The current run's program; its reader thread takes it out and waits for it (no zombies).
     child: Arc<Mutex<Option<Child>>>,
 }
 
@@ -46,11 +82,21 @@ impl Default for CmdRunner {
     }
 }
 
+impl Drop for CmdRunner {
+    /// A closed tab (or AdminCraft closing) ends a continuous ping too.
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 impl CmdRunner {
     pub fn start(&mut self, program: &str, args: &[String], ctx: eframe::egui::Context) {
         self.stop();
         let lines = Arc::new(Mutex::new(vec![format!("> {} {}", program, args.join(" "))]));
         self.lines = lines.clone();
+        // a fresh slot and flag for this run: the previous run's thread keeps its own
+        self.child = Arc::new(Mutex::new(None));
+        self.running = Arc::new(AtomicBool::new(false));
         let mut cmd = Command::new(program);
         cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
         #[cfg(windows)]
@@ -66,42 +112,34 @@ impl CmdRunner {
                 self.running.store(true, Ordering::SeqCst);
                 let running = self.running.clone();
                 let child_slot = self.child.clone();
-                let l2 = lines.clone();
-                let c2 = ctx.clone();
-                if let Some(mut err) = err {
-                    std::thread::spawn(move || {
-                        let mut buf = Vec::new();
-                        let _ = err.read_to_end(&mut buf);
-                        let text = decode(&buf);
-                        if !text.trim().is_empty() {
-                            l2.lock().unwrap_or_else(|e| e.into_inner()).extend(text.lines().map(|s| s.to_string()));
-                            c2.request_repaint();
-                        }
-                    });
+                if let Some(err) = err {
+                    let (l2, c2) = (lines.clone(), ctx.clone());
+                    // without this thread the error output is closed; the program gets an error writing there
+                    let _ = std::thread::Builder::new().name("cmd-stderr".into()).spawn(move || pump(err, &l2, &c2));
                 }
-                std::thread::spawn(move || {
+                let (l3, c3, slot3) = (lines.clone(), ctx.clone(), child_slot.clone());
+                let started = std::thread::Builder::new().name("cmd-stdout".into()).spawn(move || {
                     if let Some(out) = out {
-                        let mut reader = BufReader::new(out);
-                        let mut buf = Vec::new();
-                        loop {
-                            buf.clear();
-                            match reader.read_until(b'\n', &mut buf) {
-                                Ok(0) | Err(_) => break,
-                                Ok(_) => {
-                                    let line = decode(&buf).trim_end().to_string();
-                                    lines.lock().unwrap_or_else(|e| e.into_inner()).push(line);
-                                    ctx.request_repaint();
-                                }
-                            }
-                        }
+                        pump(out, &l3, &c3);
                     }
-                    if let Some(mut c) = child_slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    // reaps the program, also after `stop` killed it
+                    let child = slot3.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some(mut c) = child {
                         let _ = c.wait();
                     }
-                    lines.lock().unwrap_or_else(|e| e.into_inner()).push(tr("— done —").into());
+                    push_line(&mut l3.lock().unwrap_or_else(|e| e.into_inner()), tr("— done —").into());
                     running.store(false, Ordering::SeqCst);
-                    ctx.request_repaint();
+                    c3.request_repaint();
                 });
+                if let Err(e) = started {
+                    let child = child_slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some(mut c) = child {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                    self.running.store(false, Ordering::SeqCst);
+                    lines.lock().unwrap_or_else(|e| e.into_inner()).push(tf("Could not start '{0}': {1}", &[&program, &e]));
+                }
             }
             Err(e) => {
                 lines.lock().unwrap_or_else(|e| e.into_inner()).push(tf("Could not start '{0}': {1}", &[&program, &e]));
@@ -109,8 +147,9 @@ impl CmdRunner {
         }
     }
 
+    /// Ends the running program. It stays in its slot: the reader thread waits for it.
     pub fn stop(&mut self) {
-        if let Some(mut c) = self.child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Some(c) = self.child.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             let _ = c.kill();
         }
     }
@@ -122,6 +161,20 @@ impl CmdRunner {
     pub fn text(&self) -> String {
         self.lines.lock().unwrap_or_else(|e| e.into_inner()).join("\n")
     }
+}
+
+/// Whether a host given by an agent or script may go to ping, traceroute or nslookup as their
+/// argument: a leading `-` would make it an option of the system tool, spaces and control
+/// characters would make it several arguments or a broken line.
+pub fn valid_target(target: &str) -> bool {
+    !target.is_empty() && !target.starts_with('-') && !target.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// IPv4 addresses first, otherwise in the resolver's order (`localhost` often gives `::1` first,
+/// where many services don't listen).
+pub fn prefer_ipv4(mut addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    addrs.sort_by_key(|a| !a.is_ipv4());
+    addrs
 }
 
 pub fn ping_args(host: &str, count: Option<u32>) -> Vec<String> {
@@ -229,6 +282,42 @@ pub fn resolve(host: &str) -> Result<Vec<SocketAddr>, String> {
     (host.trim(), 0).to_socket_addrs().map(|i| i.collect()).map_err(|e| tf("Name can't be resolved: {0}", &[&e]))
 }
 
+/// Checks TCP ports of one address with up to `workers` threads that take the next port from a
+/// shared index, until all are done or `stop` says so. Returns how many ports were checked.
+/// Threads that can't be started are fewer workers (none: the calling thread does the work).
+pub fn scan_ports(
+    addr: IpAddr,
+    ports: &[u16],
+    timeout: Duration,
+    workers: usize,
+    stop: &(dyn Fn() -> bool + Sync),
+    found: &(dyn Fn(u16, bool) + Sync),
+) -> usize {
+    let next = AtomicUsize::new(0);
+    let checked = AtomicUsize::new(0);
+    let work = || {
+        while !stop() {
+            let Some(&p) = ports.get(next.fetch_add(1, Ordering::Relaxed)) else { break };
+            let ok = TcpStream::connect_timeout(&SocketAddr::new(addr, p), timeout).is_ok();
+            checked.fetch_add(1, Ordering::Relaxed);
+            found(p, ok);
+        }
+    };
+    std::thread::scope(|sc| {
+        let mut started = 0;
+        for _ in 0..workers.min(ports.len()) {
+            match std::thread::Builder::new().name("port-check".into()).spawn_scoped(sc, work) {
+                Ok(_) => started += 1,
+                Err(_) => break,
+            }
+        }
+        if started == 0 {
+            work();
+        }
+    });
+    checked.load(Ordering::Relaxed)
+}
+
 #[derive(Default)]
 pub struct ScanState {
     pub open: Vec<u16>,
@@ -251,15 +340,18 @@ impl PortScan {
         let st = state.clone();
         let cc = cancel.clone();
         let host = host.trim().to_string();
-        std::thread::spawn(move || {
-            let addr = match resolve(&host) {
-                Ok(a) if !a.is_empty() => a.iter().find(|a| a.is_ipv4()).copied().unwrap_or(a[0]).ip(),
-                Ok(_) => {
-                    let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
-                    s.error = Some(tr("No address found.").into());
-                    s.finished = true;
-                    return;
-                }
+        let started = std::thread::Builder::new().name("port-scan".into()).spawn(move || {
+            let addr = match resolve(&host).map(prefer_ipv4) {
+                Ok(a) => match a.first() {
+                    Some(a) => a.ip(),
+                    None => {
+                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                        s.error = Some(tr("No address found.").into());
+                        s.finished = true;
+                        ctx.request_repaint();
+                        return;
+                    }
+                },
                 Err(e) => {
                     let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                     s.error = Some(e);
@@ -269,45 +361,26 @@ impl PortScan {
                 }
             };
             st.lock().unwrap_or_else(|e| e.into_inner()).address = addr.to_string();
-            let ports = Arc::new(ports);
-            let next = Arc::new(AtomicUsize::new(0));
-            let workers = 128.min(ports.len()).max(1);
-            let mut handles = Vec::new();
-            for _ in 0..workers {
-                let ports = ports.clone();
-                let next = next.clone();
-                let st = st.clone();
-                let cc = cc.clone();
-                let ctx = ctx.clone();
-                handles.push(std::thread::spawn(move || {
-                    loop {
-                        if cc.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        let i = next.fetch_add(1, Ordering::Relaxed);
-                        if i >= ports.len() {
-                            break;
-                        }
-                        let p = ports[i];
-                        let ok = TcpStream::connect_timeout(&SocketAddr::new(addr, p), Duration::from_millis(timeout_ms)).is_ok();
-                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
-                        s.done += 1;
-                        if ok {
-                            s.open.push(p);
-                            s.open.sort_unstable();
-                        }
-                        if s.done.is_multiple_of(16) || ok {
-                            ctx.request_repaint();
-                        }
-                    }
-                }));
-            }
-            for h in handles {
-                let _ = h.join();
-            }
+            let found = |p: u16, ok: bool| {
+                let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                s.done += 1;
+                if ok {
+                    s.open.push(p);
+                    s.open.sort_unstable();
+                }
+                if s.done.is_multiple_of(16) || ok {
+                    ctx.request_repaint();
+                }
+            };
+            scan_ports(addr, &ports, Duration::from_millis(timeout_ms), 128, &|| cc.load(Ordering::Relaxed), &found);
             st.lock().unwrap_or_else(|e| e.into_inner()).finished = true;
             ctx.request_repaint();
         });
+        if let Err(e) = started {
+            let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+            s.error = Some(tf("No thread could be started: {0}", &[&e]));
+            s.finished = true;
+        }
         PortScan { state, cancel }
     }
 
@@ -353,12 +426,14 @@ pub fn check_reachability(targets: Vec<(u64, String, u16)>, map: StatusMap, ctx:
             m.insert(*id, None);
         }
     }
+    let workers = targets.len().min(24);
     let queue = Arc::new(Mutex::new(targets));
-    for _ in 0..24 {
+    let mut started = 0;
+    for _ in 0..workers {
         let queue = queue.clone();
         let map = map.clone();
         let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        let spawned = std::thread::Builder::new().name("reachability".into()).spawn(move || {
             loop {
                 let Some((id, host, port)) = queue.lock().unwrap_or_else(|e| e.into_inner()).pop() else { break };
                 let ok = match (host.as_str(), port).to_socket_addrs() {
@@ -369,5 +444,16 @@ pub fn check_reachability(targets: Vec<(u64, String, u16)>, map: StatusMap, ctx:
                 ctx.request_repaint();
             }
         });
+        match spawned {
+            Ok(_) => started += 1,
+            Err(_) => break,
+        }
+    }
+    if started == 0 {
+        // nobody checks them: unknown again instead of "checking" forever
+        let mut m = map.lock().unwrap_or_else(|e| e.into_inner());
+        for (id, _, _) in queue.lock().unwrap_or_else(|e| e.into_inner()).drain(..) {
+            m.remove(&id);
+        }
     }
 }

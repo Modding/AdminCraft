@@ -340,7 +340,9 @@ admincraft cli window type 2 uptime     scrive in un terminale o in un PuTTY inc
 
 Il server MCP offre lo stesso come strumenti `window_…`. Scrivere nei terminali è possibile solo dopo averlo
 consentito nelle impostazioni, e ogni digitazione viene mostrata nella finestra. Possono collegarsi solo i
-programmi su questo computer che leggono la cartella dati; le password non vengono mai fornite.
+programmi su questo computer eseguiti con il tuo account utente; le password non vengono mai fornite.
+Uno screenshot senza nome di file va nella cartella `screenshots` della cartella dati; un file esistente
+non viene mai sovrascritto.
 
 ## Domande e problemi
 

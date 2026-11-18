@@ -335,7 +335,8 @@ admincraft cli window type 2 uptime     type into a terminal tab or embedded PuT
 
 The MCP server offers the same as `window_…` tools. Typing into terminals is only possible after you
 allowed it in the settings, and every typing is shown in the window. Only programs on this computer
-that can read the data folder can connect; passwords are never given out.
+that run under your own user account can connect; passwords are never given out. A screenshot without
+a file name goes to the folder `screenshots` in the data folder; an existing file is never overwritten.
 
 ## Questions and problems
 

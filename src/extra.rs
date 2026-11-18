@@ -42,12 +42,35 @@ pub struct NetScanTab {
     pub saved: Option<SavedScan>,
     pub only_changes: bool,
     pub msg: Option<String>,
+    /// This PC's networks, looked up once per tab (not every frame).
+    subnets: Option<Vec<String>>,
+    /// Counts changes of `saved`, so the rows are compared again only then.
+    saved_gen: u64,
+    /// The rows shown, kept until the scan or the baseline changes.
+    rows: Option<(RowsKey, Arc<Vec<ScanRow>>)>,
+}
+
+/// A device in the result: as found now, how it changed, and how it was before.
+pub type ScanRow = (ScanHost, Change, Option<ScanHost>);
+/// What the rows depend on: which scan, how far it is, whether it is finished, which baseline.
+type RowsKey = (usize, usize, bool, u64);
+
+/// The value for `key` from `cache`, built again only when the key changed.
+pub fn cached<K: PartialEq, T>(cache: &mut Option<(K, Arc<T>)>, key: K, build: impl FnOnce() -> T) -> Arc<T> {
+    match cache {
+        Some((k, v)) if *k == key => v.clone(),
+        _ => {
+            let v = Arc::new(build());
+            *cache = Some((key, v.clone()));
+            v
+        }
+    }
 }
 
 impl NetScanTab {
     pub fn new(range: String) -> NetScanTab {
-        let range =
-            if range.trim().is_empty() { netscan::local_subnets().into_iter().next().unwrap_or_else(|| "192.168.1.0/24".into()) } else { range };
+        let subnets = netscan::local_subnets();
+        let range = if range.trim().is_empty() { subnets.first().cloned().unwrap_or_else(|| "192.168.1.0/24".into()) } else { range };
         let saved = netscan::load(&range);
         NetScanTab {
             range,
@@ -59,7 +82,16 @@ impl NetScanTab {
             saved,
             only_changes: false,
             msg: None,
+            subnets: Some(subnets),
+            saved_gen: 0,
+            rows: None,
         }
+    }
+
+    /// Sets the baseline the result is compared with.
+    fn set_saved(&mut self, saved: Option<SavedScan>) {
+        self.saved = saved;
+        self.saved_gen = self.saved_gen.wrapping_add(1);
     }
 }
 
@@ -94,12 +126,13 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut t.range).desired_width(240.0).hint_text("192.168.1.0/24"));
             if r.lost_focus() {
-                t.saved = netscan::load(&t.range);
+                t.set_saved(netscan::load(&t.range));
             }
-            for s in netscan::local_subnets() {
+            let subnets = t.subnets.get_or_insert_with(netscan::local_subnets).clone();
+            for s in subnets {
                 if ui.small_button(&s).on_hover_text(tr("This PC's network")).clicked() {
-                    t.range = s.clone();
-                    t.saved = netscan::load(&t.range);
+                    t.set_saved(netscan::load(&s));
+                    t.range = s;
                 }
             }
             ui.weak(tr("e.g. 10.0.0.0/24, 10.0.0.1-50, 10.0.0.1-10.0.1.254"));
@@ -130,7 +163,7 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
                 (Ok(targets), Ok(ports)) => {
                     t.error = None;
                     t.msg = None;
-                    t.saved = netscan::load(&t.range);
+                    t.set_saved(netscan::load(&t.range));
                     let ports = if t.ports.trim().is_empty() { Vec::new() } else { ports };
                     t.scan = Some(NetScan::start(targets, ports, t.timeout, t.names, ctx.clone()));
                 }
@@ -147,7 +180,7 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
             match netscan::save(&t.range, &hosts) {
                 Ok(s) => {
                     t.msg = Some(tf("Saved: {0} devices.", &[&s.hosts.len()]));
-                    t.saved = Some(s);
+                    t.set_saved(Some(s));
                 }
                 Err(e) => t.error = Some(e),
             }
@@ -188,10 +221,13 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
         tf("{0} / {1} checked · {2} found", &[&st.done, &st.total, &st.hosts.len()])
     };
     ui.add(egui::ProgressBar::new(frac).text(status));
-    let rows: Vec<(ScanHost, Change, Option<ScanHost>)> = match (&t.saved, st.finished) {
+    // compared and copied again only when the scan moved on or the baseline changed, not every frame
+    let finished = st.finished;
+    let key: RowsKey = (Arc::as_ptr(&scan.state) as usize, st.done, finished, t.saved_gen);
+    let rows = cached(&mut t.rows, key, || match (&t.saved, finished) {
         (Some(s), true) => netscan::diff(&st.hosts, &s.hosts),
         _ => st.hosts.iter().map(|h| (h.clone(), Change::Same, None)).collect(),
-    };
+    });
     drop(st);
     let (n_new, n_gone, n_chg) = rows.iter().fold((0, 0, 0), |a, r| match r.1 {
         Change::New => (a.0 + 1, a.1, a.2),
@@ -199,7 +235,7 @@ pub fn netscan_ui(ui: &mut egui::Ui, t: &mut NetScanTab, ctx: &egui::Context) ->
         Change::Changed => (a.0, a.1, a.2 + 1),
         Change::Same => a,
     });
-    if t.saved.is_some() && scan.state.lock().unwrap_or_else(|e| e.into_inner()).finished {
+    if t.saved.is_some() && finished {
         ui.horizontal(|ui| {
             ui.label(RichText::new(tf("{0} new", &[&n_new])).color(OK_GREEN).strong());
             ui.label(RichText::new(tf("{0} gone", &[&n_gone])).color(BAD_RED).strong());
@@ -355,12 +391,17 @@ pub fn cert_ui(ui: &mut egui::Ui, t: &mut CertTab, ctx: &egui::Context) {
     if go && !busy && !t.host.trim().is_empty() {
         let (host, port, slot, flag, c2) = (t.host.trim().to_string(), t.port, t.result.clone(), t.busy.clone(), ctx.clone());
         *flag.lock().unwrap_or_else(|e| e.into_inner()) = true;
-        std::thread::spawn(move || {
+        let (slot2, flag2) = (slot.clone(), flag.clone());
+        let started = std::thread::Builder::new().name("cert-check".into()).spawn(move || {
             let r = admintools::check_cert(&host, port);
-            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
-            *flag.lock().unwrap_or_else(|e| e.into_inner()) = false;
+            *slot2.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+            *flag2.lock().unwrap_or_else(|e| e.into_inner()) = false;
             c2.request_repaint();
         });
+        if let Err(e) = started {
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(Err(tf("No thread could be started: {0}", &[&e])));
+            *flag.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        }
     }
     ui.separator();
     let res = t.result.lock().unwrap_or_else(|e| e.into_inner());
@@ -542,7 +583,70 @@ pub fn start_tunnel(e: &Entry, c: &Creds, jumps: &[JumpHop], t: &Tunnel, setting
         cmd.env(k, v);
     }
     hidden(&mut cmd);
-    cmd.spawn().map_err(|err| err.to_string())
+    let mut child = cmd.spawn().map_err(|err| err.to_string())?;
+    if let Some(err) = child.stderr.take() {
+        // read while ssh runs: a full pipe would stop the tunnel
+        let tail = Arc::new(Mutex::new(ErrTail::default()));
+        let t2 = tail.clone();
+        match std::thread::Builder::new().name("tunnel-stderr".into()).spawn(move || drain_stderr(err, &t2)) {
+            Ok(_) => {
+                tails().lock().unwrap_or_else(|e| e.into_inner()).insert(child.id(), tail);
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(tf("No thread could be started: {0}", &[&e]));
+            }
+        }
+    }
+    Ok(child)
+}
+
+/// Lines of ssh's error output kept per tunnel: the last one says why a tunnel ended.
+pub const TAIL_LINES: usize = 20;
+/// Longest line kept from ssh's error output.
+const TAIL_LINE_BYTES: u64 = 4096;
+/// How long a tunnel that ended waits for its last error lines to be read.
+const TAIL_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The end of a tunnel's error output, filled by its reader thread.
+#[derive(Default)]
+pub struct ErrTail {
+    pub lines: std::collections::VecDeque<String>,
+    /// The pipe ended: everything ssh wrote is here.
+    pub done: bool,
+    /// When `poll_tunnels` first saw the program ended.
+    ended: Option<std::time::Instant>,
+}
+
+/// Tails of the running tunnels, by process id (`TunnelRun` stays as `app.rs` builds it).
+fn tails() -> &'static Mutex<HashMap<u32, Arc<Mutex<ErrTail>>>> {
+    static TAILS: std::sync::OnceLock<Mutex<HashMap<u32, Arc<Mutex<ErrTail>>>>> = std::sync::OnceLock::new();
+    TAILS.get_or_init(Default::default)
+}
+
+/// Reads an error output to its end, keeping its last `TAIL_LINES` non-empty lines.
+pub fn drain_stderr(pipe: impl std::io::Read, tail: &Mutex<ErrTail>) {
+    use std::io::{BufRead, Read};
+    let mut reader = std::io::BufReader::new(pipe);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match (&mut reader).take(TAIL_LINE_BYTES).read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                let line = String::from_utf8_lossy(&buf).trim().to_string();
+                if !line.is_empty() {
+                    let mut t = tail.lock().unwrap_or_else(|e| e.into_inner());
+                    t.lines.push_back(line);
+                    while t.lines.len() > TAIL_LINES {
+                        t.lines.pop_front();
+                    }
+                }
+            }
+        }
+    }
+    tail.lock().unwrap_or_else(|e| e.into_inner()).done = true;
 }
 
 pub enum TunnelAct {
@@ -600,21 +704,35 @@ pub fn tunnels_ui(ui: &mut egui::Ui, entries: &[Entry], runs: &mut HashMap<(u64,
 }
 
 /// Watches running tunnels: a tunnel that ended gets the reason from ssh's error output.
+/// Never reads a pipe on the UI thread: the reader thread of each tunnel keeps the last lines.
 pub fn poll_tunnels(runs: &mut HashMap<(u64, usize), TunnelRun>) {
+    let mut tails = tails().lock().unwrap_or_else(|e| e.into_inner());
     for r in runs.values_mut() {
         if let Some(c) = r.child.as_mut()
             && let Ok(Some(status)) = c.try_wait()
         {
-            let mut text = String::new();
-            if let Some(mut err) = c.stderr.take() {
-                use std::io::Read;
-                let _ = err.read_to_string(&mut text);
-            }
-            let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string();
+            let pid = c.id();
+            let tail = tails.get(&pid).cloned();
+            let line = match &tail {
+                Some(t) => {
+                    let mut t = t.lock().unwrap_or_else(|e| e.into_inner());
+                    // the reader may still be at the last lines: ask again next time (shortly)
+                    let ended = *t.ended.get_or_insert_with(std::time::Instant::now);
+                    if !t.done && ended.elapsed() < TAIL_WAIT {
+                        continue;
+                    }
+                    t.lines.back().cloned().unwrap_or_default()
+                }
+                None => String::new(),
+            };
+            tails.remove(&pid);
             r.error = Some(if line.is_empty() { tf("ended (code {0})", &[&status.code().unwrap_or(-1)]) } else { line });
             r.child = None;
         }
     }
+    // tunnels stopped or removed elsewhere: their tails go once the pipe has ended
+    let live: std::collections::HashSet<u32> = runs.values().filter_map(|r| r.child.as_ref().map(|c| c.id())).collect();
+    tails.retain(|pid, t| live.contains(pid) || !t.lock().unwrap_or_else(|e| e.into_inner()).done);
 }
 
 // ------------------------------------------------------------------ Windows management tools

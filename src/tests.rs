@@ -1626,3 +1626,323 @@ fn snmp_numbers_and_answers_are_checked() {
     assert!(match_answer(asked, asked, &pkt, 8).is_none(), "another request");
     assert!(match_answer(asked, asked, &[0x30, 0x05, 0x02], 7).is_none(), "a damaged packet is skipped");
 }
+
+// ------------------------------------------------------------------ code review 2026-11-18: tools and control channel
+
+/// Waits up to `secs` seconds for `f` to become true.
+fn wait_for(secs: u64, f: impl Fn() -> bool) -> bool {
+    let t0 = std::time::Instant::now();
+    while t0.elapsed() < std::time::Duration::from_secs(secs) {
+        if f() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    f()
+}
+
+#[test]
+fn control_file_is_private_on_windows() {
+    use crate::control::control_file_for;
+    use std::path::Path;
+    let local = if cfg!(windows) { Path::new(r"C:\Users\tom\AppData\Local") } else { Path::new("/home/tom/.local") };
+    let data = if cfg!(windows) { Path::new(r"E:\AdminCraft\AdminCraftData") } else { Path::new("/media/usb/AdminCraftData") };
+    let f = control_file_for(data, Some(local), true).unwrap();
+    assert!(f.starts_with(local.join("AdminCraft")), "in the user's own folder: {}", f.display());
+    assert!(!f.starts_with(data), "not in the (portable, maybe shared) data folder");
+    let name = f.file_name().unwrap().to_string_lossy().to_string();
+    assert!(name.starts_with("control-") && name.ends_with(".json"), "{name}");
+    // client and window find the same file; another data folder gets its own
+    assert_eq!(control_file_for(data, Some(local), true), Some(f.clone()));
+    assert_ne!(control_file_for(&data.join("other"), Some(local), true), Some(f));
+    // without a private folder: no control channel rather than a readable token
+    assert_eq!(control_file_for(data, None, true), None);
+    assert_eq!(control_file_for(data, Some(Path::new("relative")), true), None);
+    // Linux / macOS: in the data folder, written with mode 0600
+    assert_eq!(control_file_for(data, Some(local), false), Some(data.join("control.json")));
+}
+
+#[test]
+fn control_request_line_has_one_deadline() {
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    // a client sending one byte at a time, never a line break
+    let slow = std::thread::spawn(move || {
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        for _ in 0..20 {
+            if c.write_all(b"x").is_err() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    });
+    let (mut s, _) = listener.accept().unwrap();
+    let t0 = std::time::Instant::now();
+    let r = crate::control::read_line(&mut s, t0 + std::time::Duration::from_millis(600), 1 << 20);
+    assert!(r.is_err(), "the line never ended");
+    assert!(t0.elapsed() < std::time::Duration::from_millis(1500), "deadline for the whole line, not per read: {:?}", t0.elapsed());
+    drop(s);
+    let _ = slow.join();
+    // a long line without a break is refused, not collected without end
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let big = std::thread::spawn(move || {
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        let _ = c.write_all(&vec![b'a'; 10_000]);
+        let _ = rx.recv();
+    });
+    let (mut s, _) = listener.accept().unwrap();
+    assert!(crate::control::read_line(&mut s, std::time::Instant::now() + std::time::Duration::from_secs(5), 4096).is_err());
+    let _ = tx.send(());
+    let _ = big.join();
+}
+
+#[test]
+fn control_channel_limits_connections_and_stops() {
+    use std::io::{Read, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel::<crate::control::Request>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let handle = crate::control::accept_loop(listener, "secret".into(), tx, Arc::new(|| {}), stop.clone()).unwrap();
+    // idle clients hold every slot
+    let idle: Vec<std::net::TcpStream> = (0..crate::control::MAX_CONNECTIONS).map(|_| std::net::TcpStream::connect(addr).unwrap()).collect();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let mut extra = std::net::TcpStream::connect(addr).unwrap();
+    extra.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
+    let mut b = [0u8; 16];
+    match extra.read(&mut b) {
+        Ok(n) => assert_eq!(n, 0, "closed right away"),
+        Err(e) => assert!(!matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut), "closed right away, not kept: {e}"),
+    }
+    drop(idle);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // a real request gets through again and carries a deadline
+    let client = std::thread::spawn(move || {
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        writeln!(c, "{}", serde_json::json!({"token": "secret", "cmd": "status", "args": {}})).unwrap();
+        crate::control::read_line(&mut c, std::time::Instant::now() + std::time::Duration::from_secs(10), 1 << 20).unwrap()
+    });
+    let req = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(req.cmd, "status");
+    assert!(!req.expired());
+    assert!(req.deadline <= std::time::Instant::now() + std::time::Duration::from_secs(21));
+    req.reply.send(serde_json::json!({"ok": true})).unwrap();
+    assert!(client.join().unwrap().contains("\"ok\":true"));
+    // a request whose client was already told "no answer" is skipped by the window
+    let (reply, _wait) = std::sync::mpsc::channel();
+    let old = crate::control::Request {
+        cmd: "close_tab".into(),
+        args: serde_json::json!({}),
+        reply,
+        deadline: std::time::Instant::now() - std::time::Duration::from_millis(1),
+    };
+    assert!(old.expired());
+    // switching the channel off ends the listener
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = std::net::TcpStream::connect(addr);
+    assert!(wait_for(5, || handle.is_finished()), "the accept loop ended");
+    assert!(std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)).is_err(), "the port is closed");
+}
+
+#[test]
+fn agent_screenshot_files_are_new_files_only() {
+    let dir = std::env::temp_dir().join(format!("admincraft-shots-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let a = crate::control::new_shot_file(&dir, 2);
+    let b = crate::control::new_shot_file(&dir, 2);
+    assert_ne!(a, b, "every picture gets its own name");
+    assert!(a.starts_with(&dir) && a.to_string_lossy().ends_with(".png"));
+    let rgba = vec![255u8; 2 * 2 * 4];
+    crate::control::save_png_new(&a, 2, 2, &rgba).unwrap();
+    assert!(std::fs::read(&a).unwrap().starts_with(b"\x89PNG"));
+    // an existing file is never replaced
+    let before = std::fs::read(&a).unwrap();
+    assert!(crate::control::save_png_new(&a, 1, 1, &[0, 0, 0, 0]).is_err());
+    assert_eq!(std::fs::read(&a).unwrap(), before);
+    // a buffer of the wrong size is an error, not a panic in the encoder
+    assert!(crate::control::save_png_new(&b, 3, 3, &rgba).is_err());
+    #[cfg(unix)]
+    {
+        // a link placed beforehand is not followed
+        let target = dir.join("victim.txt");
+        std::fs::write(&target, "keep").unwrap();
+        let link = dir.join("link.png");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(crate::control::save_png_new(&link, 2, 2, &rgba).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_screenshot_reads_only_png_files() {
+    use crate::agent::read_png;
+    let dir = std::env::temp_dir().join(format!("admincraft-readpng-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[0u8; 100]);
+    let good = dir.join("a.png");
+    std::fs::write(&good, &png).unwrap();
+    let not_png_name = dir.join("a.txt");
+    std::fs::write(&not_png_name, &png).unwrap();
+    let not_png_data = dir.join("b.png");
+    std::fs::write(&not_png_data, "secret token").unwrap();
+    assert_eq!(read_png(&good.to_string_lossy(), 1 << 20), Some(png));
+    assert_eq!(read_png(&not_png_name.to_string_lossy(), 1 << 20), None, "only .png names");
+    assert_eq!(read_png(&not_png_data.to_string_lossy(), 1 << 20), None, "only PNG contents");
+    assert_eq!(read_png(&good.to_string_lossy(), 50), None, "size cap");
+    assert_eq!(read_png(&dir.to_string_lossy(), 1 << 20), None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn agent_targets_are_no_tool_options() {
+    use crate::tools::valid_target;
+    for ok in ["web01", "10.0.0.1", "fe80::1%eth0", "host.example.com"] {
+        assert!(valid_target(ok), "{ok}");
+    }
+    for bad in ["-t", "-n 1000 host", "host -t", "a\tb", "a\nb", "host\u{0}", ""] {
+        assert!(!valid_target(bad), "{bad:?}");
+    }
+}
+
+#[test]
+fn port_scan_prefers_ipv4_and_has_a_time_cap() {
+    use std::net::SocketAddr;
+    let v6: SocketAddr = "[::1]:80".parse().unwrap();
+    let v4: SocketAddr = "127.0.0.1:80".parse().unwrap();
+    let v4b: SocketAddr = "10.0.0.1:80".parse().unwrap();
+    assert_eq!(crate::tools::prefer_ipv4(vec![v6, v4, v4b]), vec![v4, v4b, v6]);
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let ip = std::net::IpAddr::from([127, 0, 0, 1]);
+    let ports = vec![port, port.wrapping_add(1).max(1)];
+    let r = crate::agent::port_scan_addr(ip, &ports, std::time::Duration::from_millis(300), std::time::Duration::from_secs(30));
+    assert_eq!(r["checked"], 2);
+    assert_eq!(r["complete"], true);
+    assert!(r["open"].as_array().unwrap().iter().any(|o| o["port"] == port));
+    // the time is up before the first port: nothing more is started
+    let r = crate::agent::port_scan_addr(ip, &ports, std::time::Duration::from_millis(300), std::time::Duration::ZERO);
+    assert_eq!(r["checked"], 0);
+    assert_eq!(r["complete"], false);
+    // no worker threads: the calling thread does the work
+    let found = std::sync::Mutex::new(Vec::new());
+    let n = crate::tools::scan_ports(ip, &[port], std::time::Duration::from_millis(300), 0, &|| false, &|p, ok| {
+        if ok {
+            found.lock().unwrap().push(p)
+        }
+    });
+    assert_eq!(n, 1);
+    assert_eq!(*found.lock().unwrap(), vec![port]);
+}
+
+#[test]
+fn command_output_is_capped() {
+    use crate::tools::{MAX_LINES, push_line};
+    let mut lines = Vec::new();
+    for i in 0..20_000 {
+        push_line(&mut lines, format!("line {i}"));
+        assert!(lines.len() <= MAX_LINES + 500);
+    }
+    assert!(lines.len() >= MAX_LINES);
+    assert_eq!(lines.last().map(String::as_str), Some("line 19999"), "the newest lines stay");
+}
+
+/// A command that runs for about 30 s.
+fn long_command() -> (String, Vec<String>) {
+    if cfg!(windows) { ("ping".into(), vec!["-n".into(), "30".into(), "127.0.0.1".into()]) } else { ("sleep".into(), vec!["30".into()]) }
+}
+
+#[test]
+fn command_runner_runs_are_separate_and_reaped() {
+    let (prog, args) = long_command();
+    let ctx = eframe::egui::Context::default();
+    let mut runner = crate::tools::CmdRunner::default();
+    runner.start(&prog, &args, ctx.clone());
+    let first = runner.running.clone();
+    assert!(first.load(std::sync::atomic::Ordering::SeqCst));
+    // a new run stops the old one; the old one ending doesn't switch off the new one
+    runner.start(&prog, &args, ctx.clone());
+    assert!(wait_for(10, || !first.load(std::sync::atomic::Ordering::SeqCst)), "the first program was killed and waited for");
+    assert!(runner.is_running(), "the second run is still running");
+    runner.stop();
+    assert!(wait_for(10, || !runner.is_running()), "stop kills, the reader thread reaps");
+}
+
+#[test]
+fn command_runner_stops_when_dropped() {
+    let (prog, args) = long_command();
+    let mut runner = crate::tools::CmdRunner::default();
+    runner.start(&prog, &args, eframe::egui::Context::default());
+    let running = runner.running.clone();
+    assert!(running.load(std::sync::atomic::Ordering::SeqCst));
+    drop(runner);
+    assert!(wait_for(10, || !running.load(std::sync::atomic::Ordering::SeqCst)), "a closed tab ends a continuous ping");
+}
+
+#[test]
+fn tunnel_error_output_keeps_the_last_lines() {
+    let text: String = (0..50).map(|i| if i % 7 == 0 { "\n".to_string() } else { format!("line {i}\n") }).collect();
+    let tail = std::sync::Mutex::new(crate::extra::ErrTail::default());
+    crate::extra::drain_stderr(std::io::Cursor::new(text.into_bytes()), &tail);
+    let t = tail.lock().unwrap();
+    assert!(t.done);
+    assert_eq!(t.lines.len(), crate::extra::TAIL_LINES);
+    assert_eq!(t.lines.back().map(String::as_str), Some("line 48"), "the last non-empty line");
+    drop(t);
+    // a very long line without a break doesn't grow without end
+    let tail = std::sync::Mutex::new(crate::extra::ErrTail::default());
+    crate::extra::drain_stderr(std::io::Cursor::new(vec![b'x'; 100_000]), &tail);
+    assert!(tail.lock().unwrap().lines.iter().all(|l| l.len() <= 4096));
+}
+
+#[test]
+fn scan_rows_are_built_only_when_the_scan_changes() {
+    let built = std::cell::Cell::new(0);
+    let mut cache = None;
+    let build = || {
+        built.set(built.get() + 1);
+        vec![1, 2, 3]
+    };
+    for _ in 0..10 {
+        let rows = crate::extra::cached(&mut cache, (1usize, 5usize, false, 0u64), build);
+        assert_eq!(*rows, vec![1, 2, 3]);
+    }
+    assert_eq!(built.get(), 1, "the same scan state: no new rows per frame");
+    crate::extra::cached(&mut cache, (1, 6, false, 0), build);
+    crate::extra::cached(&mut cache, (1, 6, true, 0), build);
+    crate::extra::cached(&mut cache, (1, 6, true, 1), build);
+    assert_eq!(built.get(), 4, "progress, end and a new baseline build again");
+}
+
+#[test]
+fn totp_refuses_what_it_cannot_compute() {
+    use crate::admintools::parse_otp;
+    let s = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    assert!(parse_otp(&format!("otpauth://totp/x?secret={s}&algorithm=SHA1")).is_some());
+    assert!(parse_otp(&format!("OTPAUTH://TOTP/x?secret={s}&algorithm=sha1")).is_some());
+    assert!(parse_otp(&format!("otpauth://totp/x?secret={s}")).is_some());
+    assert!(parse_otp(s).is_some(), "a bare key");
+    assert_eq!(parse_otp(&format!("otpauth://totp/x?secret={s}&algorithm=SHA256")), None, "no wrong codes");
+    assert_eq!(parse_otp(&format!("otpauth://totp/x?secret={s}&algorithm=SHA512")), None);
+    assert_eq!(parse_otp(&format!("otpauth://hotp/x?secret={s}&counter=5")), None, "counter-based codes");
+}
+
+#[test]
+fn mcp_initialize_answers_a_supported_version() {
+    use crate::agent::{MCP_VERSIONS, mcp_version};
+    assert_eq!(mcp_version(Some("2024-11-05")), "2024-11-05");
+    assert_eq!(mcp_version(Some("1999-01-01")), MCP_VERSIONS[0]);
+    assert_eq!(mcp_version(None), MCP_VERSIONS[0]);
+    let mut out = Vec::new();
+    crate::agent::handle(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"evil-9"}}"#, &mut out);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["result"]["protocolVersion"], MCP_VERSIONS[0]);
+    // ports are checked, not cut down to another port (70000 as u16 = 4464)
+    let e = crate::agent::call("check_certificate", &serde_json::json!({"host": "example.invalid", "port": 70000})).unwrap_err();
+    assert!(e.contains("65535"), "{e}");
+    assert!(crate::agent::call("check_certificate", &serde_json::json!({"host": "example.invalid", "port": 0})).is_err());
+}

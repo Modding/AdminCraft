@@ -339,7 +339,9 @@ admincraft cli window type 2 uptime     in Terminal-Tab oder eingebettetes PuTTY
 
 Der MCP-Server bietet dasselbe als `window_…`-Werkzeuge. In Terminals tippen geht erst, wenn Sie es in den
 Einstellungen erlaubt haben, und jedes Tippen wird im Fenster angezeigt. Nur Programme auf diesem Computer,
-die den Datenordner lesen können, kommen hinein; Passwörter werden nie herausgegeben.
+die unter Ihrem eigenen Benutzerkonto laufen, kommen hinein; Passwörter werden nie herausgegeben. Ein
+Bildschirmfoto ohne Dateinamen landet im Ordner `screenshots` im Datenordner; eine vorhandene Datei wird
+nie überschrieben.
 
 ## Fragen und Probleme
 
