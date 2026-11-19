@@ -13,7 +13,7 @@ use std::process::{Child, Command};
 pub struct Creds {
     pub user: String,
     pub domain: String,
-    pub password: String,
+    pub password: crate::model::Secret,
 }
 
 impl Creds {
@@ -40,7 +40,7 @@ pub struct JumpHop {
 pub struct PwRule {
     pub host: String,
     pub user: String,
-    pub password: String,
+    pub password: crate::model::Secret,
 }
 
 pub enum Launch {
@@ -429,7 +429,7 @@ pub fn powershell_session(e: &Entry, c: &Creds, over_ssh: bool) -> (String, Vec<
     if !c.user.is_empty() {
         env.push(("AC_USER".into(), c.full_user()));
         if !c.password.is_empty() {
-            env.push(("AC_PW".into(), c.password.clone()));
+            env.push(("AC_PW".into(), (*c.password).clone()));
             script = format!(
                 "$c = New-Object System.Management.Automation.PSCredential($env:AC_USER, (ConvertTo-SecureString $env:AC_PW -AsPlainText -Force)); Remove-Item Env:AC_PW; {0} -Credential $c",
                 script
@@ -894,7 +894,7 @@ pub fn freerdp_args(e: &Entry, c: &Creds, version: u8) -> Vec<String> {
         args.push(format!("/d:{}", c.domain));
     }
     if !c.password.is_empty() && e.rdp.pass_credentials {
-        args.push(format!("/p:{}", c.password));
+        args.push(format!("/p:{}", c.password.as_str()));
     }
     if e.rdp.fullscreen {
         args.push("/f".into());

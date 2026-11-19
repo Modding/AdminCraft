@@ -45,7 +45,7 @@ pub struct Hop {
     pub user: String,
     pub host: String,
     pub port: u16,
-    pub password: String,
+    pub password: crate::model::Secret,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -308,7 +308,7 @@ pub fn askpass_env(hops: &[Hop]) -> Vec<(String, String)> {
     for (i, h) in hops.iter().enumerate() {
         v.push((format!("AC_ASKPASS_HOST_{i}"), h.host.clone()));
         v.push((format!("AC_ASKPASS_USER_{i}"), h.user.clone()));
-        v.push((format!("AC_ASKPASS_PW_{i}"), h.password.clone()));
+        v.push((format!("AC_ASKPASS_PW_{i}"), (*h.password).clone()));
     }
     v
 }
@@ -327,7 +327,7 @@ pub fn askpass_main(prompt: &str) -> i32 {
             host: std::env::var(format!("AC_ASKPASS_HOST_{i}")).unwrap_or_default(),
             user: std::env::var(format!("AC_ASKPASS_USER_{i}")).unwrap_or_default(),
             port: 0,
-            password: std::env::var(format!("AC_ASKPASS_PW_{i}")).unwrap_or_default(),
+            password: std::env::var(format!("AC_ASKPASS_PW_{i}")).unwrap_or_default().into(),
         })
         .collect();
     match askpass_answer(prompt, &hops) {
@@ -1000,7 +1000,7 @@ pub fn ftp_connect_with(ep: &Endpoint, connect: Duration, io: Duration) -> Resul
     let host = t.host.trim().trim_start_matches('[').trim_end_matches(']');
     let addrs = ftp_addrs(host, if t.port == 0 { 21 } else { t.port })?;
     let user = if t.user.is_empty() { "anonymous".to_string() } else { t.user.clone() };
-    let pass = if t.user.is_empty() && t.password.is_empty() { "admincraft@".to_string() } else { t.password.clone() };
+    let pass = if t.user.is_empty() && t.password.is_empty() { "admincraft@".to_string() } else { (*t.password).clone() };
     let tcp = tcp_connect(&addrs, connect, io).map_err(|e| format!("{host}: {e}"))?;
     let data = move |addr: SocketAddr| tcp_connect(&[addr], connect, io).map_err(suppaftp::FtpError::ConnectionError);
     let mut conn = if ep.tls {
@@ -1303,7 +1303,7 @@ pub fn cli_check(kind: &str, host: &str, user: &str, download_dir: &Path) -> Str
             user: user.into(),
             host: host.into(),
             port: if k == Kind::Ftp { 21 } else { 22 },
-            password: std::env::var("AC_CHECK_PW").unwrap_or_default(),
+            password: std::env::var("AC_CHECK_PW").unwrap_or_default().into(),
         },
         key_file: String::new(),
         jumps: Vec::new(),

@@ -899,7 +899,7 @@ fn freerdp_2_and_3_get_their_own_options() {
 
     let mut e = Entry { host: " rdp01 ".into(), protocol: Protocol::Rdp, port: 0, ..Default::default() };
     e.rdp.redirect_drives = true;
-    let c = Creds { user: "admin".into(), domain: "CORP".into(), password: String::new() };
+    let c = Creds { user: "admin".into(), domain: "CORP".into(), password: Default::default() };
     let v2 = freerdp_args(&e, &c, 2);
     assert!(v2.contains(&"/cert-tofu".to_string()) && !v2.iter().any(|a| a.starts_with("/cert:")));
     let v3 = freerdp_args(&e, &c, 3);
@@ -2602,6 +2602,22 @@ fn exit_waits_for_the_last_webdav_upload_but_not_forever() {
     let started = Instant::now();
     assert!(!s.wait_for_upload(Duration::from_millis(200)), "a stuck upload doesn't keep the program open");
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn passwords_are_secrets_in_memory() {
+    use crate::launch::{Creds, PwRule};
+    use crate::model::{Entry, Secret};
+    let e = Entry { name: "web01".into(), password: "hunter2".into(), ..Default::default() };
+    let c = Creds { user: "root".into(), domain: String::new(), password: "hunter2".into() };
+    let r = PwRule { host: "10.0.0.30".into(), user: "root".into(), password: "hunter2".into() };
+    for shown in [format!("{e:?}"), format!("{c:?}"), format!("{r:?}")] {
+        assert!(!shown.contains("hunter2"), "a log line must not carry the password: {shown}");
+    }
+    // still reads like a string where the password is needed
+    assert_eq!(c.password, "hunter2");
+    assert_eq!(c.password.len(), 7);
+    assert_eq!(format!("{:?}", Secret::default()), "\"\"", "an empty password shows as empty");
 }
 
 #[test]

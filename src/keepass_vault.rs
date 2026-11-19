@@ -11,10 +11,10 @@ pub struct KpEntry {
     pub path: String,
     pub title: String,
     pub user: String,
-    pub password: String,
+    pub password: crate::model::Secret,
     pub url: String,
     /// otpauth:// link or base32 secret (two-factor codes), if the entry has one.
-    pub otp: String,
+    pub otp: crate::model::Secret,
 }
 
 #[derive(Default)]
@@ -37,9 +37,9 @@ fn walk(db: &keepass::Database, group: keepass::db::GroupRef<'_>, prefix: &str, 
             path,
             title,
             user: e.get_username().unwrap_or("").to_string(),
-            password: e.get_password().unwrap_or("").to_string(),
+            password: e.get_password().unwrap_or("").into(),
             url: e.get_url().unwrap_or("").to_string(),
-            otp: e.get("otp").or_else(|| e.get("TimeOtp-Secret-Base32")).unwrap_or("").to_string(),
+            otp: e.get("otp").or_else(|| e.get("TimeOtp-Secret-Base32")).unwrap_or("").into(),
         });
     }
     for g in group.groups() {
