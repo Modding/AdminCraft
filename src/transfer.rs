@@ -504,9 +504,64 @@ pub fn q(s: &str) -> Result<String, String> {
     Ok(format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
 }
 
+/// A local path for OpenSSH's sftp (the tests check its quoting; the program goes through `Batch`).
+#[cfg(test)]
 pub fn local_q(p: &Path) -> Result<String, String> {
     // sftp's batch parser treats backslashes as escapes; forward slashes work on Windows too
     q(&p.display().to_string().replace('\\', "/"))
+}
+
+/// The two batch languages: OpenSSH's sftp and PuTTY's psftp. psftp has no `-` prefix to ignore an
+/// error, no options for `ls`, and quotes by doubling `"` (a backslash is an ordinary letter).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Batch {
+    OpenSsh,
+    Psftp,
+}
+
+impl Batch {
+    /// A remote path for this batch language (control characters refused, see `q`).
+    pub fn quote(self, s: &str) -> Result<String, String> {
+        match self {
+            Batch::OpenSsh => q(s),
+            Batch::Psftp => {
+                q(s)?;
+                Ok(format!("\"{}\"", s.replace('"', "\"\"")))
+            }
+        }
+    }
+
+    pub fn local(self, p: &Path) -> Result<String, String> {
+        self.quote(&p.display().to_string().replace('\\', "/"))
+    }
+
+    /// Change to `path` (when given), say where we are, list it.
+    pub fn list_script(self, path: &str) -> Result<String, String> {
+        let mut s = String::new();
+        if !path.is_empty() {
+            s.push_str(&format!("cd {}\n", self.quote(path)?));
+        }
+        s.push_str(match self {
+            Batch::OpenSsh => "pwd\nls -la\n",
+            // psftp lists long by itself and takes no options
+            Batch::Psftp => "pwd\nls\n",
+        });
+        Ok(s)
+    }
+
+    /// Uploads a file or a folder into `remote_dir`.
+    pub fn upload_script(self, local: &Path, is_dir: bool, remote_dir: &str) -> Result<String, String> {
+        let name = local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let mut s = format!("cd {}\n", self.quote(remote_dir)?);
+        let r = if is_dir { "-r " } else { "" };
+        // OpenSSH's `put -r` needs the folder to exist; `-mkdir` makes it and goes on when it is
+        // there already. psftp makes the folder itself and would stop at a failed mkdir.
+        if is_dir && self == Batch::OpenSsh {
+            s.push_str(&format!("-mkdir {0}\n", self.quote(&name)?));
+        }
+        s.push_str(&format!("put {0}{1} {2}\n", r, self.local(local)?, self.quote(&name)?));
+        Ok(s)
+    }
 }
 
 /// Whether the first field of an `ls -l` line is a file mode: the type, nine permission
@@ -629,12 +684,13 @@ fn parse_listing(out: &str) -> (Option<String>, Vec<RemoteItem>) {
     (cwd, items)
 }
 
+/// The batch language of the program this transfer uses.
+fn batch_of(ep: &Endpoint) -> Result<Batch, String> {
+    Ok(if sftp_program(ep)?.1 { Batch::Psftp } else { Batch::OpenSsh })
+}
+
 fn sftp_list(ep: &Endpoint, path: &str) -> Result<(String, Vec<RemoteItem>), String> {
-    let mut script = String::new();
-    if !path.is_empty() {
-        script.push_str(&format!("cd {}\n", q(path)?));
-    }
-    script.push_str("pwd\nls -la\n");
+    let script = batch_of(ep)?.list_script(path)?;
     let out = sftp_batch(ep, &script)?;
     let (cwd, items) = parse_listing(&out.stdout);
     match cwd {
@@ -662,6 +718,7 @@ fn sftp_walk(ep: &Endpoint, dir: &str, files: &mut Vec<String>, dirs: &mut Vec<S
 
 fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, String> {
     let done = |out: RunOut, msg: String| if out.ok { Ok(Outcome::Done(msg)) } else { Err(clean_error(&out)) };
+    let b = batch_of(ep)?;
     match job {
         Job::List(p) => {
             let (dir, items) = sftp_list(ep, p)?;
@@ -670,28 +727,23 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
         }
         Job::Download { remote, is_dir, local_dir } => {
             let r = if *is_dir { "-r " } else { "" };
-            let script = format!("lcd {0}\nget {1}{2}\n", local_q(local_dir)?, r, q(remote)?);
+            let script = format!("lcd {0}\nget {1}{2}\n", b.local(local_dir)?, r, b.quote(remote)?);
             let out = sftp_batch(ep, &script)?;
             done(out, tf("Downloaded: {0} » {1}", &[&(base_name(remote)), &(local_dir.display())]))
         }
         Job::Upload { local, remote_dir } => {
-            let r = if local.is_dir() { "-r " } else { "" };
             let name = local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            let mut script = format!("cd {}\n", q(remote_dir)?);
-            if local.is_dir() {
-                script.push_str(&format!("-mkdir {0}\n", q(&name)?));
-            }
-            script.push_str(&format!("put {0}{1} {2}\n", r, local_q(local)?, q(&name)?));
+            let script = b.upload_script(local, local.is_dir(), remote_dir)?;
             let out = sftp_batch(ep, &script)?;
             done(out, tf("Uploaded: {0} » {1}", &[&name, &remote_dir]))
         }
         Job::Mkdir(p) => {
-            let out = sftp_batch(ep, &format!("mkdir {0}\n", q(p)?))?;
+            let out = sftp_batch(ep, &format!("mkdir {0}\n", b.quote(p)?))?;
             done(out, tf("Folder created: {0}", &[&p]))
         }
         Job::Delete { path, is_dir } => {
             if !*is_dir {
-                let out = sftp_batch(ep, &format!("rm {}\n", q(path)?))?;
+                let out = sftp_batch(ep, &format!("rm {}\n", b.quote(path)?))?;
                 return done(out, tf("Deleted: {0}", &[&path]));
             }
             let mut files = Vec::new();
@@ -699,16 +751,16 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
             sftp_walk(ep, path, &mut files, &mut dirs, 0)?;
             let mut script = String::new();
             for f in &files {
-                script.push_str(&format!("rm {}\n", q(f)?));
+                script.push_str(&format!("rm {}\n", b.quote(f)?));
             }
             for d in &dirs {
-                script.push_str(&format!("rmdir {0}\n", q(d)?));
+                script.push_str(&format!("rmdir {0}\n", b.quote(d)?));
             }
             let out = sftp_batch(ep, &script)?;
             done(out, tf("Folder deleted: {0} ({1} files)", &[&path, &(files.len())]))
         }
         Job::Rename { from, to } => {
-            let out = sftp_batch(ep, &format!("rename {0} {1}\n", q(from)?, q(to)?))?;
+            let out = sftp_batch(ep, &format!("rename {0} {1}\n", b.quote(from)?, b.quote(to)?))?;
             done(out, tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
         }
     }

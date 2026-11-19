@@ -2399,6 +2399,27 @@ fn unchanged_keepass_list_is_not_written_again() {
 }
 
 #[test]
+fn psftp_batch_language() {
+    // B8: psftp takes no options for ls, has no "-" prefix and doubles quotes instead of escaping
+    use crate::transfer::Batch;
+    use std::path::Path;
+    assert_eq!(Batch::OpenSsh.list_script("/var/www").unwrap(), "cd \"/var/www\"\npwd\nls -la\n");
+    assert_eq!(Batch::Psftp.list_script("/var/www").unwrap(), "cd \"/var/www\"\npwd\nls\n");
+    assert_eq!(Batch::Psftp.list_script("").unwrap(), "pwd\nls\n");
+    assert_eq!(Batch::OpenSsh.quote(r#"a"b\c"#).unwrap(), r#""a\"b\\c""#);
+    assert_eq!(Batch::Psftp.quote(r#"a"b\c"#).unwrap(), r#""a""b\c""#);
+    assert!(Batch::Psftp.quote("x\ny").is_err(), "a line break could start another command");
+    let dir = Path::new("site");
+    let open = Batch::OpenSsh.upload_script(dir, true, "/srv").unwrap();
+    assert!(open.contains("-mkdir \"site\"") && open.contains("put -r "));
+    let putty = Batch::Psftp.upload_script(dir, true, "/srv").unwrap();
+    assert!(!putty.lines().any(|l| l.starts_with('-')), "psftp knows no '-' prefix: {putty}");
+    assert!(putty.contains("put -r \"site\" \"site\""));
+    let file = Batch::Psftp.upload_script(Path::new("a.txt"), false, "/srv").unwrap();
+    assert_eq!(file, "cd \"/srv\"\nput \"a.txt\" \"a.txt\"\n");
+}
+
+#[test]
 fn keepass_is_written_in_the_background() {
     // C11: the save hands the list to the writer and returns; the KeePass id of a new entry comes
     // back from it afterwards (before, the save wrote the file itself and set it right away)

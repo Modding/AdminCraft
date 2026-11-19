@@ -235,8 +235,10 @@ fixes one marks it **fixed**. Items marked *to try* need a real program or serve
 - **B6** *fixed* · TOTP ignores `algorithm=` and treats HOTP as TOTP: wrong codes (`admintools.rs`).
 - **B7** *fixed* · The SCP listing needs an sh-like shell (`$(pwd)`, `VAR=x cmd`): csh, tcsh and fish fail
   (`transfer.rs`).
-- **B8** *open* · psftp batch syntax: `ls -la`, `-mkdir` and `\"` quoting are OpenSSH sftp syntax
-  (`transfer.rs`). *To try with a real psftp.*
+- **B8** *fixed* · psftp batch syntax: `ls -la`, `-mkdir` and `\"` quoting are OpenSSH sftp syntax
+  (`transfer.rs`). Scripts now go through `transfer::Batch`: psftp gets `ls`, no `-` prefix (its
+  `put -r` makes the folder) and doubled quotes. *To try with a real psftp:* listing, upload of a
+  folder (new and existing), names with `"` and `\`.
 - **B9** *fixed* · Listings: leading spaces of names are cut; echoed `sftp>` lines can become phantom entries
   (`transfer.rs` `parse_ls_line`).
 - **B10** *fixed* · IPv6 literals are not bracketed for scp, sftp, FTP and `-J` (`transfer.rs`).
