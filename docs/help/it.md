@@ -80,6 +80,8 @@ Clic destro su una cartella » **Apri tutte le connessioni nella cartella** le a
 | Seriale, TCP raw, rlogin | PuTTY nella scheda o una scheda terminale | PuTTY/plink (Windows); picocom, nc … altrove |
 | Shell locale | scheda terminale su questo computer | — |
 
+**PuTTY è facoltativo.** SSH si apre nella scheda terminale integrata con OpenSSH, già presente in Windows 10/11, macOS e Linux; i file passano dalla scheda di trasferimento integrata. PuTTY, WinSCP e FileZilla sono solo un altro modo per aprire una connessione: *Apri con PuTTY* compare nel menu del tasto destro solo se PuTTY viene trovato, e il controllo di sistema mostra quelli mancanti come *non installato (facoltativo)*. Su macOS non serve installare PuTTY.
+
 **Finestre dentro le schede.** Su Windows, le finestre di Desktop remoto, PuTTY, VNC e web vengono inserite nella
 scheda. Fai clic al loro interno per scrivere. **Come finestra separata** ne stacca una, **Focus** le passa la tastiera.
 Su Linux e macOS questi programmi girano in finestre proprie e la scheda mostra il loro stato.

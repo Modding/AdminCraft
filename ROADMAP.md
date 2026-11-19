@@ -342,6 +342,12 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
     `craft-atomic` (safe file replacement), `craft-dav` (WebDAV), `craft-jsonrpc` / `craft-mcp`
     (the MCP server), `craft-i18n`, `craft-update`. Check each one's API and licence and move over
     one at a time; the UI crates need the same egui version (craft-libs v0.1.0 uses egui 0.36).
+14. *fixed* · **PuTTY looked required** (issue #24, on macOS). SSH runs in the built-in terminal
+    with OpenSSH and files in the built-in transfer tab; PuTTY, its helpers, WinSCP, FileZilla,
+    Remmina and an own browser only add a way to open something. *Open with PuTTY* was in the
+    right-click menu even without PuTTY, and the system check showed every program it didn't find
+    as *missing* in orange. Now the menu item appears only when PuTTY is found, those programs show
+    as *not installed (optional)* (`programs::is_optional`), and the guide says so.
 
 Done and to be tried against real servers: the Remote Desktop login through the Credential
 Manager (`src/wincred.rs`) — log in to a real host with *Pass the login automatically* and check

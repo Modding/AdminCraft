@@ -469,7 +469,7 @@ pub struct AdminApp {
     show_password: bool,
     toast: Option<Toast>,
     pending_connect: Vec<u64>,
-    system_check: Vec<(&'static str, String, bool)>,
+    system_check: Vec<launch::Check>,
     applied_dark: Option<bool>,
     shot: Option<Shot>,
     keepass: KeePassVault,
@@ -2355,7 +2355,8 @@ impl AdminApp {
                             acts.push(Act::OpenSsh(id));
                             ui.close();
                         }
-                        if ui.button(tr("Open with PuTTY")).clicked() {
+                        // PuTTY is optional: offered only when it is there.
+                        if self.prog_cache.get("putty").map(|x| x.is_some()).unwrap_or(false) && ui.button(tr("Open with PuTTY")).clicked() {
                             acts.push(Act::Putty(id));
                             ui.close();
                         }
@@ -3575,15 +3576,27 @@ impl AdminApp {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     egui::Grid::new("syscheck").num_columns(3).spacing([12.0, 5.0]).show(ui, |ui| {
-                        for (what, prog, ok) in &self.system_check {
+                        for c in &self.system_check {
                             let (r, _) = ui.allocate_exact_size(Vec2::new(10.0, 14.0), Sense::hover());
-                            ui.painter().circle_filled(r.center(), 5.0, if *ok { OK_GREEN } else { WARN });
-                            ui.label(tr(what));
-                            if *ok {
-                                ui.label(RichText::new(prog).weak());
+                            let dot = if c.found {
+                                OK_GREEN
+                            } else if c.optional {
+                                ui.visuals().weak_text_color()
+                            } else {
+                                WARN
+                            };
+                            ui.painter().circle_filled(r.center(), 5.0, dot);
+                            ui.label(tr(c.what));
+                            if c.found {
+                                ui.label(RichText::new(&c.detail).weak());
+                            } else if c.optional {
+                                ui.label(RichText::new(tr("not installed (optional)")).weak()).on_hover_text(tf(
+                                    "AdminCraft works without it. To use it, install it or put it into the programs folder: {0}",
+                                    &[&c.detail],
+                                ));
                             } else {
                                 ui.label(RichText::new(tr("missing")).color(WARN))
-                                    .on_hover_text(tf("Install or put into the programs folder: {0}", &[&prog]));
+                                    .on_hover_text(tf("Install or put into the programs folder: {0}", &[&c.detail]));
                             }
                             ui.end_row();
                         }
@@ -4187,6 +4200,9 @@ impl AdminApp {
                 match self.prog_cache.get(p.key).cloned().flatten() {
                     Some((path, src)) => {
                         ui.label(RichText::new(format!("OK · {}", src.label())).color(OK_GREEN)).on_hover_text(path.display().to_string());
+                    }
+                    None if programs::is_optional(p.key) => {
+                        ui.weak(tr("not installed (optional)"));
                     }
                     None => {
                         ui.label(RichText::new(tr("missing")).color(WARN));

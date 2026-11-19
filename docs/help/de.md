@@ -80,6 +80,8 @@ Rechtsklick auf einen Ordner » **Alle Verbindungen im Ordner öffnen** öffnet 
 | Seriell, Raw-TCP, rlogin | PuTTY im Tab oder ein Terminal-Tab | PuTTY/plink (Windows); picocom, nc … anderswo |
 | Lokale Shell | Terminal-Tab auf diesem Computer | — |
 
+**PuTTY ist optional.** SSH läuft im eingebauten Terminal-Tab mit OpenSSH, das Windows 10/11, macOS und Linux schon mitbringen; Dateien gehen über den eingebauten Übertragungs-Tab. PuTTY, WinSCP und FileZilla sind nur ein weiterer Weg, eine Verbindung zu öffnen: *Mit PuTTY öffnen* steht im Rechtsklick-Menü nur, wenn PuTTY gefunden wird, und die Systemprüfung zeigt fehlende als *nicht installiert (optional)*. Unter macOS muss PuTTY nicht installiert werden.
+
 **Fenster in Tabs.** Unter Windows werden Remotedesktop-, PuTTY-, VNC- und Webfenster in den
 Tab gesetzt. Zum Tippen hineinklicken. **Als eigenes Fenster** löst eines wieder heraus, **Fokus** gibt ihm die Tastatur.
 Unter Linux und macOS laufen diese Programme in eigenen Fenstern, und der Tab zeigt ihren Zustand.

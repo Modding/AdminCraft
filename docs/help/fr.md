@@ -80,6 +80,8 @@ Clic droit sur un dossier » **Ouvrir toutes les connexions du dossier** les ouv
 | Série, TCP brut, rlogin | PuTTY dans l'onglet ou un onglet terminal | PuTTY/plink (Windows) ; picocom, nc … ailleurs |
 | Shell local | onglet terminal sur cet ordinateur | — |
 
+**PuTTY est facultatif.** SSH s'ouvre dans l'onglet terminal intégré avec OpenSSH, déjà présent dans Windows 10/11, macOS et Linux ; les fichiers passent par l'onglet de transfert intégré. PuTTY, WinSCP et FileZilla ne sont qu'un autre moyen d'ouvrir une connexion : *Ouvrir avec PuTTY* n'apparaît dans le menu du clic droit que si PuTTY est trouvé, et la vérification du système affiche ceux qui manquent comme *non installé (facultatif)*. Sous macOS, inutile d'installer PuTTY.
+
 **Des fenêtres dans les onglets.** Sous Windows, les fenêtres Bureau à distance, PuTTY, VNC et web sont placées dans
 l'onglet. Cliquez dedans pour taper. **Fenêtre séparée** en détache une à nouveau, **Focus** lui donne le clavier.
 Sous Linux et macOS, ces programmes s'ouvrent dans leurs propres fenêtres et l'onglet affiche leur état.
