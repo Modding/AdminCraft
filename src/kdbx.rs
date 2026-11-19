@@ -165,7 +165,7 @@ fn walk_group(
         c.parent = parent;
         c.name = e.get_title().unwrap_or("").to_string();
         c.username = e.get_username().unwrap_or("").to_string();
-        c.password = e.get_password().unwrap_or("").to_string();
+        c.password = e.get_password().unwrap_or("").into();
         c.password_enc = None;
         c.description = e.get(fields::NOTES).unwrap_or("").to_string();
         let url = e.get_url().unwrap_or("");
@@ -209,7 +209,7 @@ fn walk_group(
         f.parent = parent;
         f.name = sub.name.clone();
         f.description = desc;
-        f.password = password;
+        f.password = password.into();
         f.kp_id = sub.id().to_string();
         let fid = f.id;
         out.push(f);
@@ -240,7 +240,7 @@ pub fn load(path: &str, key: &Key) -> Result<Vec<Entry>, String> {
 /// What AdminCraft keeps in its extra field: everything but what KeePass shows itself.
 fn extra_json(e: &Entry) -> String {
     let mut x = e.clone();
-    x.password = String::new();
+    x.password = Default::default();
     x.password_enc = None;
     x.kp_id = String::new();
     serde_json::to_string(&x).unwrap_or_default()
@@ -252,7 +252,7 @@ fn folder_notes(f: &Entry) -> String {
     x.kp_id = String::new();
     x.description = String::new();
     // a folder's password is kept with it (the whole database is encrypted)
-    let json = serde_json::json!({ "settings": x, "password": f.password });
+    let json = serde_json::json!({ "settings": x, "password": f.password.as_str() });
     format!("{}{FOLDER_MARK}{}", f.description, json)
 }
 
@@ -364,7 +364,7 @@ pub fn save(path: &str, key: &Key, list: &mut [Entry], known: &HashSet<String>) 
         let values = [
             (fields::TITLE, c.name.clone(), false),
             (fields::USERNAME, c.username.clone(), false),
-            (fields::PASSWORD, c.password.clone(), true),
+            (fields::PASSWORD, (*c.password).clone(), true),
             (fields::URL, url_of(c), false),
             (fields::NOTES, c.description.clone(), false),
             (FIELD, extra_json(c), false),

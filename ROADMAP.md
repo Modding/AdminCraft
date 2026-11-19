@@ -278,11 +278,12 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
    FreeRDP 2 knows `/args-from` is not checked. Needs a Linux machine with FreeRDP 2 and 3 to
    try; say in the pull request what was tried. Done already: Remote Desktop on Windows
    (`src/wincred.rs`) and PuTTY, plink, psftp and pscp (`-pwfile`, `src/secretfile.rs`).
-2. **Wipe the passwords of connections from memory.** Only the vault key and the key-derivation
-   input are wiped (`Vault` in `src/model.rs`). `Creds.password`, `Entry.password`, the session
-   passwords in `src/app.rs` and the auto-typing rules in `src/terminal.rs` are plain `String`s.
-   Move them to `zeroize::Zeroizing<String>` (the crate is already a dependency); serde needs
-   `zeroize`'s `serde` feature or a small wrapper. Medium; the compiler finds every place.
+2. *fixed* · **Wipe the passwords of connections from memory.** `model::Secret` (a
+   `Zeroizing<String>` whose `Debug` shows `<hidden>`) now holds `Entry.password`, `Creds.password`,
+   `CredInfo.password`, the auto-typing rules (`PwRule`), the jump-host passwords of the file transfer
+   (`Hop`), KeePass entries (password and 2FA secret), the session passwords and the password fields
+   of the dialogs. Still plain for a moment where a password is handed on: the environment of a child
+   (`AC_PW`, `AC_ASKPASS_PW_n`), a KeePass field being written, the export map, FreeRDP's `/p:`.
 3. **Try the password files with a real PuTTY** (0.77 or newer, and one older): direct login,
    a jump host through plink (reconnect with *Restart session* too), and file transfer with
    psftp/pscp. The logic is covered by tests, the programs themselves were not at hand.

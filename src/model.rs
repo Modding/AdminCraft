@@ -238,11 +238,59 @@ pub enum KeePassRef {
     Host(String),
 }
 
+/// A password in memory: wiped when it goes away, never shown by `{:?}` (a log line or an error
+/// report must not carry it). Reads like a `String` through `Deref`.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Secret(zeroize::Zeroizing<String>);
+
+impl Secret {
+    pub fn new(s: impl Into<String>) -> Secret {
+        Secret(zeroize::Zeroizing::new(s.into()))
+    }
+}
+
+impl std::ops::Deref for Secret {
+    type Target = String;
+    fn deref(&self) -> &String {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Secret {
+    fn deref_mut(&mut self) -> &mut String {
+        &mut self.0
+    }
+}
+
+impl From<String> for Secret {
+    fn from(s: String) -> Secret {
+        Secret::new(s)
+    }
+}
+
+impl From<&str> for Secret {
+    fn from(s: &str) -> Secret {
+        Secret::new(s)
+    }
+}
+
+impl PartialEq<&str> for Secret {
+    fn eq(&self, other: &&str) -> bool {
+        self.0.as_str() == *other
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_empty() { "\"\"" } else { "<hidden>" })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CredInfo {
     pub user: String,
     pub domain: String,
-    pub password: String,
+    pub password: Secret,
     pub keepass: Option<KeePassRef>,
     pub ask: bool,
 }
@@ -326,7 +374,7 @@ pub struct Entry {
     pub username: String,
     pub domain: String,
     #[serde(skip)]
-    pub password: String,
+    pub password: Secret,
     pub password_enc: Option<String>,
     /// Empty user name / domain / password are taken from the folder above.
     pub inherit_credentials: bool,
@@ -372,7 +420,7 @@ impl Default for Entry {
             port: 22,
             username: String::new(),
             domain: String::new(),
-            password: String::new(),
+            password: Secret::default(),
             password_enc: None,
             inherit_credentials: true,
             description: String::new(),
@@ -1388,7 +1436,7 @@ impl Store {
     fn decrypt_all(&mut self) {
         let Some(v) = self.vault.clone() else { return };
         for e in &mut self.data.entries {
-            e.password = e.password_enc.as_deref().and_then(|p| v.decrypt(p)).unwrap_or_default();
+            e.password = e.password_enc.as_deref().and_then(|p| v.decrypt(p)).map(Secret::new).unwrap_or_default();
         }
     }
 
@@ -1586,10 +1634,10 @@ impl Store {
     }
 
     /// User, domain and password after following "inherit from folder".
-    pub fn credentials(&self, id: u64) -> (String, String, String) {
+    pub fn credentials(&self, id: u64) -> (String, String, Secret) {
         let mut user = String::new();
         let mut domain = String::new();
-        let mut pass = String::new();
+        let mut pass = Secret::default();
         let mut cur = self.get(id);
         let mut depth = 0;
         while let Some(e) = cur {

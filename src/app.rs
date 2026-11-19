@@ -105,7 +105,7 @@ struct AskState {
     key: u64,
     name: String,
     user: String,
-    pw: String,
+    pw: crate::model::Secret,
     focus: bool,
 }
 
@@ -441,7 +441,7 @@ pub struct AdminApp {
     log: Vec<String>,
     status: StatusMap,
     dirty_since: Option<f64>,
-    unlock_pw: String,
+    unlock_pw: crate::model::Secret,
     unlock_failed: bool,
     show_settings: bool,
     new_master: String,
@@ -449,7 +449,7 @@ pub struct AdminApp {
     settings_msg: Option<String>,
     show_import: bool,
     import_path: String,
-    import_pw: String,
+    import_pw: crate::model::Secret,
     import_msg: Option<(bool, String)>,
     show_about: bool,
     show_keys: bool,
@@ -476,13 +476,13 @@ pub struct AdminApp {
     kp_dialog: bool,
     /// "Save password in KeePass": connection id, the password typed, an error.
     kp_save: Option<(u64, String, Option<String>)>,
-    kp_pw: String,
+    kp_pw: crate::model::Secret,
     kp_msg: Option<(bool, String)>,
     kp_pending: Vec<Pending>,
     /// The password question shown now; more wait in `ask_queue` ("Open all").
     ask: Option<AskState>,
     ask_queue: VecDeque<AskState>,
-    session_pw: HashMap<u64, String>,
+    session_pw: HashMap<u64, crate::model::Secret>,
     /// Where the active tab's content is drawn (points), for placing embedded windows.
     embed_rect: Option<Rect>,
     last_content: Rect,
@@ -493,21 +493,21 @@ pub struct AdminApp {
     show_export: bool,
     export_root: Option<u64>,
     export_mode: crate::sharing::PwMode,
-    export_pw: String,
-    export_pw2: String,
+    export_pw: crate::model::Secret,
+    export_pw2: crate::model::Secret,
     export_ack: bool,
     export_path: String,
     export_msg: Option<(bool, String)>,
     show_ximport: bool,
     ximport_path: String,
-    ximport_pw: String,
+    ximport_pw: crate::model::Secret,
     ximport_need_pw: bool,
     ximport_msg: Option<(bool, String)>,
     /// 0 = this PC, 1 = network folder (SMB), 2 = WebDAV
     storage_kind: u8,
     dav_url: String,
     dav_user: String,
-    dav_pw: String,
+    dav_pw: crate::model::Secret,
     dav_msg: Option<(bool, String)>,
     last_remote_poll: f64,
     prog_cache: HashMap<&'static str, Option<(PathBuf, programs::Source)>>,
@@ -570,7 +570,7 @@ impl AdminApp {
             log: Vec::new(),
             status: Arc::new(Mutex::new(Default::default())),
             dirty_since: None,
-            unlock_pw: String::new(),
+            unlock_pw: Default::default(),
             unlock_failed: false,
             show_settings: false,
             new_master: String::new(),
@@ -578,7 +578,7 @@ impl AdminApp {
             settings_msg: None,
             show_import: false,
             import_path: String::new(),
-            import_pw: String::new(),
+            import_pw: Default::default(),
             import_msg: None,
             show_about: false,
             show_keys: false,
@@ -600,7 +600,7 @@ impl AdminApp {
             keepass: KeePassVault::default(),
             kp_dialog: false,
             kp_save: None,
-            kp_pw: String::new(),
+            kp_pw: Default::default(),
             kp_msg: None,
             kp_pending: Vec::new(),
             ask: None,
@@ -615,20 +615,20 @@ impl AdminApp {
             show_export: false,
             export_root: None,
             export_mode: crate::sharing::PwMode::Without,
-            export_pw: String::new(),
-            export_pw2: String::new(),
+            export_pw: Default::default(),
+            export_pw2: Default::default(),
             export_ack: false,
             export_path: String::new(),
             export_msg: None,
             show_ximport: false,
             ximport_path: String::new(),
-            ximport_pw: String::new(),
+            ximport_pw: Default::default(),
             ximport_need_pw: false,
             ximport_msg: None,
             storage_kind: 0,
             dav_url: String::new(),
             dav_user: String::new(),
-            dav_pw: String::new(),
+            dav_pw: Default::default(),
             dav_msg: None,
             last_remote_poll: 0.0,
             prog_cache: HashMap::new(),
@@ -661,7 +661,7 @@ impl AdminApp {
             app.storage_kind = 2;
             app.dav_url = r.url.clone();
             app.dav_user = r.user.clone();
-            app.dav_pw = r.password();
+            app.dav_pw = r.password().into();
         } else if !app.shared_edit.trim().is_empty() {
             app.storage_kind = 1;
         }
@@ -919,10 +919,10 @@ impl AdminApp {
                 PwMode::Encrypted => {
                     egui::Grid::new("export_pw").num_columns(2).show(ui, |ui| {
                         ui.label(tr("Export password"));
-                        ui.add(egui::TextEdit::singleline(&mut self.export_pw).password(true));
+                        ui.add(egui::TextEdit::singleline(&mut *self.export_pw).password(true));
                         ui.end_row();
                         ui.label(tr("Repeat"));
-                        ui.add(egui::TextEdit::singleline(&mut self.export_pw2).password(true));
+                        ui.add(egui::TextEdit::singleline(&mut *self.export_pw2).password(true));
                         ui.end_row();
                     });
                     ui.weak(tr("Tell your colleague the password another way (not in the same e-mail)."));
@@ -987,7 +987,7 @@ impl AdminApp {
             );
             if self.ximport_need_pw {
                 ui.label(tr("The file is encrypted. Export password:"));
-                ui.add(egui::TextEdit::singleline(&mut self.ximport_pw).password(true));
+                ui.add(egui::TextEdit::singleline(&mut *self.ximport_pw).password(true));
             }
             if ui.add(egui::Button::new(RichText::new(tr("Import")).color(Color32::WHITE)).fill(ACCENT)).clicked() {
                 run = true;
@@ -1544,7 +1544,7 @@ impl AdminApp {
             Err(Need::Ask(key)) => {
                 let name = self.store.get(key).map(|x| x.name.clone()).unwrap_or_default();
                 let user = self.store.credential_info(key).user;
-                self.ask_push(AskState { pending: Pending { entry: e, how }, key, name, user, pw: String::new(), focus: true });
+                self.ask_push(AskState { pending: Pending { entry: e, how }, key, name, user, pw: Default::default(), focus: true });
             }
             Ok((c, jumps, warns)) => {
                 for w in warns {
@@ -1653,7 +1653,7 @@ impl AdminApp {
         if e.protocol.transfer() {
             // no stored login: ask for the password first (empty = SSH key)
             let name = e.name.clone();
-            self.ask_push(AskState { pending: Pending { entry: e, how: How::Default }, key: 0, name, user, pw: String::new(), focus: true });
+            self.ask_push(AskState { pending: Pending { entry: e, how: How::Default }, key: 0, name, user, pw: Default::default(), focus: true });
             return;
         }
         self.open_session(e, Creds { user, ..Default::default() }, Vec::new(), ctx, now);
@@ -2669,7 +2669,7 @@ impl AdminApp {
                     match e.cred_source {
                         CredSource::Stored => {
                             ui.label(tr("Password"));
-                            ui.add(egui::TextEdit::singleline(&mut e.password).password(!self.show_password).desired_width(f32::INFINITY));
+                            ui.add(egui::TextEdit::singleline(&mut *e.password).password(!self.show_password).desired_width(f32::INFINITY));
                             ui.end_row();
                             ui.label("");
                             ui.horizontal(|ui| {
@@ -3717,7 +3717,7 @@ impl AdminApp {
                 ui.label(tr("Key file (optional):"));
                 ui.add(egui::TextEdit::singleline(&mut self.store.data.settings.keepass_keyfile).desired_width(f32::INFINITY));
                 ui.label(tr("Master password of the KeePass database:"));
-                let r = ui.add(egui::TextEdit::singleline(&mut self.kp_pw).password(true).desired_width(f32::INFINITY));
+                let r = ui.add(egui::TextEdit::singleline(&mut *self.kp_pw).password(true).desired_width(f32::INFINITY));
                 if !r.has_focus() && self.kp_pw.is_empty() {
                     r.request_focus();
                 }
@@ -3772,7 +3772,7 @@ impl AdminApp {
                         }
                         ui.end_row();
                         ui.label(tr("Password"));
-                        let r = ui.add(egui::TextEdit::singleline(&mut a.pw).password(true).desired_width(240.0));
+                        let r = ui.add(egui::TextEdit::singleline(&mut *a.pw).password(true).desired_width(240.0));
                         if a.focus {
                             r.request_focus();
                             a.focus = false;
@@ -3869,7 +3869,7 @@ impl AdminApp {
                 ui.label(tr("Path to confCons.xml (in mRemoteNG: File » Export, or %APPDATA%\\mRemoteNG\\confCons.xml):"));
                 ui.add(egui::TextEdit::singleline(&mut self.import_path).desired_width(f32::INFINITY).hint_text(r"C:\Users\...\confCons.xml"));
                 ui.label(tr("Password of the file (leave empty if none was set in mRemoteNG):"));
-                ui.add(egui::TextEdit::singleline(&mut self.import_pw).password(true).desired_width(f32::INFINITY));
+                ui.add(egui::TextEdit::singleline(&mut *self.import_pw).password(true).desired_width(f32::INFINITY));
                 ui.add_space(6.0);
                 if ui.button(tr("Import")).clicked() {
                     let path = self.import_path.trim().trim_matches('"').to_string();
@@ -3946,7 +3946,7 @@ impl AdminApp {
                     ui.label(tr("The connections are protected by a master password."));
                 }
                 let hint = if kp { tr("KeePass master password") } else { tr("Master password") };
-                let r = ui.add(egui::TextEdit::singleline(&mut self.unlock_pw).password(true).hint_text(hint).desired_width(f32::INFINITY));
+                let r = ui.add(egui::TextEdit::singleline(&mut *self.unlock_pw).password(true).hint_text(hint).desired_width(f32::INFINITY));
                 r.request_focus();
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if self.unlock_failed {
@@ -4351,7 +4351,7 @@ impl AdminApp {
                     ui.add(egui::TextEdit::singleline(&mut self.dav_user).desired_width(220.0));
                     ui.end_row();
                     ui.label(tr("Password"));
-                    ui.add(egui::TextEdit::singleline(&mut self.dav_pw).password(true).desired_width(220.0));
+                    ui.add(egui::TextEdit::singleline(&mut *self.dav_pw).password(true).desired_width(220.0));
                     ui.end_row();
                 });
                 ui.weak(tr("Nextcloud/ownCloud: best create an app password. If the address ends with \"/\", connections.json inside it is used."));
@@ -4806,7 +4806,7 @@ impl eframe::App for AdminApp {
         if let Some((id, pw)) = extra::pwgen_window(&ctx, &mut self.pwgen)
             && let Some(i) = self.store.index_of(id)
         {
-            self.store.data.entries[i].password = pw;
+            self.store.data.entries[i].password = pw.into();
             self.store.data.entries[i].cred_source = CredSource::Stored;
             self.mark_dirty(now);
             self.note(tr("Password applied."), false, now);

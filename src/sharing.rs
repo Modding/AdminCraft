@@ -75,7 +75,7 @@ pub fn export(store: &Store, root: Option<u64>, mode: PwMode, export_pw: &str, p
     let passwords: BTreeMap<u64, String> = if mode == PwMode::Without {
         BTreeMap::new()
     } else {
-        entries.iter().filter(|e| !e.password.is_empty()).map(|e| (e.id, e.password.clone())).collect()
+        entries.iter().filter(|e| !e.password.is_empty()).map(|e| (e.id, (*e.password).clone())).collect()
     };
     let created = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let mut file = ExportFile { format: FORMAT.into(), version: 1, created, ..Default::default() };
@@ -164,7 +164,7 @@ pub fn merge(store: &mut Store, entries: Vec<Entry>, passwords: BTreeMap<u64, St
         e.id = nid;
         e.parent = Some(e.parent.and_then(|p| map.get(&p).copied()).filter(|&p| p != nid).unwrap_or(folder_id));
         e.jump_host = e.jump_host.and_then(|j| map.get(&j).copied()).filter(|&j| j != nid);
-        e.password = passwords.get(&old).cloned().unwrap_or_default();
+        e.password = passwords.get(&old).cloned().map(crate::model::Secret::new).unwrap_or_default();
         e.password_enc = None;
         // the colleague's KeePass ids mean nothing here (and must not hit entries of this list)
         e.kp_id.clear();

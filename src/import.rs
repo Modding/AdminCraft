@@ -156,7 +156,7 @@ pub fn import_mremoteng(xml: &str, master: &str, first_id: u64, parent: Option<u
         if !enc.is_empty() {
             match (!password.is_empty()).then(|| decrypt_mremote(&enc, &password, iterations)).flatten() {
                 Some(p) => {
-                    entry.password = p;
+                    entry.password = p.into();
                     out.passwords_ok += 1;
                 }
                 None => out.passwords_failed += 1,
