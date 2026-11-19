@@ -337,7 +337,8 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
     `Entry::web_browser`), which export and import leave out. A built-in webview (WebView2) is not an option: the Rust
     house rules allow no webview in native Craft apps.
 13. **Shared libraries first** (house rule 16). `storytold/craft-libs` has crates for code
-    AdminCraft carries itself: `craft-ber` (SNMP), `craft-codepage` (Windows console output, *done*),
+    AdminCraft carries itself: `craft-ber` (SNMP: reading the answer *done*; craft-ber has no writer, so
+    the requests are still encoded here), `craft-codepage` (Windows console output, *done*),
     `craft-atomic` (safe file replacement), `craft-dav` (WebDAV), `craft-jsonrpc` / `craft-mcp`
     (the MCP server), `craft-i18n`, `craft-update`. Check each one's API and licence and move over
     one at a time; the UI crates need the same egui version (craft-libs v0.1.0 uses egui 0.36).
