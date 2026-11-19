@@ -2446,6 +2446,17 @@ fn deleting_a_folder_lists_one_level_per_login() {
 }
 
 #[test]
+fn snmp_answers_read_through_craft_ber() {
+    use crate::nettools::decode_response;
+    // an indefinite length (BER allows it, SNMP doesn't use it) is refused, not followed
+    assert!(decode_response(&[0x30, 0x80, 0x02, 0x01, 0x01, 0x00, 0x00]).is_err());
+    // a length longer than what came is refused
+    assert!(decode_response(&[0x30, 0x82, 0xff, 0xff, 0x02, 0x01, 0x01]).is_err());
+    // nothing at all
+    assert!(decode_response(&[]).is_err());
+}
+
+#[test]
 fn browser_per_connection_never_comes_from_a_file_of_someone_else() {
     use crate::launch::connection_browser;
     use crate::model::Entry;

@@ -815,29 +815,14 @@ struct Ber<'a> {
 }
 
 impl<'a> Ber<'a> {
+    /// The next element: its tag's first byte and its content. Read by craft-libs `craft-ber`
+    /// (lengths checked against what is there; an indefinite length is refused).
     fn next(&mut self) -> Result<(u8, &'a [u8]), String> {
         let bad = || tr("The SNMP answer is damaged.").to_string();
-        let tag = *self.b.get(self.pos).ok_or_else(bad)?;
-        let first = *self.b.get(self.pos + 1).ok_or_else(bad)?;
-        self.pos += 2;
-        let len = if first & 0x80 == 0 {
-            first as usize
-        } else {
-            let n = (first & 0x7f) as usize;
-            if n == 0 || n > 4 {
-                return Err(bad());
-            }
-            let mut l = 0usize;
-            for _ in 0..n {
-                l = (l << 8) | *self.b.get(self.pos).ok_or_else(bad)? as usize;
-                self.pos += 1;
-            }
-            l
-        };
-        let end = self.pos.checked_add(len).filter(|e| *e <= self.b.len()).ok_or_else(bad)?;
-        let content = &self.b[self.pos..end];
-        self.pos = end;
-        Ok((tag, content))
+        let rest = self.b.get(self.pos..).ok_or_else(bad)?;
+        let (tlv, after) = craft_ber::read(rest).ok_or_else(bad)?;
+        self.pos = self.b.len() - after.len();
+        Ok((tlv.tag, tlv.value))
     }
 
     fn done(&self) -> bool {

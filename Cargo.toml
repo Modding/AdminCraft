@@ -41,6 +41,8 @@ zeroize = "1.8"
 # Legacy code pages from the shared Craft libraries (house rule 16): decodes the output of Windows
 # console programs (ping, tracert, nslookup) in the computer's OEM code page.
 craft-codepage = { git = "https://github.com/storytold/craft-libs", rev = "d7c9632bfb3040cf45db394e7500cc93c81c49e0", version = "0.1.0" }
+# ASN.1 BER reading from the shared Craft libraries: the elements of an SNMP answer.
+craft-ber = { git = "https://github.com/storytold/craft-libs", rev = "d7c9632bfb3040cf45db394e7500cc93c81c49e0", version = "0.1.0" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 winit = "0.30"
