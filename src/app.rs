@@ -2911,6 +2911,16 @@ impl AdminApp {
                         section(ui, tr("Web"));
                         ui.add_enabled(cfg!(windows), egui::Checkbox::new(&mut e.web_in_tab, tr("Open in a tab (browser window, see Settings » Web interfaces)")))
                             .on_disabled_hover_text(tr("Only possible on Windows."));
+                        ui.horizontal(|ui| {
+                            let label = ui.label(tr("Browser"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut e.web_browser)
+                                    .hint_text(tr("empty = the one from the settings"))
+                                    .desired_width(f32::INFINITY),
+                            )
+                            .labelled_by(label.id)
+                            .on_hover_text(tr("Only for this connection, e.g. firefox.exe for a device whose page needs another browser."));
+                        });
                         if e.protocol == Protocol::Https && ui.button(tr("Check certificate")).clicked() {
                             act = Some(Act::CheckCert(id));
                         }

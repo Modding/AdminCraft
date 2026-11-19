@@ -267,6 +267,10 @@ Open with the **Settings** button, **Ctrl+,** or Tools » Settings.
 A browser chosen under *Web interfaces* is also used on Linux and macOS and for pages that don't go into a
 tab; there it opens in a window of its own. Without one, those pages open in the system's browser.
 
+A single web interface can use another browser: in its properties under *Web*, field *Browser* (e.g.
+`firefox.exe` for an old device whose page only works there). Empty means the one from the settings. An
+export or import leaves this field out, so a file from a colleague never names a program to start.
+
 ## Portable: everything next to the program
 
 AdminCraft is one file. Everything it keeps lives in folders next to it:

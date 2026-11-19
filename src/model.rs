@@ -400,6 +400,9 @@ pub struct Entry {
     pub baud: u32,
     /// Open web pages in a tab (Edge/Chrome app window, Windows) instead of the browser.
     pub web_in_tab: bool,
+    /// The browser program for this web interface; empty = the one from the settings.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub web_browser: String,
     /// SSH port forwardings of this connection.
     pub tunnels: Vec<Tunnel>,
     /// The KeePass entry or group this connection is kept in (KeePass as connection list).
@@ -438,6 +441,7 @@ impl Default for Entry {
             start_path: String::new(),
             baud: 9600,
             web_in_tab: false,
+            web_browser: String::new(),
             tunnels: Vec::new(),
             kp_id: String::new(),
         }

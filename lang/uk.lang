@@ -901,3 +901,5 @@ The list was changed elsewhere in the meantime and has been reloaded. Your versi
 The list was changed elsewhere in the meantime and was not overwritten. Your version was kept in {0}. = Тим часом список змінили в іншому місці, його не перезаписано. Вашу версію збережено в {0}.
 The file asks for {0} key derivation rounds (KdfIterations); AdminCraft accepts 1 to 1000000. = Файл вимагає {0} раундів формування ключа (KdfIterations); AdminCraft приймає від 1 до 1000000.
 The WebDAV password doesn't open with this master password (was it changed on another computer?). Enter it again in Settings » Storage location. = Пароль WebDAV не відкривається цим майстер-паролем (його змінили на іншому комп'ютері?). Введіть його знову в Налаштування » Місце зберігання.
+empty = the one from the settings => порожньо = той, що в налаштуваннях
+Only for this connection, e.g. firefox.exe for a device whose page needs another browser. = Лише для цього підключення, напр. firefox.exe для пристрою, сторінці якого потрібен інший браузер.

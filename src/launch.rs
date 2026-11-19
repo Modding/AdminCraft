@@ -130,6 +130,12 @@ fn hidden(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// The browser program a connection names for itself, when it is there.
+pub fn connection_browser(path: &str) -> Option<PathBuf> {
+    let p = PathBuf::from(path.trim().trim_matches('"'));
+    (!p.as_os_str().is_empty() && p.is_file()).then_some(p)
+}
+
 /// How a web interface opens.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WebStart {
@@ -390,7 +396,10 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
             } else {
                 format!("{scheme}://{host}:{}", e.port)
             };
-            let found = programs::find_with_source("browser", settings);
+            // this connection's own browser first, then the one from the settings
+            let found = connection_browser(&e.web_browser)
+                .map(|p| (p, programs::Source::Settings))
+                .or_else(|| programs::find_with_source("browser", settings));
             let own = matches!(found, Some((_, programs::Source::Settings)));
             let in_tab = e.web_in_tab || settings.web_all_in_tab;
             if let (WebStart::Browser { into_tab }, Some((browser, _))) = (web_start(cfg!(windows), in_tab, own, found.is_some()), found) {

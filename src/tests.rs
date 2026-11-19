@@ -2446,6 +2446,34 @@ fn deleting_a_folder_lists_one_level_per_login() {
 }
 
 #[test]
+fn browser_per_connection_never_comes_from_a_file_of_someone_else() {
+    use crate::launch::connection_browser;
+    use crate::model::Entry;
+    // a connection's own browser: used when the program is there, else the settings' one
+    assert!(connection_browser("").is_none());
+    assert!(connection_browser("   ").is_none());
+    assert!(connection_browser(r"C:\nowhere\firefox.exe").is_none());
+    let exe = std::env::current_exe().unwrap();
+    assert_eq!(connection_browser(&format!("\"{}\"", exe.display())), Some(exe.clone()));
+    // export and import leave it out: a colleague's file never names a program to start here
+    let dir = std::env::temp_dir().join(format!("admincraft-bpc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = temp_store("bpc");
+    let web = s.data.entries.iter().position(|e| !e.folder).unwrap();
+    s.data.entries[web].web_browser = exe.display().to_string();
+    let f = dir.join("export.json");
+    crate::sharing::export(&s, None, crate::sharing::PwMode::Without, "", &f).unwrap();
+    let (entries, pws) = crate::sharing::read(&std::fs::read_to_string(&f).unwrap(), "").unwrap();
+    assert!(entries.iter().all(|e| e.web_browser.is_empty()), "not exported");
+    let planted = vec![Entry { id: 1, name: "fw".into(), web_browser: r"C:\Windows\System32\cmd.exe".into(), ..Default::default() }];
+    let mut other = temp_store("bpc2");
+    let before = other.data.entries.len();
+    crate::sharing::merge(&mut other, planted, pws, "Import");
+    assert!(other.data.entries[before..].iter().all(|e| e.web_browser.is_empty()), "not imported");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn chosen_browser_on_every_system() {
     // work list 12: a browser chosen in the settings opened only on Windows, only for a tab
     use crate::launch::{WebStart, web_start};

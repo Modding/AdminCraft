@@ -274,6 +274,11 @@ Un navigateur choisi sous *Interfaces web* sert aussi sous Linux et macOS et pou
 dans un onglet ; il s'ouvre alors dans sa propre fenêtre. Sans lui, ces pages s'ouvrent dans le navigateur du
 système.
 
+Une interface web peut utiliser un autre navigateur : dans ses propriétés sous *Web*, champ *Navigateur*
+(p. ex. `firefox.exe` pour un ancien appareil dont la page ne marche que là). Vide signifie celui des
+paramètres. L'export et l'import laissent ce champ de côté : un fichier d'un collègue n'indique jamais un
+programme à lancer.
+
 ## Portable : tout à côté du programme
 
 AdminCraft tient en un seul fichier. Tout ce qu'il conserve se trouve dans des dossiers à côté de lui :

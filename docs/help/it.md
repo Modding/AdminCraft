@@ -272,6 +272,11 @@ Si aprono con il pulsante **Impostazioni**, con **Ctrl+,** o con Strumenti » Im
 Un browser scelto in *Interfacce web* viene usato anche su Linux e macOS e per le pagine che non vanno in una
 scheda; lì si apre in una finestra propria. Senza, queste pagine si aprono nel browser del sistema.
 
+Una singola interfaccia web può usare un altro browser: nelle sue proprietà sotto *Web*, campo *Browser*
+(ad es. `firefox.exe` per un vecchio dispositivo la cui pagina funziona solo lì). Vuoto significa quello
+delle impostazioni. Esportazione e importazione tralasciano questo campo, così un file di un collega non
+indica mai un programma da avviare.
+
 ## Portatile: tutto accanto al programma
 
 AdminCraft è un unico file. Tutto ciò che salva si trova in cartelle accanto ad esso:
