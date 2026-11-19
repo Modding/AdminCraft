@@ -978,7 +978,18 @@ fn launch_vnc(e: &Entry, c: &Creds, settings: &Settings) -> Result<Launch, Strin
 }
 
 /// Which helper programs this computer has – shown on the start page.
-pub fn system_check(settings: &Settings) -> Vec<(&'static str, String, bool)> {
+/// One line of the system check on the start page.
+pub struct Check {
+    pub what: &'static str,
+    /// The file found and where it came from, or the names looked for.
+    pub detail: String,
+    pub found: bool,
+    /// AdminCraft works without it (see `programs::is_optional`): missing is shown as optional,
+    /// not as a fault.
+    pub optional: bool,
+}
+
+pub fn system_check(settings: &Settings) -> Vec<Check> {
     let mut v = Vec::new();
     for p in programs::PROGRAMS {
         let found = programs::find_with_source(p.key, settings);
@@ -986,11 +997,16 @@ pub fn system_check(settings: &Settings) -> Vec<(&'static str, String, bool)> {
             Some((path, src)) => format!("{} ({})", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), src.label()),
             None => p.names.join(" / "),
         };
-        v.push((p.label, detail, found.is_some()));
+        v.push(Check { what: p.label, detail, found: found.is_some(), optional: programs::is_optional(p.key) });
     }
-    v.push(("PowerShell", tr("pwsh / powershell").into(), first_found(&["pwsh", "powershell"]).is_some()));
+    v.push(Check {
+        what: "PowerShell",
+        detail: tr("pwsh / powershell").into(),
+        found: first_found(&["pwsh", "powershell"]).is_some(),
+        optional: false,
+    });
     if cfg!(target_os = "macos") {
-        v.push(("RDP (Windows App)", tr(".rdp file").into(), true));
+        v.push(Check { what: "RDP (Windows App)", detail: tr(".rdp file").into(), found: true, optional: false });
     }
     v
 }

@@ -80,6 +80,8 @@ Right-click a folder » **Open all connections in the folder** opens them all at
 | Serial, raw TCP, rlogin | PuTTY in the tab or a terminal tab | PuTTY/plink (Windows); picocom, nc … elsewhere |
 | Local shell | terminal tab on this computer | — |
 
+**PuTTY is optional.** SSH runs in the built-in terminal tab with OpenSSH, which Windows 10/11, macOS and Linux already have; files go through the built-in transfer tab. PuTTY, WinSCP and FileZilla only add another way to open a connection: *Open with PuTTY* appears in the right-click menu only when PuTTY is found, and the system check shows missing ones as *not installed (optional)*. On macOS there is no need to install PuTTY.
+
 **Windows inside tabs.** On Windows, Remote Desktop, PuTTY, VNC and web windows are placed into the
 tab. Click into them to type. **As own window** detaches one again, **Focus** gives it the keyboard.
 On Linux and macOS these programs run in their own windows and the tab shows their state.

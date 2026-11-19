@@ -143,6 +143,15 @@ pub fn def(key: &str) -> Option<&'static ProgDef> {
     PROGRAMS.iter().find(|p| p.key == key)
 }
 
+/// Programs AdminCraft works without: SSH runs in the built-in terminal with OpenSSH, files in the
+/// built-in transfer tab, web pages in the normal browser. These only add a way to open something
+/// (PuTTY, WinSCP, FileZilla, an own browser window), so a missing one is no fault.
+const OPTIONAL: &[&str] = &["putty", "plink", "psftp", "pscp", "winscp", "filezilla", "remmina", "browser"];
+
+pub fn is_optional(key: &str) -> bool {
+    OPTIONAL.contains(&key)
+}
+
 /// "AdminCraftTools" next to the program (portable), or inside the data folder when the
 /// program's own folder can't be written (macOS app bundle, read-only share). Worked out once:
 /// the settings page and every program search ask for it, and the answer does not change while

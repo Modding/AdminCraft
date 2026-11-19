@@ -2457,6 +2457,27 @@ fn snmp_answers_read_through_craft_ber() {
 }
 
 #[test]
+fn putty_and_other_extras_are_optional() {
+    use crate::launch::system_check;
+    use crate::programs::is_optional;
+    // AdminCraft works without these: they only add a way to open something
+    for key in ["putty", "plink", "psftp", "pscp", "winscp", "filezilla", "remmina", "browser"] {
+        assert!(is_optional(key), "{key}");
+    }
+    // these do the work of a protocol: missing is a fault
+    for key in ["ssh", "sftp", "scp", "vnc", "rdp", "mstsc", "telnet"] {
+        assert!(!is_optional(key), "{key}");
+    }
+    // the system check says so for every line, found or not
+    let checks = system_check(&crate::model::Settings::default());
+    let putty = checks.iter().find(|c| c.what == "PuTTY").unwrap();
+    assert!(putty.optional);
+    let ssh = checks.iter().find(|c| c.what == "OpenSSH ssh").unwrap();
+    assert!(!ssh.optional);
+    assert!(checks.iter().filter(|c| c.what == "PowerShell").all(|c| !c.optional));
+}
+
+#[test]
 fn browser_per_connection_never_comes_from_a_file_of_someone_else() {
     use crate::launch::connection_browser;
     use crate::model::Entry;
