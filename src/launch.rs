@@ -130,6 +130,26 @@ fn hidden(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// How a web interface opens.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WebStart {
+    /// In the browser from the settings (or Edge/Chrome on Windows), its window in the tab when
+    /// `into_tab`.
+    Browser { into_tab: bool },
+    /// In the system's browser.
+    System,
+}
+
+/// A browser chosen in the settings is used on every system and also when the page doesn't go
+/// into a tab; without one, Edge or Chrome are only started for a tab on Windows. Only Windows
+/// can put the window into the tab.
+pub fn web_start(windows: bool, in_tab: bool, own_browser: bool, browser_found: bool) -> WebStart {
+    if !browser_found {
+        return WebStart::System;
+    }
+    if own_browser || (windows && in_tab) { WebStart::Browser { into_tab: windows && in_tab } } else { WebStart::System }
+}
+
 /// Main window classes of the two browser families (to find the window to put into the tab).
 const CHROMIUM_WINDOW: &[&str] = &["Chrome_WidgetWin_1"];
 const FIREFOX_WINDOW: &[&str] = &["MozillaWindowClass"];
@@ -370,10 +390,10 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
             } else {
                 format!("{scheme}://{host}:{}", e.port)
             };
-            if (e.web_in_tab || settings.web_all_in_tab)
-                && cfg!(windows)
-                && let Some(browser) = programs::find("browser", settings)
-            {
+            let found = programs::find_with_source("browser", settings);
+            let own = matches!(found, Some((_, programs::Source::Settings)));
+            let in_tab = e.web_in_tab || settings.web_all_in_tab;
+            if let (WebStart::Browser { into_tab }, Some((browser, _))) = (web_start(cfg!(windows), in_tab, own, found.is_some()), found) {
                 let family = browser_family(&browser, settings.web_family);
                 // an own profile per connection makes a new browser process whose window can be
                 // taken into the tab; the normal profile opens in the browser already running
@@ -387,7 +407,7 @@ pub fn launch(e: &Entry, c: &Creds, settings: &Settings, jumps: &[JumpHop], tab_
                 let args = web_args(family, &url, profile.as_deref(), &settings.web_args);
                 let child = spawn(&browser, &args)?;
                 let classes: &'static [&'static str] = if family == BrowserFamily::Firefox { FIREFOX_WINDOW } else { CHROMIUM_WINDOW };
-                let embed = (settings.embed_windows && profile.is_some()).then_some(classes);
+                let embed = (into_tab && settings.embed_windows && profile.is_some()).then_some(classes);
                 let label = if embed.is_some() { tf("Web in tab: {0}", &[&url]) } else { tf("Browser opened: {0}", &[&url]) };
                 return Ok(Launch::Process { child, label, embed });
             }

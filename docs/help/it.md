@@ -269,6 +269,9 @@ Si aprono con il pulsante **Impostazioni**, con **Ctrl+,** o con Strumenti » Im
   riprodurre, controllo regolare della raggiungibilità.
 - **Cassaforte password** — anche KeePass come intero elenco delle connessioni.
 
+Un browser scelto in *Interfacce web* viene usato anche su Linux e macOS e per le pagine che non vanno in una
+scheda; lì si apre in una finestra propria. Senza, queste pagine si aprono nel browser del sistema.
+
 ## Portatile: tutto accanto al programma
 
 AdminCraft è un unico file. Tutto ciò che salva si trova in cartelle accanto ad esso:

@@ -2446,6 +2446,24 @@ fn deleting_a_folder_lists_one_level_per_login() {
 }
 
 #[test]
+fn chosen_browser_on_every_system() {
+    // work list 12: a browser chosen in the settings opened only on Windows, only for a tab
+    use crate::launch::{WebStart, web_start};
+    // Linux / macOS: the chosen browser, in its own window
+    assert_eq!(web_start(false, true, true, true), WebStart::Browser { into_tab: false });
+    // no browser chosen there: the system's browser
+    assert_eq!(web_start(false, true, false, true), WebStart::System);
+    // Windows, into the tab: the chosen one or Edge/Chrome
+    assert_eq!(web_start(true, true, true, true), WebStart::Browser { into_tab: true });
+    assert_eq!(web_start(true, true, false, true), WebStart::Browser { into_tab: true });
+    // Windows, not into the tab: the chosen browser still, else the system's
+    assert_eq!(web_start(true, false, true, true), WebStart::Browser { into_tab: false });
+    assert_eq!(web_start(true, false, false, true), WebStart::System);
+    // nothing found: the system's browser
+    assert_eq!(web_start(true, true, true, false), WebStart::System);
+}
+
+#[test]
 fn psftp_batch_language() {
     // B8: psftp takes no options for ls, has no "-" prefix and doubles quotes instead of escaping
     use crate::transfer::Batch;

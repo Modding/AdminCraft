@@ -267,6 +267,10 @@ zeigt zuerst die lokale Kopie der Liste und fragt den Server, sobald das Masterp
   Aufzeichnungen zum Abspielen, regelmäßige Erreichbarkeitsprüfung.
 - **Passwort-Tresor** – auch KeePass als ganze Verbindungsliste.
 
+Ein unter *Weboberflächen* gewählter Browser wird auch unter Linux und macOS und für Seiten genutzt, die
+nicht in einen Tab kommen; dort öffnet er in einem eigenen Fenster. Ohne ihn öffnen diese Seiten im Browser
+des Systems.
+
 ## Portabel: alles neben dem Programm
 
 AdminCraft ist eine einzige Datei. Alles, was es speichert, liegt in Ordnern daneben:

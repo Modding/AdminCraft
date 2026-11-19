@@ -264,6 +264,9 @@ Open with the **Settings** button, **Ctrl+,** or Tools » Settings.
 - **Sessions and monitoring** — reopen the last connections at start, text logs, recordings for
   playback, regular reachability checks.
 
+A browser chosen under *Web interfaces* is also used on Linux and macOS and for pages that don't go into a
+tab; there it opens in a window of its own. Without one, those pages open in the system's browser.
+
 ## Portable: everything next to the program
 
 AdminCraft is one file. Everything it keeps lives in folders next to it:

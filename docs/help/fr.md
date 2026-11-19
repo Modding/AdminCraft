@@ -270,6 +270,10 @@ Ouvrez-les avec le bouton **Paramètres**, **Ctrl+,** ou Outils » Paramètres.
   enregistrements à rejouer, vérification régulière de l'accessibilité.
 - **Coffre à mots de passe** — aussi KeePass comme liste complète des connexions.
 
+Un navigateur choisi sous *Interfaces web* sert aussi sous Linux et macOS et pour les pages qui ne vont pas
+dans un onglet ; il s'ouvre alors dans sa propre fenêtre. Sans lui, ces pages s'ouvrent dans le navigateur du
+système.
+
 ## Portable : tout à côté du programme
 
 AdminCraft tient en un seul fichier. Tout ce qu'il conserve se trouve dans des dossiers à côté de lui :
