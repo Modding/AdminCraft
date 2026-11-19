@@ -2603,3 +2603,33 @@ fn exit_waits_for_the_last_webdav_upload_but_not_forever() {
     assert!(!s.wait_for_upload(Duration::from_millis(200)), "a stuck upload doesn't keep the program open");
     assert!(started.elapsed() < Duration::from_secs(2));
 }
+
+#[test]
+fn webdav_password_under_the_master_password() {
+    use crate::remote::RemoteConfig;
+    let master = Vault::derive("master", &new_salt()).unwrap();
+    let mut c = RemoteConfig::new("https://dav.example.com/it/".into(), "admin".into());
+    c.set_password("dav-secret", Some(&master));
+    assert_eq!(c.password(), "dav-secret");
+    let json = serde_json::to_string(&c).unwrap();
+    assert!(c.password_enc.is_empty(), "nothing under the program's fixed key");
+    assert!(!json.contains("dav-secret"));
+    assert!(!format!("{c:?}").contains("dav-secret"), "Debug never shows it");
+    // the saved settings, read at the next start: locked until the master password is given
+    let mut again: RemoteConfig = serde_json::from_str(&json).unwrap();
+    assert!(again.needs_unlock());
+    assert_eq!(again.password(), "", "no password before the master password");
+    let other = Vault::derive("other", &new_salt()).unwrap();
+    assert!(!again.open_sealed(&other), "another key doesn't open it");
+    assert!(again.open_sealed(&master));
+    assert_eq!(again.password(), "dav-secret");
+    // master password removed: back under the fixed key, opens without anything
+    assert!(again.protect(None));
+    let local: RemoteConfig = serde_json::from_str(&serde_json::to_string(&again).unwrap()).unwrap();
+    assert!(!local.needs_unlock() && local.password_sealed.is_empty());
+    assert_eq!(local.password(), "dav-secret");
+    // a locked password can't be moved (it isn't known)
+    let mut locked: RemoteConfig = serde_json::from_str(&json).unwrap();
+    assert!(!locked.protect(None));
+    assert!(locked.needs_unlock());
+}

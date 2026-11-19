@@ -11,17 +11,32 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
-/// The WebDAV password on this PC is only obfuscated with a fixed key (like browsers do
-/// without a master password); the list itself can be encrypted with the master password.
+/// Without a master password the WebDAV password on this PC is only obfuscated with a fixed key
+/// (like browsers do without one). With a master password it is encrypted with the list's key
+/// (`password_sealed`), so it opens only after the master password was entered.
 const LOCAL_KEY: &str = "admincraft-remote-local";
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RemoteConfig {
     /// Full address of the file, or of a folder ending in "/" (connections.json is added).
     pub url: String,
     pub user: String,
+    /// The password under the program's fixed key (no master password).
     pub password_enc: String,
+    /// The password under the list's key (with a master password).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub password_sealed: String,
+    /// `password_sealed` opened with the master password, for this run only.
+    #[serde(skip)]
+    unlocked: Option<String>,
+}
+
+/// Never shows the password (log lines, error reports).
+impl std::fmt::Debug for RemoteConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteConfig").field("url", &self.url).field("user", &self.user).field("sealed", &!self.password_sealed.is_empty()).finish()
+    }
 }
 
 /// Derived once per run (same key and parameters every time): every WebDAV request needs the
@@ -32,12 +47,64 @@ fn local_vault() -> Option<&'static Vault> {
 }
 
 impl RemoteConfig {
-    pub fn password(&self) -> String {
-        local_vault().and_then(|v| v.decrypt(&self.password_enc)).unwrap_or_default()
+    pub fn new(url: String, user: String) -> RemoteConfig {
+        RemoteConfig { url, user, ..Default::default() }
     }
 
-    pub fn set_password(&mut self, pw: &str) {
-        self.password_enc = if pw.is_empty() { String::new() } else { local_vault().and_then(|v| v.encrypt(pw).ok()).unwrap_or_default() };
+    pub fn password(&self) -> String {
+        if self.password_sealed.is_empty() {
+            local_vault().and_then(|v| v.decrypt(&self.password_enc)).unwrap_or_default()
+        } else {
+            self.unlocked.clone().unwrap_or_default()
+        }
+    }
+
+    /// Stores the password under the list's key (`vault`, with a master password) or, without
+    /// one, under the program's fixed key.
+    pub fn set_password(&mut self, pw: &str, vault: Option<&Vault>) {
+        self.password_enc.clear();
+        self.password_sealed.clear();
+        self.unlocked = None;
+        if pw.is_empty() {
+            return;
+        }
+        match vault {
+            Some(v) => {
+                self.password_sealed = v.encrypt(pw).unwrap_or_default();
+                self.unlocked = Some(pw.to_string());
+            }
+            None => self.password_enc = local_vault().and_then(|v| v.encrypt(pw).ok()).unwrap_or_default(),
+        }
+    }
+
+    /// The password is under the master password and wasn't opened yet: the server can't be
+    /// asked before the list is unlocked.
+    pub fn needs_unlock(&self) -> bool {
+        !self.password_sealed.is_empty() && self.unlocked.is_none()
+    }
+
+    /// Opens the sealed password with the list's key; false when the key doesn't fit (the master
+    /// password was changed elsewhere).
+    pub fn open_sealed(&mut self, vault: &Vault) -> bool {
+        match vault.decrypt(&self.password_sealed) {
+            Some(pw) => {
+                self.unlocked = Some(pw);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Stores the known password again under `vault` (master password set or changed) or under
+    /// the fixed key (`None`, master password removed). False when there is nothing to move, or
+    /// the password is still locked.
+    pub fn protect(&mut self, vault: Option<&Vault>) -> bool {
+        if self.needs_unlock() || (self.password_enc.is_empty() && self.password_sealed.is_empty()) {
+            return false;
+        }
+        let pw = self.password();
+        self.set_password(&pw, vault);
+        true
     }
 
     pub fn file_url(&self) -> String {

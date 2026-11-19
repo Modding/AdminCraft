@@ -236,6 +236,9 @@ daneben aufbewahrt (`….conflict-….json`); die Statusleiste nennt sie.
 **Umstieg von anderen Werkzeugen:** Datei » mRemoteNG-Datei importieren (`confCons.xml`, mit Passwörtern) und
 Datei » OpenSSH-Konfiguration importieren (`~/.ssh/config`, einschließlich ProxyJump).
 
+Mit Masterpasswort wird auch das WebDAV-Passwort auf diesem Computer damit verschlüsselt: AdminCraft
+zeigt zuerst die lokale Kopie der Liste und fragt den Server, sobald das Masterpasswort eingegeben ist.
+
 ## Einstellungen
 
 Öffnen über die Schaltfläche **Einstellungen**, **Ctrl+,** oder Werkzeuge » Einstellungen.

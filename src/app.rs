@@ -4359,8 +4359,8 @@ impl AdminApp {
                 if ui.add_enabled(!dav_busy, egui::Button::new(tr("Test connection"))).clicked() {
                     let (url, user, pw) = (self.dav_url.clone(), self.dav_user.clone(), self.dav_pw.clone());
                     self.start_dav_job(ui.ctx(), move || {
-                        let mut c = crate::remote::RemoteConfig { url, user, password_enc: String::new() };
-                        c.set_password(&pw);
+                        let mut c = crate::remote::RemoteConfig::new(url, user);
+                        c.set_password(&pw, None);
                         match crate::remote::test(&c) {
                             Ok(m) => (true, m),
                             Err(e) => (false, e),
@@ -4377,13 +4377,15 @@ impl AdminApp {
                 let shared = self.shared_edit.clone();
                 let path = self.store.path.clone();
                 let (url, user, pw) = (self.dav_url.trim().to_string(), self.dav_user.clone(), self.dav_pw.clone());
+                // with a master password the WebDAV password is kept under the list's key
+                let vault = if self.store.data.master { self.store.vault.clone() } else { None };
                 let saved = tr("Saved – please restart AdminCraft.").to_string();
                 self.start_dav_job(ui.ctx(), move || {
                     let result = match kind {
                         1 => crate::model::set_shared_location(&shared, &path).and_then(|_| crate::remote::save_config(&Default::default())),
                         2 => {
-                            let mut c = crate::remote::RemoteConfig { url, user, password_enc: String::new() };
-                            c.set_password(&pw);
+                            let mut c = crate::remote::RemoteConfig::new(url, user);
+                            c.set_password(&pw, vault.as_ref());
                             // first time: put the current list on the server unless one is there already
                             match crate::remote::fetch(&c) {
                                 Ok(None) => std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| crate::remote::upload(&c, &t)),

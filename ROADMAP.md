@@ -288,8 +288,10 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
    psftp/pscp. The logic is covered by tests, the programs themselves were not at hand.
 4. **Look at the hint in the properties panel** (password saved without a master password) in
    all five languages with `--screenshot`; it reuses existing texts and was not looked at yet.
-5. **The saved WebDAV password** (`src/remote.rs`) is encrypted with a key built into the
-   program, so it is only obscured. Encrypt it with the store's vault when a master password is set.
+5. *fixed* · **The saved WebDAV password** (`src/remote.rs`) was encrypted with a key built into the
+   program only. With a master password it is now encrypted with the list's key (`password_sealed`):
+   the server is asked once the list is unlocked, setting, changing or removing the master password
+   moves it. *To try* with a real WebDAV server: start, unlock, change the master password.
 6. **Licences:** `Zlib`, `BSL-1.0` and `CDLA-Permissive-2.0` joined the Craft allowlist
    (craft-contrib RFC-0027), so every licence in `ATTRIBUTION.md` is on it or offered as one choice
    of an `OR`. Still to settle with craft-contrib: three crates name a licence outside the list as

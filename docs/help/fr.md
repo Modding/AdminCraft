@@ -238,6 +238,10 @@ fichier à côté (`….conflict-….json`) ; la barre d'état l'indique.
 **Venir d'autres outils :** Fichier » Importer un fichier mRemoteNG (`confCons.xml`, avec les mots de passe) et
 Fichier » Importer la configuration OpenSSH (`~/.ssh/config`, ProxyJump compris).
 
+Avec un mot de passe maître, le mot de passe WebDAV de cet ordinateur est lui aussi chiffré avec lui :
+AdminCraft montre d'abord la copie locale de la liste et interroge le serveur une fois le mot de passe
+maître saisi.
+
 ## Paramètres
 
 Ouvrez-les avec le bouton **Paramètres**, **Ctrl+,** ou Outils » Paramètres.

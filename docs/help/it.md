@@ -237,6 +237,10 @@ accanto (`….conflict-….json`); la barra di stato lo indica.
 **Passare da altri strumenti:** File » Importa file mRemoteNG (`confCons.xml`, con le password) e
 File » Importa configurazione OpenSSH (`~/.ssh/config`, incluso ProxyJump).
 
+Con una password principale, anche la password WebDAV su questo computer viene cifrata con essa:
+AdminCraft mostra prima la copia locale dell'elenco e interroga il server dopo che hai inserito la
+password principale.
+
 ## Impostazioni
 
 Si aprono con il pulsante **Impostazioni**, con **Ctrl+,** o con Strumenti » Impostazioni.
