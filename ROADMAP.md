@@ -179,7 +179,7 @@ fixes one marks it **fixed**. Items marked *to try* need a real program or serve
 - **C9** *fixed* · Network ranges like `255.255.255.0/24` overflow (`netscan.rs` `parse_targets`).
 - **C10** *fixed* · SNMP: OID arithmetic overflows; one damaged packet from the target ends the query
   (`nettools.rs`).
-- **C11** *partly fixed* (still open: KeePass saves run on the UI thread) · The UI waits for slow work: `shutdown /m`, WebDAV test and apply, writes into a terminal
+- **C11** *fixed* (KeePass saves now run on a writer thread, `KdbxJob`; AdminCraft waits up to 20 s for the last one when it closes) · The UI waits for slow work: `shutdown /m`, WebDAV test and apply, writes into a terminal
   (a large paste into a slow session), KeePass saves (`app.rs`, `extra.rs`, `terminal.rs`, `model.rs`).
 - **C12** *fixed* · FTP has no timeouts; closing a transfer tab doesn't cancel queued jobs (`transfer.rs`).
 - **C13** *fixed* · MCP `port_scan` can block the MCP server for over an hour; the first address may be IPv6
@@ -211,7 +211,7 @@ fixes one marks it **fixed**. Items marked *to try* need a real program or serve
   request (`model.rs`, `remote.rs`).
 - **P14** *fixed* · Every save encrypts every password again, so the file always changes: needless uploads
   and reloads (`model.rs`).
-- **P15** *partly fixed* (an unchanged list is not written again; the key derivation itself still runs twice per real save) · A KeePass save runs the key derivation twice on the UI thread, also when only settings
+- **P15** *fixed* (an unchanged list is not written again; a save starts from the database read or written last, `kdbx::save_cached`, so one key derivation instead of two, unless KeePass changed the file meanwhile) · A KeePass save runs the key derivation twice on the UI thread, also when only settings
   changed (`model.rs`, `kdbx.rs`).
 - **P16** *open* (needs one sftp session per batch) · File transfer logs in once per folder when deleting, and once more for the listing after
   each job (`transfer.rs`).
@@ -354,7 +354,6 @@ again (`Embedded::keep_inside` in `src/embed.rs`).
 ## Ideas
 
 - Native RDP/VNC rendering on Linux and macOS inside the tab (planned).
-- Saving into KeePass in the background (big databases with strong key settings take a moment to save).
 - SNMP v3 (user and encryption).
 - More languages (`AdminCraftLang/xx.lang`); the French, Italian and Ukrainian texts would profit from a native speaker's review.
 - Screenshots inside the user guide (in the program; on GitHub they are shown already).
