@@ -901,3 +901,5 @@ The list was changed elsewhere in the meantime and has been reloaded. Your versi
 The list was changed elsewhere in the meantime and was not overwritten. Your version was kept in {0}. = La liste a été modifiée ailleurs entre-temps et n’a pas été écrasée. Votre version a été conservée dans {0}.
 The file asks for {0} key derivation rounds (KdfIterations); AdminCraft accepts 1 to 1000000. = Le fichier demande {0} tours de dérivation de clé (KdfIterations) ; AdminCraft accepte de 1 à 1000000.
 The WebDAV password doesn't open with this master password (was it changed on another computer?). Enter it again in Settings » Storage location. = Le mot de passe WebDAV ne s'ouvre pas avec ce mot de passe maître (a-t-il été changé sur un autre ordinateur ?). Saisissez-le de nouveau dans Paramètres » Emplacement de stockage.
+empty = the one from the settings => vide = celui des paramètres
+Only for this connection, e.g. firefox.exe for a device whose page needs another browser. = Seulement pour cette connexion, p. ex. firefox.exe pour un appareil dont la page demande un autre navigateur.

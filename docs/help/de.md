@@ -271,6 +271,11 @@ Ein unter *Weboberflächen* gewählter Browser wird auch unter Linux und macOS u
 nicht in einen Tab kommen; dort öffnet er in einem eigenen Fenster. Ohne ihn öffnen diese Seiten im Browser
 des Systems.
 
+Eine einzelne Weboberfläche kann einen anderen Browser nutzen: in ihren Eigenschaften unter *Web*, Feld
+*Browser* (z. B. `firefox.exe` für ein altes Gerät, dessen Seite nur dort funktioniert). Leer heißt: der aus
+den Einstellungen. Export und Import lassen dieses Feld weg, damit eine Datei von Kollegen nie ein Programm
+zum Starten mitbringt.
+
 ## Portabel: alles neben dem Programm
 
 AdminCraft ist eine einzige Datei. Alles, was es speichert, liegt in Ordnern daneben:

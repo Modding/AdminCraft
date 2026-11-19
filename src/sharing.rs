@@ -60,6 +60,7 @@ fn collect(store: &Store, root: Option<u64>) -> Vec<Entry> {
         .map(|mut e| {
             e.password_enc = None; // encrypted with this PC's key: useless elsewhere
             e.kp_id.clear(); // a KeePass entry of this list: the copy must not write over it
+            e.web_browser.clear(); // a program path of this computer means nothing elsewhere
             e
         })
         .collect()
@@ -168,6 +169,8 @@ pub fn merge(store: &mut Store, entries: Vec<Entry>, passwords: BTreeMap<u64, St
         e.password_enc = None;
         // the colleague's KeePass ids mean nothing here (and must not hit entries of this list)
         e.kp_id.clear();
+        // an imported file names no program to start here: its browser is chosen on this computer
+        e.web_browser.clear();
         added.push(e);
     }
     crate::model::break_parent_cycles(&mut added, Some(folder_id));
