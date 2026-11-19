@@ -2410,6 +2410,42 @@ fn console_output_in_the_oem_code_page() {
 }
 
 #[test]
+fn deleting_a_folder_lists_one_level_per_login() {
+    // P16: one login per folder before; now one per level of folders
+    use crate::transfer::{RemoteItem, parse_sections, walk_levels};
+    let item =
+        |name: &str, dir: bool| RemoteItem { name: name.into(), is_dir: dir, is_link: false, size: 0, modified: String::new(), perms: String::new() };
+    // /site: a.txt, img/ (x.png, thumbs/ (t.png)), css/ (s.css)
+    let tree = |dir: &str| -> Vec<RemoteItem> {
+        match dir {
+            "/site" => vec![item("a.txt", false), item("img", true), item("css", true)],
+            "/site/img" => vec![item("x.png", false), item("thumbs", true)],
+            "/site/img/thumbs" => vec![item("t.png", false)],
+            "/site/css" => vec![item("s.css", false)],
+            _ => Vec::new(),
+        }
+    };
+    let mut logins = 0;
+    let (files, dirs) = walk_levels("/site", |level| {
+        logins += 1;
+        Ok(level.iter().map(|d| tree(d)).collect())
+    })
+    .unwrap();
+    assert_eq!(logins, 3, "three levels, three logins (four folders)");
+    assert_eq!(files.len(), 4);
+    assert_eq!(dirs, vec!["/site/img/thumbs", "/site/img", "/site/css", "/site"], "deepest first, so rmdir works");
+    // a folder that never ends is refused, not walked for ever
+    let deep = walk_levels("/x", |level| Ok(level.iter().map(|_| vec![item("d", true)]).collect()));
+    assert!(deep.is_err());
+    // several listings in one output
+    let out = "sftp> pwd\nRemote working directory: /site/img\nsftp> ls -la\n-rw-r--r--    1 u g  10 Jan  1 10:00 x.png\n\
+               drwxr-xr-x    2 u g 4096 Jan  1 10:00 thumbs\nRemote working directory: /site/css\n-rw-r--r--    1 u g 3 Jan  1 10:00 s.css\n";
+    let s = parse_sections(out);
+    assert_eq!(s.len(), 2);
+    assert_eq!((s[0].0.as_str(), s[0].1.len(), s[1].0.as_str(), s[1].1.len()), ("/site/img", 2, "/site/css", 1));
+}
+
+#[test]
 fn psftp_batch_language() {
     // B8: psftp takes no options for ls, has no "-" prefix and doubles quotes instead of escaping
     use crate::transfer::Batch;
