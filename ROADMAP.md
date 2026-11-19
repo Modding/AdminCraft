@@ -331,8 +331,9 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
     in a tab unless switched off. The window is also found when it belongs to a process the started
     one launched (launchers, browsers that hand over), `embed::descendants`. Tried live: Edge in the
     tab. Still to do: try it with Brave Origin and a Firefox browser on Windows (window found and
-    placed in the tab, focus, size, logins kept); hide the browser's own title bar inside the tab; a browser per connection instead of one for all; on Linux/macOS use the chosen
-    browser too instead of the system one. A built-in webview (WebView2) is not an option: the Rust
+    placed in the tab, focus, size, logins kept); hide the browser's own title bar inside the tab; a
+    browser per connection instead of one for all. *Done:* a chosen browser is also used on Linux and
+    macOS and for pages that don't go into a tab (`launch::web_start`). A built-in webview (WebView2) is not an option: the Rust
     house rules allow no webview in native Craft apps.
 13. **Shared libraries first** (house rule 16). `storytold/craft-libs` has crates for code
     AdminCraft carries itself: `craft-ber` (SNMP), `craft-codepage` (Windows console output, *done*),
