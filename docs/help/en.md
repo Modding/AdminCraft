@@ -235,6 +235,9 @@ When a colleague saved while you were editing, their list stays and yours is kep
 **Moving from other tools:** File » Import mRemoteNG file (`confCons.xml`, with passwords) and
 File » Import OpenSSH configuration (`~/.ssh/config`, including ProxyJump).
 
+With a master password, the WebDAV password on this computer is encrypted with it too: AdminCraft
+shows the local copy of the list first and asks the server once you entered the master password.
+
 ## Settings
 
 Open with the **Settings** button, **Ctrl+,** or Tools » Settings.

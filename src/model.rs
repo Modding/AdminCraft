@@ -928,13 +928,23 @@ impl Store {
     pub fn open(read_only: bool) -> Store {
         let remote = crate::remote::load_config();
         let path = if remote.is_some() { crate::remote::cache_path() } else { connections_file(!read_only) };
-        let server = remote.as_ref().map(crate::remote::fetch);
+        // a WebDAV password under the master password opens only with it: then the local copy
+        // is shown first and the server asked once the list is unlocked
+        let server = remote.as_ref().filter(|r| !r.needs_unlock()).map(crate::remote::fetch);
         let mut store = Store::open_at(path, remote, server, read_only);
         // command line / MCP server: the master password may come from the environment
         if store.vault.is_none()
             && let Ok(pw) = std::env::var("AC_MASTER")
+            && store.unlock(&pw)
         {
-            store.unlock(&pw);
+            // no window that polls later: take the server's list right now
+            if let Some(r) = store.remote.clone()
+                && let Ok(Some(t)) = crate::remote::fetch(&r)
+                && store.replace_if_same_key(&t)
+                && !store.read_only
+            {
+                let _ = write_atomic(&store.path, &t);
+            }
         }
         if store.kdbx_waiting
             && let Ok(pw) = std::env::var("AC_KEEPASS")
@@ -1354,7 +1364,25 @@ impl Store {
             self.vault = Some(vault);
             self.decrypt_all();
         }
+        self.remote_after_unlock();
         true
+    }
+
+    /// WebDAV after the master password was entered: open the sealed server password and ask
+    /// the server; a password still under the fixed key moves under the list's key.
+    fn remote_after_unlock(&mut self) {
+        let Some(vault) = self.vault.clone() else { return };
+        let master = self.data.master;
+        let Some(r) = self.remote.as_mut() else { return };
+        if r.needs_unlock() {
+            if r.open_sealed(&vault) {
+                self.poll_remote();
+            } else {
+                self.last_error = Some(tr("The WebDAV password doesn't open with this master password (was it changed on another computer?). Enter it again in Settings » Storage location.").into());
+            }
+        } else if master && !r.password_enc.is_empty() && r.protect(Some(&vault)) && !self.read_only {
+            let _ = crate::remote::save_config(r);
+        }
     }
 
     fn decrypt_all(&mut self) {
@@ -1381,6 +1409,14 @@ impl Store {
         self.data.salt = B64.encode(&salt);
         self.data.master = master;
         self.data.verifier = verifier;
+        // the WebDAV password follows: under the new key, or back under the fixed one
+        if let Some(r) = self.remote.as_mut()
+            && r.protect(master.then_some(&vault))
+            && !self.read_only
+            && let Err(e) = crate::remote::save_config(r)
+        {
+            self.last_error = Some(e);
+        }
         self.vault = Some(vault);
         self.save();
     }
