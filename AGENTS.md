@@ -116,7 +116,8 @@ An admin tool that dies takes every open session with it. This outranks feature 
   says why it is sound:
   - `src/embed.rs` — placing other programs' windows into tabs, focus, tab screenshots;
   - `src/wincred.rs` — the Credential Manager entry for the Remote Desktop login;
-  - `src/winconsole.rs` — attaching the release build to the terminal it was started from.
+  - `src/winconsole.rs` — attaching the release build to the terminal it was started from, the
+    OEM code page of console programs.
   New `unsafe` goes into one of these, or gets its own named module here. Nothing else.
 
 ## Layout
@@ -148,7 +149,7 @@ An admin tool that dies takes every open session with it. This outranks feature 
 | `src/timefmt.rs` | dates and times as text, through `chrono` |
 | `src/secretfile.rs` | password files for other programs (PuTTY's `-pwfile`), removed when the program is done |
 | `src/wincred.rs` | Windows Credential Manager entry for the Remote Desktop login (written, then removed) |
-| `src/winconsole.rs` | attaches the release build to the terminal it was started from (Windows) |
+| `src/winconsole.rs` | attaches the release build to the terminal it was started from; the OEM code page console programs write in (Windows) |
 
 ## Versions and releases
 

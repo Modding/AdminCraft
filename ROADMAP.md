@@ -243,7 +243,8 @@ fixes one marks it **fixed**. Items marked *to try* need a real program or serve
   (`transfer.rs` `parse_ls_line`).
 - **B10** *fixed* · IPv6 literals are not bracketed for scp, sftp, FTP and `-J` (`transfer.rs`).
 - **B11** *fixed* · Session logs keep the `B` of `ESC ( B` and DCS payloads (`terminal.rs`).
-- **B12** *open* (use craft-libs `craft-codepage`, work list item 13) · Windows console output: only German letters of code page 850 are decoded (`tools.rs`).
+- **B12** *fixed* · Windows console output: only German letters of code page 850 are decoded (`tools.rs`).
+  Now the computer's OEM code page (`winconsole::oem_code_page`) through craft-libs `craft-codepage`.
 - **B13** *fixed* · "Change" / "Set" (master password) are not translated (`app.rs`).
 - **B14** *fixed* · `--open connect:NAME` can pick a folder (`app.rs`).
 - **B15** *fixed* · MCP `initialize` echoes any protocol version; ports are cut with `as u16`
@@ -329,7 +330,7 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
     browser too instead of the system one. A built-in webview (WebView2) is not an option: the Rust
     house rules allow no webview in native Craft apps.
 13. **Shared libraries first** (house rule 16). `storytold/craft-libs` has crates for code
-    AdminCraft carries itself: `craft-ber` (SNMP), `craft-codepage` (Windows console output),
+    AdminCraft carries itself: `craft-ber` (SNMP), `craft-codepage` (Windows console output, *done*),
     `craft-atomic` (safe file replacement), `craft-dav` (WebDAV), `craft-jsonrpc` / `craft-mcp`
     (the MCP server), `craft-i18n`, `craft-update`. Check each one's API and licence and move over
     one at a time; the UI crates need the same egui version (craft-libs v0.1.0 uses egui 0.36).

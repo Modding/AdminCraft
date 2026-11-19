@@ -9,7 +9,7 @@ target platforms). Each crate keeps its own license; see the crate for the full 
 
 | License | Crates |
 |---|---|
-| MIT OR Apache-2.0 | 230 |
+| MIT OR Apache-2.0 | 231 |
 | MIT | 106 |
 | Apache-2.0 OR MIT | 56 |
 | MIT/Apache-2.0 | 20 |
@@ -52,6 +52,7 @@ target platforms). Each crate keeps its own license; see the crate for the full 
 | base64 | 0.22.1 | MIT OR Apache-2.0 |
 | base64 | 0.23.1 | MIT OR Apache-2.0 |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
+| craft-codepage | 0.1.0 | MIT OR Apache-2.0 |
 | eframe | 0.37.0 | MIT OR Apache-2.0 |
 | getrandom | 0.2.17 | MIT OR Apache-2.0 |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 |
@@ -204,6 +205,7 @@ Every asset file in this repository, with author, source and licence.
 | core-graphics-types | 0.1.3 | MIT OR Apache-2.0 |
 | cpubits | 0.1.1 | MIT OR Apache-2.0 |
 | cpufeatures | 0.3.1 | MIT OR Apache-2.0 |
+| craft-codepage | 0.1.0 | MIT OR Apache-2.0 |
 | crc32fast | 1.5.5 | MIT OR Apache-2.0 |
 | crossbeam-utils | 0.8.23 | MIT OR Apache-2.0 |
 | crunchy | 0.2.4 | MIT |

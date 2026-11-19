@@ -2399,6 +2399,17 @@ fn unchanged_keepass_list_is_not_written_again() {
 }
 
 #[test]
+fn console_output_in_the_oem_code_page() {
+    // B12: only the German letters of code page 850 were decoded, everything else became '?'
+    use crate::tools::decode_with;
+    assert_eq!(decode_with(b"Zeit\x81berschreitung", 850), "Zeitüberschreitung");
+    assert_eq!(decode_with(b"r\x82ponse", 850), "réponse", "French on code page 850");
+    assert_eq!(decode_with(&[0x8F, 0xE0, 0xA8, 0xA2, 0xA5, 0xE2], 866), "Привет", "Cyrillic on 866");
+    assert_eq!(decode_with("schon UTF-8: ü".as_bytes(), 850), "schon UTF-8: ü");
+    assert_eq!(decode_with(b"\x81", 1), "ü", "an unknown code page reads as 850");
+}
+
+#[test]
 fn psftp_batch_language() {
     // B8: psftp takes no options for ls, has no "-" prefix and doubles quotes instead of escaping
     use crate::transfer::Batch;
