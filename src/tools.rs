@@ -11,25 +11,27 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Decodes console output: UTF-8 when valid, otherwise the old DOS code page (German umlauts).
+/// Decodes console output: UTF-8 when valid, otherwise the computer's OEM (DOS) code page.
 fn decode(bytes: &[u8]) -> String {
+    static OEM: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+    decode_with(bytes, *OEM.get_or_init(crate::winconsole::oem_code_page))
+}
+
+/// `decode` with a given DOS code page (an unknown one reads as 850, the most common in Europe).
+pub fn decode_with(bytes: &[u8], code_page: u16) -> String {
     match std::str::from_utf8(bytes) {
         Ok(s) => s.to_string(),
-        Err(_) => bytes
-            .iter()
-            .map(|&b| match b {
-                0x81 => 'ü',
-                0x84 => 'ä',
-                0x94 => 'ö',
-                0x8E => 'Ä',
-                0x99 => 'Ö',
-                0x9A => 'Ü',
-                0xE1 => 'ß',
-                0xFF => ' ',
-                b if b < 0x80 => b as char,
-                _ => '?',
-            })
-            .collect(),
+        Err(_) => {
+            let upper = craft_codepage::dos_upper(code_page).or_else(|| craft_codepage::dos_upper(850));
+            bytes
+                .iter()
+                .map(|&b| match (b, upper) {
+                    (b, _) if b < 0x80 => b as char,
+                    (b, Some(t)) => t.get(usize::from(b - 0x80)).copied().unwrap_or('?'),
+                    _ => '?',
+                })
+                .collect()
+        }
     }
 }
 
