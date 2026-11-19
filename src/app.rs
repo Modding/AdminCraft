@@ -2565,6 +2565,9 @@ impl AdminApp {
         let default_client = self.store.data.settings.default_ssh_client;
 
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // room for the scroll bar, which floats over the content: long texts (Ukrainian) and
+            // the full-width fields would otherwise run under it and be cut at the right
+            ui.set_max_width((ui.available_width() - 12.0).max(120.0));
             ui.horizontal(|ui| {
                 if e.folder {
                     ui.label(RichText::new(tr("Folder")).color(Color32::from_rgb(232, 180, 60)).strong());

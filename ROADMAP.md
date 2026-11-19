@@ -293,8 +293,10 @@ first, run `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warni
 3. **Try the password files with a real PuTTY** (0.77 or newer, and one older): direct login,
    a jump host through plink (reconnect with *Restart session* too), and file transfer with
    psftp/pscp. The logic is covered by tests, the programs themselves were not at hand.
-4. **Look at the hint in the properties panel** (password saved without a master password) in
-   all five languages with `--screenshot`; it reuses existing texts and was not looked at yet.
+4. *fixed* · **Look at the hint in the properties panel** (password saved without a master password)
+   in all five languages with `--screenshot`. Looked at: right in English, German, French and
+   Italian; in Ukrainian the panel's text and fields ran under the floating scroll bar and were cut
+   at the right. The panel's content now leaves room for the scroll bar.
 5. *fixed* · **The saved WebDAV password** (`src/remote.rs`) was encrypted with a key built into the
    program only. With a master password it is now encrypted with the list's key (`password_sealed`):
    the server is asked once the list is unlocked, setting, changing or removing the master password
