@@ -203,10 +203,23 @@ pub fn next_job(rx: &Receiver<Job>, cancel: &AtomicBool) -> Option<Job> {
 /// Runs one job against the server, after checking host and users (S7: none may become an
 /// option of the program that is started). `notes` gets lines for the log (skipped names).
 fn run_job(ep: &Endpoint, ftp: &mut Option<FtpConn>, job: &Job, cwd: &mut String, notes: &mut Vec<String>) -> Result<Outcome, String> {
+    run_job_then_list(ep, ftp, job, cwd, notes, false)
+}
+
+/// `run_job`; with `relist`, SFTP through OpenSSH lists the folder in the same login after a
+/// change (P16: one login instead of two).
+fn run_job_then_list(
+    ep: &Endpoint,
+    ftp: &mut Option<FtpConn>,
+    job: &Job,
+    cwd: &mut String,
+    notes: &mut Vec<String>,
+    relist: bool,
+) -> Result<Outcome, String> {
     check_endpoint(ep)?;
     match ep.kind {
         Kind::Ftp => run_ftp(ep, ftp, job, cwd, notes),
-        Kind::Sftp => run_sftp(ep, job, cwd),
+        Kind::Sftp => run_sftp(ep, job, cwd, relist),
         Kind::Scp => run_scp(ep, job, cwd),
     }
 }
@@ -233,8 +246,12 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, cancel: A
         }
         ctx.request_repaint();
         let is_list = matches!(job, Job::List(_));
+        // a download changes nothing on the server: no new listing afterwards
+        let changes_server = !is_list && !matches!(job, Job::Download { .. });
+        let last = shared.lock().unwrap_or_else(|e| e.into_inner()).queued == 0;
         let mut notes = Vec::new();
-        let result = run_job(&ep, &mut ftp, &job, &mut cwd, &mut notes);
+        let result = run_job_then_list(&ep, &mut ftp, &job, &mut cwd, &mut notes, changes_server && last);
+        let mut listed = false;
         for n in notes {
             log(&shared, false, n);
         }
@@ -252,6 +269,14 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, cancel: A
                     shared.lock().unwrap_or_else(|e| e.into_inner()).local_changed = true;
                 }
             }
+            Ok(Outcome::DoneListed(msg, dir, items)) => {
+                log(&shared, true, msg);
+                let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                s.cwd = dir.clone();
+                s.items = items;
+                cwd = dir;
+                listed = true;
+            }
             Err(e) => {
                 log(&shared, false, format!("{}: {e}", job.describe()));
                 if is_list && !shared.lock().unwrap_or_else(|e| e.into_inner()).connected {
@@ -259,8 +284,8 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, cancel: A
                 }
             }
         }
-        // after a change on the server, show the folder again
-        if !is_list && !cancel.load(Ordering::SeqCst) {
+        // after a change on the server, show the folder again (unless that came along already)
+        if changes_server && !listed && !cancel.load(Ordering::SeqCst) {
             let again = shared.lock().unwrap_or_else(|e| e.into_inner()).queued == 0;
             if again {
                 let dir = cwd.clone();
@@ -281,6 +306,8 @@ fn worker(ep: Endpoint, rx: Receiver<Job>, shared: Arc<Mutex<Shared>>, cancel: A
 enum Outcome {
     Listing(String, Vec<RemoteItem>),
     Done(String),
+    /// Done, and the folder listed again in the same login.
+    DoneListed(String, String, Vec<RemoteItem>),
 }
 
 // ------------------------------------------------------------------ OpenSSH / PuTTY helpers
@@ -699,26 +726,89 @@ fn sftp_list(ep: &Endpoint, path: &str) -> Result<(String, Vec<RemoteItem>), Str
     }
 }
 
-fn sftp_walk(ep: &Endpoint, dir: &str, files: &mut Vec<String>, dirs: &mut Vec<String>, depth: usize) -> Result<(), String> {
-    if depth > 12 || files.len() + dirs.len() > 5000 {
-        return Err(tr("Folder too deep or too big to delete.").into());
-    }
-    let (_, items) = sftp_list(ep, dir)?;
-    for it in items {
-        let p = join(dir, &it.name);
-        if it.is_dir && !it.is_link {
-            sftp_walk(ep, &p, files, dirs, depth + 1)?;
-        } else {
-            files.push(p);
+/// The output of several listings in one batch: one section per `pwd`, with its entries.
+pub fn parse_sections(out: &str) -> Vec<(String, Vec<RemoteItem>)> {
+    let mut sections: Vec<(String, Vec<RemoteItem>)> = Vec::new();
+    for line in out.lines() {
+        let l = line.trim_end();
+        if let Some(d) = l.strip_prefix("Remote working directory: ").or_else(|| l.strip_prefix("Remote directory is ")) {
+            sections.push((d.trim().to_string(), Vec::new()));
+        } else if let (Some(it), Some(last)) = (parse_ls_line(l), sections.last_mut()) {
+            last.1.push(it);
         }
     }
-    dirs.push(dir.to_string());
-    Ok(())
+    for s in &mut sections {
+        sort_items(&mut s.1);
+    }
+    sections
 }
 
-fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, String> {
-    let done = |out: RunOut, msg: String| if out.ok { Ok(Outcome::Done(msg)) } else { Err(clean_error(&out)) };
+/// Lists several folders in one login.
+fn sftp_list_many(ep: &Endpoint, b: Batch, dirs: &[String]) -> Result<Vec<Vec<RemoteItem>>, String> {
+    let mut script = String::new();
+    for d in dirs {
+        script.push_str(&b.list_script(d)?);
+    }
+    let out = sftp_batch(ep, &script)?;
+    let sections = parse_sections(&out.stdout);
+    if !out.ok || sections.len() != dirs.len() {
+        return Err(clean_error(&out));
+    }
+    Ok(sections.into_iter().map(|(_, items)| items).collect())
+}
+
+/// Everything below `root` for deleting it: the files, and the folders deepest first. One
+/// listing per level of folders (P16: before, one login per folder), at most 12 levels and
+/// 5000 names. `list` lists a level's folders in one go.
+pub fn walk_levels(
+    root: &str,
+    mut list: impl FnMut(&[String]) -> Result<Vec<Vec<RemoteItem>>, String>,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let too_big = || tr("Folder too deep or too big to delete.").to_string();
+    let mut files = Vec::new();
+    let mut levels: Vec<Vec<String>> = Vec::new();
+    let mut frontier = vec![root.to_string()];
+    let mut count = 1;
+    while !frontier.is_empty() {
+        if levels.len() > 12 {
+            return Err(too_big());
+        }
+        let listed = list(&frontier)?;
+        let mut next = Vec::new();
+        for (dir, items) in frontier.iter().zip(listed) {
+            for it in items {
+                let p = join(dir, &it.name);
+                if it.is_dir && !it.is_link {
+                    next.push(p)
+                } else {
+                    files.push(p)
+                }
+                count += 1;
+            }
+        }
+        if count > 5000 {
+            return Err(too_big());
+        }
+        levels.push(std::mem::replace(&mut frontier, next));
+    }
+    Ok((files, levels.into_iter().rev().flatten().collect()))
+}
+
+fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String, relist: bool) -> Result<Outcome, String> {
     let b = batch_of(ep)?;
+    // OpenSSH: list the folder again in the same login; "-" keeps a failing listing from making
+    // the job look failed. psftp has no "-", so it lists in a login of its own afterwards.
+    let tail = if relist && b == Batch::OpenSsh && !cwd.is_empty() { format!("-cd {}\npwd\n-ls -la\n", b.quote(cwd)?) } else { String::new() };
+    let run_with_tail = |script: String| sftp_batch(ep, &(script + &tail));
+    let done = |out: RunOut, msg: String| {
+        if !out.ok {
+            return Err(clean_error(&out));
+        }
+        match parse_sections(&out.stdout).pop() {
+            Some((dir, items)) if !tail.is_empty() => Ok(Outcome::DoneListed(msg, dir, items)),
+            _ => Ok(Outcome::Done(msg)),
+        }
+    };
     match job {
         Job::List(p) => {
             let (dir, items) = sftp_list(ep, p)?;
@@ -728,27 +818,25 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
         Job::Download { remote, is_dir, local_dir } => {
             let r = if *is_dir { "-r " } else { "" };
             let script = format!("lcd {0}\nget {1}{2}\n", b.local(local_dir)?, r, b.quote(remote)?);
-            let out = sftp_batch(ep, &script)?;
+            let out = run_with_tail(script)?;
             done(out, tf("Downloaded: {0} » {1}", &[&(base_name(remote)), &(local_dir.display())]))
         }
         Job::Upload { local, remote_dir } => {
             let name = local.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let script = b.upload_script(local, local.is_dir(), remote_dir)?;
-            let out = sftp_batch(ep, &script)?;
+            let out = run_with_tail(script)?;
             done(out, tf("Uploaded: {0} » {1}", &[&name, &remote_dir]))
         }
         Job::Mkdir(p) => {
-            let out = sftp_batch(ep, &format!("mkdir {0}\n", b.quote(p)?))?;
+            let out = run_with_tail(format!("mkdir {0}\n", b.quote(p)?))?;
             done(out, tf("Folder created: {0}", &[&p]))
         }
         Job::Delete { path, is_dir } => {
             if !*is_dir {
-                let out = sftp_batch(ep, &format!("rm {}\n", b.quote(path)?))?;
+                let out = run_with_tail(format!("rm {}\n", b.quote(path)?))?;
                 return done(out, tf("Deleted: {0}", &[&path]));
             }
-            let mut files = Vec::new();
-            let mut dirs = Vec::new();
-            sftp_walk(ep, path, &mut files, &mut dirs, 0)?;
+            let (files, dirs) = walk_levels(path, |level| sftp_list_many(ep, b, level))?;
             let mut script = String::new();
             for f in &files {
                 script.push_str(&format!("rm {}\n", b.quote(f)?));
@@ -756,11 +844,11 @@ fn run_sftp(ep: &Endpoint, job: &Job, cwd: &mut String) -> Result<Outcome, Strin
             for d in &dirs {
                 script.push_str(&format!("rmdir {0}\n", b.quote(d)?));
             }
-            let out = sftp_batch(ep, &script)?;
+            let out = run_with_tail(script)?;
             done(out, tf("Folder deleted: {0} ({1} files)", &[&path, &(files.len())]))
         }
         Job::Rename { from, to } => {
-            let out = sftp_batch(ep, &format!("rename {0} {1}\n", b.quote(from)?, b.quote(to)?))?;
+            let out = run_with_tail(format!("rename {0} {1}\n", b.quote(from)?, b.quote(to)?))?;
             done(out, tf("Renamed: {0} » {1}", &[&(base_name(from)), &(base_name(to))]))
         }
     }

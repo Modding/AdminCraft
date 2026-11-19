@@ -213,8 +213,11 @@ fixes one marks it **fixed**. Items marked *to try* need a real program or serve
   and reloads (`model.rs`).
 - **P15** *fixed* (an unchanged list is not written again; a save starts from the database read or written last, `kdbx::save_cached`, so one key derivation instead of two, unless KeePass changed the file meanwhile) · A KeePass save runs the key derivation twice on the UI thread, also when only settings
   changed (`model.rs`, `kdbx.rs`).
-- **P16** *open* (needs one sftp session per batch) · File transfer logs in once per folder when deleting, and once more for the listing after
-  each job (`transfer.rs`).
+- **P16** *fixed* · File transfer logs in once per folder when deleting, and once more for the listing after
+  each job (`transfer.rs`). Deleting a folder now lists one level of folders per login
+  (`walk_levels`); with OpenSSH the folder is listed again in the job's own login (`-cd`, `-ls`);
+  a download is no longer followed by a listing. psftp still lists in a login of its own (it has no
+  `-` prefix). *To try* with a real server: delete a folder tree, upload, rename.
 - **P17** *fixed* · Helper programs are searched again and again (6 times per transfer tab, twice per program
   on refresh) (`programs.rs`, `app.rs`).
 - **P18** *fixed* · Whois text and SNMP walk rows are rebuilt every frame (`tooltabs.rs`).
