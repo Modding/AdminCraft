@@ -674,6 +674,76 @@ pub struct Store {
     /// The list as last loaded from or saved to KeePass (without `password_enc`): an unchanged
     /// list is not written again (no key derivation for a settings-only change).
     kdbx_snapshot: Option<Vec<Entry>>,
+    /// KeePass writes run in the background (a key derivation takes a moment).
+    kdbx_job: std::sync::Arc<std::sync::Mutex<KdbxJob>>,
+}
+
+/// The background writer of "KeePass as connection list".
+#[derive(Default)]
+pub struct KdbxJob {
+    busy: bool,
+    /// The newest list waiting to be written (an older one waiting is replaced).
+    pending: Option<KdbxWork>,
+    /// What the last write gave back, for the window to take over.
+    done: Option<KdbxDone>,
+    /// The database as last read or written (`kdbx::save_cached`).
+    cache: Option<crate::kdbx::Cache>,
+    /// KeePass ids handed out so far, by AdminCraft id: a list queued before a write came back
+    /// gets them too, so a new entry isn't written twice.
+    ids: HashMap<u64, String>,
+}
+
+struct KdbxWork {
+    path: String,
+    key: crate::kdbx::Key,
+    list: Vec<Entry>,
+    known: HashSet<String>,
+}
+
+struct KdbxDone {
+    result: Result<(), String>,
+    ids: Vec<(u64, String)>,
+    snapshot: Vec<Entry>,
+    known: HashSet<String>,
+    mtime: Option<std::time::SystemTime>,
+}
+
+impl KdbxJob {
+    /// Writes queued lists until none is left (runs on the writer thread).
+    fn run(job: &std::sync::Arc<std::sync::Mutex<KdbxJob>>) {
+        loop {
+            let (mut work, mut cache) = {
+                let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(mut w) = j.pending.take() else {
+                    j.busy = false;
+                    return;
+                };
+                for e in &mut w.list {
+                    if e.kp_id.is_empty()
+                        && let Some(id) = j.ids.get(&e.id)
+                    {
+                        e.kp_id = id.clone();
+                    }
+                }
+                (w, j.cache.take())
+            };
+            let result = crate::kdbx::save_cached(&mut cache, &work.path, &work.key, &mut work.list, &work.known);
+            let mtime = std::fs::metadata(work.path.trim().trim_matches('"')).and_then(|m| m.modified()).ok();
+            let mut j = job.lock().unwrap_or_else(|e| e.into_inner());
+            j.cache = cache;
+            let ids: Vec<(u64, String)> = work.list.iter().filter(|e| !e.kp_id.is_empty()).map(|e| (e.id, e.kp_id.clone())).collect();
+            if result.is_ok() {
+                j.ids.extend(ids.iter().cloned());
+            }
+            j.done = Some(KdbxDone {
+                known: if result.is_ok() { kdbx_ids(&work.list) } else { work.known.clone() },
+                snapshot: kdbx_snapshot_of(&work.list),
+                ids,
+                result,
+                mtime,
+            });
+        }
+    }
 }
 
 #[derive(Default)]
@@ -1028,6 +1098,7 @@ impl Store {
             kdbx_mtime: None,
             kdbx_known: HashSet::new(),
             kdbx_snapshot: None,
+            kdbx_job: Default::default(),
         };
         // WebDAV: the server's list wins; without the server the local copy is used
         let mut server_has_none = false;
@@ -1087,6 +1158,82 @@ impl Store {
         store
     }
 
+    /// Reads the list from KeePass and keeps the opened database for the next save.
+    fn kdbx_load(&mut self, path: &str, key: &crate::kdbx::Key) -> Result<Vec<Entry>, String> {
+        let (list, cache) = crate::kdbx::load_cached(path, key)?;
+        let mut j = self.kdbx_job.lock().unwrap_or_else(|e| e.into_inner());
+        // a write still going on brings its own (newer) database
+        if !j.busy {
+            j.cache = Some(cache);
+        }
+        Ok(list)
+    }
+
+    /// Hands the list to the KeePass writer (started when it is idle).
+    fn queue_kdbx(&mut self, path: String, key: crate::kdbx::Key) -> Result<(), String> {
+        let work = KdbxWork { path, key, list: self.data.entries.clone(), known: self.kdbx_known.clone() };
+        let start = {
+            let mut j = self.kdbx_job.lock().unwrap_or_else(|e| e.into_inner());
+            j.pending = Some(work);
+            !std::mem::replace(&mut j.busy, true)
+        };
+        if start {
+            let job = self.kdbx_job.clone();
+            if std::thread::Builder::new().name("keepass-save".into()).spawn(move || KdbxJob::run(&job)).is_err() {
+                // no thread: write it here, as before
+                KdbxJob::run(&self.kdbx_job);
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes over what the KeePass writer finished: KeePass ids of new entries, the ids KeePass
+    /// knows, the file's time, an error. True while a write is still going on.
+    pub fn poll_kdbx(&mut self) -> bool {
+        let (done, busy) = {
+            let mut j = self.kdbx_job.lock().unwrap_or_else(|e| e.into_inner());
+            (j.done.take(), j.busy || j.pending.is_some())
+        };
+        if let Some(d) = done {
+            let ids: HashMap<u64, String> = d.ids.into_iter().collect();
+            for e in &mut self.data.entries {
+                if e.kp_id.is_empty()
+                    && let Some(k) = ids.get(&e.id)
+                {
+                    e.kp_id = k.clone();
+                }
+            }
+            match d.result {
+                Ok(()) => {
+                    self.kdbx_known = d.known;
+                    self.kdbx_mtime = d.mtime;
+                    if !busy {
+                        self.kdbx_snapshot = Some(d.snapshot);
+                    }
+                }
+                Err(e) => {
+                    self.last_error = Some(tf("Saving failed: {0}", &[&e]));
+                    // written again with the next save
+                    self.kdbx_snapshot = None;
+                }
+            }
+        }
+        busy
+    }
+
+    /// Waits (at most `max`) for the KeePass writer, e.g. before AdminCraft closes. True when
+    /// everything is written.
+    pub fn wait_for_kdbx(&mut self, max: std::time::Duration) -> bool {
+        let until = std::time::Instant::now() + max;
+        while self.poll_kdbx() {
+            if std::time::Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        true
+    }
+
     /// KeePass as connection list: the connections come from KeePass once its password is given.
     fn wait_for_keepass(&mut self) {
         if self.kdbx_mode() && self.kdbx_key.is_none() && !self.kdbx_waiting {
@@ -1108,7 +1255,7 @@ impl Store {
     /// Opens the connection list in the KeePass database.
     pub fn unlock_keepass(&mut self, password: &str) -> bool {
         let key = crate::kdbx::Key { password: password.to_string(), keyfile: self.data.settings.keepass_keyfile.clone() };
-        match crate::kdbx::load(&self.data.settings.keepass_path, &key) {
+        match self.kdbx_load(&self.data.settings.keepass_path.clone(), &key) {
             Ok(list) => {
                 self.kdbx_loaded(list);
                 self.kdbx_key = Some(key);
@@ -1137,7 +1284,7 @@ impl Store {
     /// it was is kept in a backup file first.
     pub fn use_keepass(&mut self, key: crate::kdbx::Key) -> Result<String, String> {
         let path = self.data.settings.keepass_path.clone();
-        let there = crate::kdbx::load(&path, &key)?;
+        let there = self.kdbx_load(&path, &key)?;
         let msg = if self.data.entries.is_empty() {
             let n = there.len();
             self.kdbx_loaded(there);
@@ -1151,7 +1298,10 @@ impl Store {
                 added = add_missing_from_keepass(&mut list, there, &mut self.data.next_id);
             }
             // no KeePass id counts as known: this first save deletes nothing in the database
-            crate::kdbx::save(&path, &key, &mut list, &HashSet::new())?;
+            // from the database just read: one key derivation, not two
+            let mut cache = self.kdbx_job.lock().unwrap_or_else(|e| e.into_inner()).cache.take();
+            crate::kdbx::save_cached(&mut cache, &path, &key, &mut list, &HashSet::new())?;
+            self.kdbx_job.lock().unwrap_or_else(|e| e.into_inner()).cache = cache;
             self.kdbx_loaded(list);
             match backup {
                 Some(b) => tf(
@@ -1262,6 +1412,10 @@ impl Store {
     /// Someone else (a colleague on the shared list) saved the file: read it again.
     /// Returns true when the data was replaced.
     pub fn reload_if_changed(&mut self) -> bool {
+        // our own KeePass write is still going on: its file is not a change by someone else
+        if self.kdbx_mode() && self.poll_kdbx() {
+            return false;
+        }
         if self.kdbx_mode() {
             // the list is in KeePass: reload when KeePass (or a colleague) saved the file
             let Some(key) = self.kdbx_key.clone() else { return false };
@@ -1271,7 +1425,7 @@ impl Store {
                 return false;
             }
             self.kdbx_mtime = Some(m);
-            return match crate::kdbx::load(&path, &key) {
+            return match self.kdbx_load(&path, &key) {
                 Ok(list) if list != self.data.entries => {
                     self.kdbx_loaded(list);
                     true
@@ -1503,14 +1657,11 @@ impl Store {
             let unchanged = self.kdbx_snapshot.as_deref().is_some_and(|s| same_as_snapshot(s, &self.data.entries));
             if !unchanged {
                 let path = self.data.settings.keepass_path.clone();
-                match crate::kdbx::save(&path, &key, &mut self.data.entries, &self.kdbx_known) {
-                    Ok(()) => {
-                        self.kdbx_known = kdbx_ids(&self.data.entries);
-                        self.kdbx_snapshot = Some(kdbx_snapshot_of(&self.data.entries));
-                        self.kdbx_mtime = std::fs::metadata(path.trim().trim_matches('"')).and_then(|m| m.modified()).ok();
-                    }
-                    Err(e) => kdbx_error = Some(e),
+                // written in the background: the key derivation must not stop the window
+                if let Err(e) = self.queue_kdbx(path, key) {
+                    kdbx_error = Some(e);
                 }
+                self.kdbx_snapshot = Some(kdbx_snapshot_of(&self.data.entries));
             }
         }
         let kept = if kdbx { std::mem::take(&mut self.data.entries) } else { Vec::new() };

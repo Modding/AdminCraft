@@ -222,17 +222,22 @@ fn find_group(db: &keepass::Database) -> Option<GroupId> {
 }
 
 /// The connections in the database's "AdminCraft" group (empty when there is none yet).
+// the program reads through `load_cached`; the tests read the file as KeePass would
+#[cfg(test)]
 pub fn load(path: &str, key: &Key) -> Result<Vec<Entry>, String> {
-    let db = open(path, key)?;
+    Ok(list_of(&open(path, key)?))
+}
+
+fn list_of(db: &keepass::Database) -> Vec<Entry> {
     let mut out = Vec::new();
-    if let Some(gid) = find_group(&db)
+    if let Some(gid) = find_group(db)
         && let Some(g) = db.group(gid)
     {
         let mut used = HashSet::new();
         let mut next = 1;
-        walk_group(&db, g, None, &mut out, &mut next, &mut used, 0);
+        walk_group(db, g, None, &mut out, &mut next, &mut used, 0);
     }
-    Ok(out)
+    out
 }
 
 // ------------------------------------------------------------------ writing
@@ -275,9 +280,51 @@ fn holds_unknown(db: &keepass::Database, g: GroupId, known: &HashSet<String>, de
 /// share one KeePass entry or group (a repeated `kp_id` makes a new one). Of what the list no
 /// longer has, only what is in `known` (the KeePass ids of the last load or save) is removed:
 /// entries added in KeePass meanwhile stay.
+#[cfg(test)]
 pub fn save(path: &str, key: &Key, list: &mut [Entry], known: &HashSet<String>) -> Result<(), String> {
     let mut db = open(path, key)?;
-    let gid = match find_group(&db) {
+    save_into(&mut db, list, known);
+    write(&db, path, key)
+}
+
+/// The database as AdminCraft last read or wrote it, and the file's time then. The next save starts
+/// from it instead of opening the file again: one key derivation per save instead of two.
+pub struct Cache {
+    db: keepass::Database,
+    path: String,
+    mtime: Option<std::time::SystemTime>,
+}
+
+fn file_mtime(path: &str) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path.trim().trim_matches('"')).and_then(|m| m.modified()).ok()
+}
+
+/// `load`, keeping the opened database for the next save.
+pub fn load_cached(path: &str, key: &Key) -> Result<(Vec<Entry>, Cache), String> {
+    let db = open(path, key)?;
+    let mtime = file_mtime(path);
+    let list = list_of(&db);
+    Ok((list, Cache { db, path: path.to_string(), mtime }))
+}
+
+/// `save`, starting from `cache` when it is this file and the file wasn't changed since (by
+/// KeePass or a colleague); otherwise the file is opened again. Leaves the written database in
+/// `cache`, or nothing when the write failed.
+pub fn save_cached(cache: &mut Option<Cache>, path: &str, key: &Key, list: &mut [Entry], known: &HashSet<String>) -> Result<(), String> {
+    let fresh = cache.take().filter(|c| c.path == path && c.mtime.is_some() && c.mtime == file_mtime(path));
+    let mut db = match fresh {
+        Some(c) => c.db,
+        None => open(path, key)?,
+    };
+    save_into(&mut db, list, known);
+    write(&db, path, key)?;
+    *cache = Some(Cache { mtime: file_mtime(path), path: path.to_string(), db });
+    Ok(())
+}
+
+/// Puts the list into an opened database (see `save`).
+fn save_into(db: &mut keepass::Database, list: &mut [Entry], known: &HashSet<String>) {
+    let gid = match find_group(db) {
         Some(g) => g,
         None => {
             let mut root = db.root_mut();
@@ -304,7 +351,7 @@ pub fn save(path: &str, key: &Key, list: &mut [Entry], known: &HashSet<String>) 
             collect(db, s, e, gs, depth + 1);
         }
     }
-    collect(&db, gid, &mut old_entries, &mut old_groups, 0);
+    collect(db, gid, &mut old_entries, &mut old_groups, 0);
 
     // folders first, parents before children
     let mut group_of: HashMap<u64, GroupId> = HashMap::new();
@@ -422,13 +469,12 @@ pub fn save(path: &str, key: &Key, list: &mut [Entry], known: &HashSet<String>) 
     for (k, g) in old_groups {
         if !kept_groups.contains(&g)
             && known.contains(&k)
-            && !holds_unknown(&db, g, known, 0)
+            && !holds_unknown(db, g, known, 0)
             && let Some(mut gm) = db.group_mut(g)
         {
             let _ = gm.track_changes().remove();
         }
     }
-    write(&db, path, key)
 }
 
 /// Puts one password into the database (group "AdminCraft"), updating the entry with this title

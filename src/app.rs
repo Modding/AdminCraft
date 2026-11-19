@@ -4898,6 +4898,10 @@ impl eframe::App for AdminApp {
         }
         // WebDAV: the upload of the last save runs in a thread that ends with the program
         self.store.wait_for_upload(std::time::Duration::from_secs(5));
+        // KeePass as connection list: the last write runs in a thread that ends with the program
+        if !self.store.wait_for_kdbx(std::time::Duration::from_secs(20)) {
+            eprintln!("KeePass: the last save did not finish in time");
+        }
         for t in &mut self.tabs {
             if let TabKind::Term(t) = &mut t.kind
                 && let Some(term) = &mut t.term

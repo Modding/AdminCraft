@@ -563,6 +563,7 @@ fn keepass_as_connection_list() {
     let id = made.id;
     s.remove(id);
     s.save();
+    assert!(s.wait_for_kdbx(std::time::Duration::from_secs(30)), "the KeePass write finished");
     assert_eq!(kdbx::load(&ps, &key).unwrap().len(), count);
     // locked until the KeePass password is entered
     let mut fresh = temp_store("kdbxlist2");
@@ -2360,6 +2361,7 @@ fn keepass_save_keeps_entries_added_in_keepass_meanwhile() {
     kdbx::store_password(&ps, &key, "added in KeePass", "u", "p", "ssh://10.9.9.9").unwrap();
     s.data.entries[0].name = "renamed".into();
     s.save();
+    assert!(s.wait_for_kdbx(std::time::Duration::from_secs(30)), "the KeePass write finished");
     let back = kdbx::load(&ps, &key).unwrap();
     assert!(back.iter().any(|e| e.name == "added in KeePass"), "never seen, so never deleted");
     assert!(back.iter().any(|e| e.name == "renamed"));
@@ -2367,6 +2369,7 @@ fn keepass_save_keeps_entries_added_in_keepass_meanwhile() {
     let leaf = s.data.entries.iter().find(|e| e.name.starts_with("web01 – L")).unwrap().id;
     s.remove(leaf);
     s.save();
+    assert!(s.wait_for_kdbx(std::time::Duration::from_secs(30)), "the KeePass write finished");
     let back = kdbx::load(&ps, &key).unwrap();
     assert_eq!(back.len(), count);
     assert!(!back.iter().any(|e| e.name.starts_with("web01 – L")));
@@ -2386,10 +2389,68 @@ fn unchanged_keepass_list_is_not_written_again() {
     let before = std::fs::read(&ps).unwrap();
     s.data.settings.dark = !s.data.settings.dark;
     s.save();
+    assert!(s.wait_for_kdbx(std::time::Duration::from_secs(30)), "the KeePass write finished");
     assert_eq!(std::fs::read(&ps).unwrap(), before, "a settings change doesn't touch KeePass");
     s.data.entries[1].name = "changed".into();
     s.save();
+    assert!(s.wait_for_kdbx(std::time::Duration::from_secs(30)), "the KeePass write finished");
     assert_ne!(std::fs::read(&ps).unwrap(), before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_is_written_in_the_background() {
+    // C11: the save hands the list to the writer and returns; the KeePass id of a new entry comes
+    // back from it afterwards (before, the save wrote the file itself and set it right away)
+    use crate::kdbx::Key;
+    let dir = review_dir("c11bg");
+    let ps = empty_kdbx(&dir, "kp-bg");
+    let mut s = temp_store("c11bg");
+    s.path = dir.join("connections.json");
+    s.data.settings.keepass_path = ps.clone();
+    s.use_keepass(Key { password: "kp-bg".into(), keyfile: String::new() }).unwrap();
+    let id = s.next_id();
+    s.data.entries.push(crate::model::Entry { id, name: "new01".into(), host: "10.9.9.9".into(), ..Default::default() });
+    s.save();
+    let fresh = |s: &crate::model::Store| s.data.entries.iter().find(|e| e.id == id).map(|e| e.kp_id.clone()).unwrap_or_default();
+    assert!(fresh(&s).is_empty(), "the window doesn't wait for KeePass");
+    assert!(s.wait_for_kdbx(std::time::Duration::from_secs(30)));
+    assert!(!fresh(&s).is_empty(), "the writer's KeePass id is taken over");
+    // a second save of the same entry updates it, it doesn't add a copy
+    s.data.entries.iter_mut().filter(|e| e.id == id).for_each(|e| e.host = "10.9.9.8".into());
+    s.save();
+    assert!(s.wait_for_kdbx(std::time::Duration::from_secs(30)));
+    let back = crate::kdbx::load(&ps, &Key { password: "kp-bg".into(), keyfile: String::new() }).unwrap();
+    assert_eq!(back.iter().filter(|e| e.name == "new01").count(), 1);
+    assert_eq!(back.iter().find(|e| e.name == "new01").map(|e| e.host.as_str()), Some("10.9.9.8"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn keepass_save_reuses_the_opened_database() {
+    // P15: a save after a load doesn't open the file again (one key derivation, not two); a file
+    // changed by KeePass meanwhile is opened again
+    use crate::kdbx::{Key, load_cached, save_cached};
+    let dir = review_dir("p15");
+    let ps = empty_kdbx(&dir, "kp-p15");
+    let right = Key { password: "kp-p15".into(), keyfile: String::new() };
+    let wrong = Key { password: "not-it".into(), keyfile: String::new() };
+    let (mut list, cache) = load_cached(&ps, &right).unwrap();
+    list.push(crate::model::Entry { id: 7, name: "srv".into(), host: "10.1.1.1".into(), ..Default::default() });
+    let mut cache = Some(cache);
+    // the cached database is used as it is: even a key that can't open the file doesn't matter
+    // for reading (only for writing, which uses it); so a working save here never opened the file
+    assert!(save_cached(&mut cache, &ps, &right, &mut list, &Default::default()).is_ok());
+    assert!(cache.is_some());
+    // KeePass changes the file: the cache no longer fits and the file is opened (and the wrong
+    // key is refused)
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    let raw = std::fs::read(&ps).unwrap();
+    std::fs::write(&ps, &raw).unwrap();
+    let t = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+    let _ = std::fs::File::options().write(true).open(&ps).and_then(|f| f.set_modified(t));
+    assert!(save_cached(&mut cache, &ps, &wrong, &mut list, &Default::default()).is_err());
+    assert!(cache.is_none(), "after a failed save nothing stale is kept");
     let _ = std::fs::remove_dir_all(dir);
 }
 
